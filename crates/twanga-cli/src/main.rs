@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use clap::{Parser, Subcommand};
 use std::fs::{self, File};
 use std::io::BufWriter;
@@ -9,10 +9,10 @@ use twanga_core::{Frequency, TunedString, Tuning};
 use twanga_dsp::{Tuner, TunerMode, TunerReading};
 use twanga_synth::{exp_decay, sine};
 use twanga_tabs::{
-    alphatex::{self, AlphaTexWriter, ParsedTab},
     TabEvent, TabRecorder,
+    alphatex::{self, AlphaTexWriter, ParsedTab},
 };
-use twanga_tui::{color, MultiLineDisplay, StatusLine};
+use twanga_tui::{MultiLineDisplay, StatusLine, color};
 
 const READ_CHUNK: usize = 4096;
 const IN_TUNE_CENTS: f32 = 5.0;
@@ -144,10 +144,7 @@ fn resolve_tuning(arg: Option<String>) -> Result<Tuning> {
 ///
 /// Non-TTY callers skip the prompt and get `None`, matching the previous
 /// behaviour where `play` without `--tuning` just used the file's tuning.
-fn resolve_play_tuning(
-    arg: Option<String>,
-    tab: &ParsedTab,
-) -> Result<Option<String>> {
+fn resolve_play_tuning(arg: Option<String>, tab: &ParsedTab) -> Result<Option<String>> {
     if arg.is_some() {
         return Ok(arg);
     }
@@ -155,19 +152,12 @@ fn resolve_play_tuning(
     if !std::io::stdin().is_terminal() || !std::io::stderr().is_terminal() {
         return Ok(None);
     }
-    let as_recorded = format!(
-        "(as recorded in file: {})",
-        tab.tuning_names.join(" ")
-    );
+    let as_recorded = format!("(as recorded in file: {})", tab.tuning_names.join(" "));
     let mut owned: Vec<String> = Vec::with_capacity(1 + Tuning::PRESETS.len());
     owned.push(as_recorded);
     owned.extend(Tuning::PRESETS.iter().map(|s| (*s).to_string()));
     let refs: Vec<&str> = owned.iter().map(|s| s.as_str()).collect();
-    let idx = twanga_tui::select_with_default(
-        "Choose a tuning for playback:",
-        &refs,
-        0,
-    )?;
+    let idx = twanga_tui::select_with_default("Choose a tuning for playback:", &refs, 0)?;
     if idx == 0 {
         Ok(None)
     } else {
@@ -182,7 +172,9 @@ fn resolve_bpm(arg: Option<u32>) -> Result<u32> {
         return Ok(b);
     }
     twanga_tui::prompt_parsed("Tempo (BPM)", DEFAULT_BPM, |s| {
-        let n: u32 = s.parse().map_err(|e: std::num::ParseIntError| e.to_string())?;
+        let n: u32 = s
+            .parse()
+            .map_err(|e: std::num::ParseIntError| e.to_string())?;
         validate_bpm(n).map_err(|e| e.to_string())?;
         Ok(n)
     })
@@ -203,7 +195,10 @@ fn resolve_resolution(arg: Option<String>) -> Result<u32> {
     }
     const LABELS: &[&str] = &["1/4", "1/8", "1/16", "1/32"];
     const DENOMS: &[u32] = &[4, 8, 16, 32];
-    let default_idx = LABELS.iter().position(|l| *l == DEFAULT_RESOLUTION).unwrap_or(1);
+    let default_idx = LABELS
+        .iter()
+        .position(|l| *l == DEFAULT_RESOLUTION)
+        .unwrap_or(1);
     let idx = twanga_tui::select_with_default("Resolution:", LABELS, default_idx)?;
     Ok(DENOMS[idx])
 }
@@ -218,7 +213,9 @@ fn resolve_block_width(arg: Option<usize>) -> Result<usize> {
         "Block width (columns per scrolling block)",
         DEFAULT_BLOCK_WIDTH,
         |s| {
-            let n: usize = s.parse().map_err(|e: std::num::ParseIntError| e.to_string())?;
+            let n: usize = s
+                .parse()
+                .map_err(|e: std::num::ParseIntError| e.to_string())?;
             validate_block_width(n).map_err(|e| e.to_string())?;
             Ok(n)
         },
@@ -236,7 +233,9 @@ fn validate_block_width(n: usize) -> Result<()> {
 /// Parse a `1/N` resolution into the integer N. Supports the conventional set.
 fn parse_resolution(s: &str) -> Result<u32> {
     let mut parts = s.split('/');
-    let num = parts.next().ok_or_else(|| anyhow!("invalid resolution '{s}'"))?;
+    let num = parts
+        .next()
+        .ok_or_else(|| anyhow!("invalid resolution '{s}'"))?;
     let denom = parts
         .next()
         .ok_or_else(|| anyhow!("invalid resolution '{s}' (expected `1/N`)"))?;
@@ -244,9 +243,7 @@ fn parse_resolution(s: &str) -> Result<u32> {
         return Err(anyhow!("invalid resolution '{s}' (expected `1/N`)"));
     }
     if num != "1" {
-        return Err(anyhow!(
-            "resolution must be of the form `1/N` (got '{s}')"
-        ));
+        return Err(anyhow!("resolution must be of the form `1/N` (got '{s}')"));
     }
     let n: u32 = denom
         .parse()
@@ -356,11 +353,7 @@ fn run_chromatic(mut tuner: Tuner, mut stream: InputStream) -> Result<()> {
     }
 }
 
-fn run_strings(
-    mut tuner: Tuner,
-    mut stream: InputStream,
-    strings: Vec<TunedString>,
-) -> Result<()> {
+fn run_strings(mut tuner: Tuner, mut stream: InputStream, strings: Vec<TunedString>) -> Result<()> {
     let mut display = MultiLineDisplay::new(strings.len());
     let use_color = display.is_terminal();
     let mut row_states: Vec<Option<(f32, f32)>> = vec![None; strings.len()];
@@ -462,8 +455,8 @@ fn open_recording_file(
         .map(|d| d.as_secs())
         .unwrap_or(0);
     let path = dir.join(format!("recording-{secs}.alphatex"));
-    let file = File::create(&path)
-        .with_context(|| format!("failed to create '{}'", path.display()))?;
+    let file =
+        File::create(&path).with_context(|| format!("failed to create '{}'", path.display()))?;
     let writer = AlphaTexWriter::new(BufWriter::new(file), tuning, bpm, resolution_denom)
         .with_context(|| format!("failed to write alphaTex header to '{}'", path.display()))?;
     Ok((path, writer))
@@ -481,12 +474,7 @@ fn finalize_recording(
     Ok(())
 }
 
-fn run_recorder(
-    tuning: Tuning,
-    bpm: u32,
-    resolution_denom: u32,
-    block_width: usize,
-) -> Result<()> {
+fn run_recorder(tuning: Tuning, bpm: u32, resolution_denom: u32, block_width: usize) -> Result<()> {
     let mut stream = InputStream::open()?;
     let sample_rate = stream.sample_rate;
     let ms_per_col = 240_000 / (bpm * resolution_denom);
@@ -506,9 +494,7 @@ fn run_recorder(
     eprintln!("Tuning:     {tuning_name} ({string_count} strings)");
     eprintln!("Device:     {}", stream.device_name);
     eprintln!("Audio:      {sample_rate} Hz");
-    eprintln!(
-        "Tempo:      {bpm} BPM, 1/{resolution_denom} notes ({ms_per_col} ms/col)",
-    );
+    eprintln!("Tempo:      {bpm} BPM, 1/{resolution_denom} notes ({ms_per_col} ms/col)",);
     eprintln!(
         "Block:      {block_width} cols ({} ms wide)",
         block_width as u32 * ms_per_col,
@@ -552,12 +538,8 @@ fn run_recorder(
             }
             for event in recorder.advance(n) {
                 let (rows, column_marks, is_block_complete) = match &event {
-                    TabEvent::ColumnTick { rows, column_marks } => {
-                        (rows, column_marks, false)
-                    }
-                    TabEvent::BlockComplete { rows, column_marks } => {
-                        (rows, column_marks, true)
-                    }
+                    TabEvent::ColumnTick { rows, column_marks } => (rows, column_marks, false),
+                    TabEvent::BlockComplete { rows, column_marks } => (rows, column_marks, true),
                 };
 
                 // Every committed column gets written to alphaTex.
@@ -614,8 +596,8 @@ fn main() -> Result<()> {
             // Parse first so the tuning prompt can show what's in the file.
             let content = fs::read_to_string(&path)
                 .with_context(|| format!("failed to read '{}'", path.display()))?;
-            let parsed = alphatex::parse(&content)
-                .map_err(|e| anyhow!("failed to parse alphaTex: {e}"))?;
+            let parsed =
+                alphatex::parse(&content).map_err(|e| anyhow!("failed to parse alphaTex: {e}"))?;
             if parsed.columns.is_empty() {
                 return Err(anyhow!("'{}' has no notes to play", path.display()));
             }
@@ -694,17 +676,15 @@ fn run_playback(
     let (mut input_state, mut input_buf) = if wait {
         let s = InputStream::open()?;
         let sr = s.sample_rate;
-        (Some((s, Tuner::new(TunerMode::Chromatic, sr))), vec![0.0_f32; READ_CHUNK])
+        (
+            Some((s, Tuner::new(TunerMode::Chromatic, sr))),
+            vec![0.0_f32; READ_CHUNK],
+        )
     } else {
         (None, Vec::new())
     };
 
-    let name_width = tab
-        .tuning_names
-        .iter()
-        .map(|n| n.len())
-        .max()
-        .unwrap_or(0);
+    let name_width = tab.tuning_names.iter().map(|n| n.len()).max().unwrap_or(0);
 
     eprintln!("Playback:   {}", path.display());
     if let Some(subtitle) = tab.subtitle.as_deref() {
@@ -792,10 +772,7 @@ fn run_playback(
 /// Parse the `--loop` spec into `(start, end, repeat)`. `start..end` is the
 /// half-open column range to play; `repeat` is `false` for one-shot, `true`
 /// to loop indefinitely.
-fn parse_loop_spec(
-    spec: Option<&str>,
-    total: usize,
-) -> Result<(usize, usize, bool)> {
+fn parse_loop_spec(spec: Option<&str>, total: usize) -> Result<(usize, usize, bool)> {
     match spec {
         None => Ok((0, total, false)),
         Some("full") => Ok((0, total, true)),
@@ -820,9 +797,7 @@ fn parse_loop_spec(
                 ));
             }
             if end > total {
-                return Err(anyhow!(
-                    "loop end ({end}) exceeds column count ({total})"
-                ));
+                return Err(anyhow!("loop end ({end}) exceeds column count ({total})"));
             }
             Ok((start, end, true))
         }
@@ -865,7 +840,9 @@ fn render_playback_rows(
         current_col + 1,
         tab.columns.len(),
         current_col / tab.columns[0].duration_denom as usize + 1,
-        (current_col % tab.columns[0].duration_denom as usize) / ((tab.columns[0].duration_denom / 4) as usize).max(1) + 1,
+        (current_col % tab.columns[0].duration_denom as usize)
+            / ((tab.columns[0].duration_denom / 4) as usize).max(1)
+            + 1,
     ));
 
     rows
@@ -933,7 +910,9 @@ fn wait_for_expected_note(
 fn matches_any_expected(detected: Frequency, expected: &[(u8, u8)], tuning: &Tuning) -> bool {
     for (string_num, fret) in expected {
         let string_idx = (*string_num as usize).saturating_sub(1);
-        let Some(s) = tuning.strings.get(string_idx) else { continue };
+        let Some(s) = tuning.strings.get(string_idx) else {
+            continue;
+        };
         let open_hz = s.open.to_frequency().hz();
         let target_hz = open_hz * 2_f32.powf(*fret as f32 / 12.0);
         let cents = 1200.0 * (detected.hz() / target_hz).log2();
@@ -943,4 +922,3 @@ fn matches_any_expected(detected: Frequency, expected: &[(u8, u8)], tuning: &Tun
     }
     false
 }
-

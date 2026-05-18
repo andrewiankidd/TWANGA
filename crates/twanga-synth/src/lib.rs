@@ -230,7 +230,10 @@ mod tests {
         for n in 0..len / 2 {
             let a = buf_f[2 * n];
             let b = buf_2f[n];
-            assert!((a - b).abs() < 1e-5, "n={n}: sine(f)[2n]={a}, sine(2f)[n]={b}");
+            assert!(
+                (a - b).abs() < 1e-5,
+                "n={n}: sine(f)[2n]={a}, sine(2f)[n]={b}"
+            );
         }
     }
 }

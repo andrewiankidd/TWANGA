@@ -114,9 +114,9 @@ impl TunerMode {
                 let (note, cents) = MidiNote::nearest_to(freq);
                 Some((note.name(), note.to_frequency(), cents))
             }
-            Self::Strings(tuning) => tuning.nearest_string(freq).map(|(s, cents)| {
-                (s.name.clone(), s.open.to_frequency(), cents)
-            }),
+            Self::Strings(tuning) => tuning
+                .nearest_string(freq)
+                .map(|(s, cents)| (s.name.clone(), s.open.to_frequency(), cents)),
         }
     }
 }
@@ -311,7 +311,7 @@ mod tests {
     // ---- Layer 2: FFT cross-check ----
 
     fn fft_peak_hz(samples: &[f32], sample_rate: u32) -> f32 {
-        use rustfft::{num_complex::Complex, FftPlanner};
+        use rustfft::{FftPlanner, num_complex::Complex};
 
         let n = samples.len();
         let mut planner = FftPlanner::<f32>::new();
@@ -321,8 +321,7 @@ mod tests {
             .iter()
             .enumerate()
             .map(|(i, &s)| {
-                let w = 0.5
-                    * (1.0 - (std::f32::consts::TAU * i as f32 / (n - 1) as f32).cos());
+                let w = 0.5 * (1.0 - (std::f32::consts::TAU * i as f32 / (n - 1) as f32).cos());
                 Complex { re: s * w, im: 0.0 }
             })
             .collect();
@@ -370,7 +369,10 @@ mod tests {
                 .hz();
             let fft_hz = fft_peak_hz(&buf, 44100);
             let diff_cents = 1200.0 * (yin_hz / fft_hz).log2();
-            assert!(diff_cents.abs() < 10.0, "MIDI {midi}: {diff_cents:+.2} cents");
+            assert!(
+                diff_cents.abs() < 10.0,
+                "MIDI {midi}: {diff_cents:+.2} cents"
+            );
         }
     }
 

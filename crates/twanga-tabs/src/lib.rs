@@ -161,11 +161,7 @@ pub mod alphatex {
                 } else if let Some(rest) = trimmed.strip_prefix("\\subtitle") {
                     subtitle = Some(unquote(rest.trim()).to_string());
                 } else if let Some(rest) = trimmed.strip_prefix("\\tuning") {
-                    tuning_names = rest
-                        .trim()
-                        .split_whitespace()
-                        .map(String::from)
-                        .collect();
+                    tuning_names = rest.trim().split_whitespace().map(String::from).collect();
                 } else if trimmed == "." {
                     in_body = true;
                 }
@@ -246,9 +242,7 @@ pub mod alphatex {
             return Ok(());
         }
         if token.starts_with('(') {
-            let inner = token
-                .trim_start_matches('(')
-                .trim_end_matches(')');
+            let inner = token.trim_start_matches('(').trim_end_matches(')');
             let mut hits = Vec::new();
             for note_str in inner.split_whitespace() {
                 hits.push(parse_note(note_str)?);
@@ -319,11 +313,7 @@ pub mod alphatex {
                 tuning.name.replace('"', "\\\"")
             )?;
             writeln!(writer, "\\tempo {bpm}")?;
-            let tuning_str: Vec<String> = tuning
-                .strings
-                .iter()
-                .map(|s| s.open.name())
-                .collect();
+            let tuning_str: Vec<String> = tuning.strings.iter().map(|s| s.open.name()).collect();
             writeln!(writer, "\\tuning {}", tuning_str.join(" "))?;
             writeln!(writer)?;
             writeln!(writer, ".")?;
@@ -437,10 +427,11 @@ pub mod alphatex {
         #[test]
         fn alphatex_multiple_hits_emit_chord_parens() {
             // Open uke chord: 2.1 0.2 0.3 0.4 (A2nd fret, E open, C open, g open)
-            let out = write_and_collect(|w| {
-                w.write_column(&[Some(2), Some(0), Some(0), Some(0)])
-            });
-            assert!(out.contains("(2.1 0.2 0.3 0.4)"), "expected chord in: {out}");
+            let out = write_and_collect(|w| w.write_column(&[Some(2), Some(0), Some(0), Some(0)]));
+            assert!(
+                out.contains("(2.1 0.2 0.3 0.4)"),
+                "expected chord in: {out}"
+            );
         }
 
         #[test]
@@ -452,7 +443,11 @@ pub mod alphatex {
                 }
                 Ok(())
             });
-            assert_eq!(out.matches('|').count(), 1, "expected one bar line in: {out}");
+            assert_eq!(
+                out.matches('|').count(),
+                1,
+                "expected one bar line in: {out}"
+            );
         }
 
         #[test]
@@ -513,7 +508,8 @@ pub mod alphatex {
         #[test]
         fn parser_carries_duration_across_bars() {
             // Duration set once at start should carry forward.
-            let input = "\\tempo 120\n\\tuning A4 E4 C4 G4\n.\n:8 r r r r r r r r |\nr r r r r r r r |\n";
+            let input =
+                "\\tempo 120\n\\tuning A4 E4 C4 G4\n.\n:8 r r r r r r r r |\nr r r r r r r r |\n";
             let parsed = parse(input).unwrap();
             assert_eq!(parsed.columns.len(), 16);
             for c in &parsed.columns {
@@ -590,10 +586,7 @@ pub mod alphatex {
             let parsed = parse(input).unwrap();
             let transposed = parsed.transpose_to(&banjo, 20);
             // After transposition, the tuning header reflects the target.
-            assert_eq!(
-                transposed.tuning_names,
-                vec!["D4", "B3", "G3", "D3", "G4"],
-            );
+            assert_eq!(transposed.tuning_names, vec!["D4", "B3", "G3", "D3", "G4"],);
         }
 
         #[test]
@@ -606,7 +599,8 @@ pub mod alphatex {
                 w.write_column(&[Some(0), None, None, None]).unwrap(); // A open
                 w.write_column(&[None, None, Some(3), None]).unwrap(); // C fret 3
                 w.write_column(&[None; 4]).unwrap(); // rest
-                w.write_column(&[Some(2), Some(0), Some(0), Some(0)]).unwrap(); // chord
+                w.write_column(&[Some(2), Some(0), Some(0), Some(0)])
+                    .unwrap(); // chord
                 w.finalize().unwrap();
             }
             let text = String::from_utf8(buf).unwrap();
@@ -673,8 +667,7 @@ impl TabRecorder {
         ms_per_column: u32,
         columns_per_block: usize,
     ) -> Self {
-        let samples_per_column =
-            ((sample_rate as u64) * (ms_per_column as u64) / 1000) as usize;
+        let samples_per_column = ((sample_rate as u64) * (ms_per_column as u64) / 1000) as usize;
         let name_width = tuning
             .strings
             .iter()

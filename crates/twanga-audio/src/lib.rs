@@ -6,9 +6,9 @@
 //! way in by extracting channel 0 from each frame, so the consumer never has
 //! to think about the device's native channel layout — `read()` always emits mono.
 
-use anyhow::{anyhow, Context, Result};
-use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+use anyhow::{Context, Result, anyhow};
 use cpal::SampleFormat;
+use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use ringbuf::traits::{Consumer, Producer, Split};
 use ringbuf::{HeapCons, HeapProd, HeapRb};
 
@@ -157,7 +157,7 @@ impl InputStream {
             other => {
                 return Err(anyhow!(
                     "unsupported sample format: {other:?}. v1 supports F32 and I16."
-                ))
+                ));
             }
         };
 
@@ -249,7 +249,7 @@ impl OutputStream {
             other => {
                 return Err(anyhow!(
                     "unsupported output sample format: {other:?}. v1 supports F32 and I16."
-                ))
+                ));
             }
         };
 
@@ -292,7 +292,10 @@ mod tests {
     #[test]
     fn pick_instrument_is_case_insensitive() {
         let names = ["UKULELE Capture"];
-        assert_eq!(pick_instrument_name(names), Some("UKULELE Capture".to_string()));
+        assert_eq!(
+            pick_instrument_name(names),
+            Some("UKULELE Capture".to_string())
+        );
     }
 
     #[test]

@@ -118,12 +118,30 @@ impl Tuning {
         Self {
             name: "Standard Guitar".into(),
             strings: vec![
-                TunedString { name: "E4".into(), open: MidiNote(64) },
-                TunedString { name: "B3".into(), open: MidiNote(59) },
-                TunedString { name: "G3".into(), open: MidiNote(55) },
-                TunedString { name: "D3".into(), open: MidiNote(50) },
-                TunedString { name: "A2".into(), open: MidiNote(45) },
-                TunedString { name: "E2".into(), open: MidiNote(40) },
+                TunedString {
+                    name: "E4".into(),
+                    open: MidiNote(64),
+                },
+                TunedString {
+                    name: "B3".into(),
+                    open: MidiNote(59),
+                },
+                TunedString {
+                    name: "G3".into(),
+                    open: MidiNote(55),
+                },
+                TunedString {
+                    name: "D3".into(),
+                    open: MidiNote(50),
+                },
+                TunedString {
+                    name: "A2".into(),
+                    open: MidiNote(45),
+                },
+                TunedString {
+                    name: "E2".into(),
+                    open: MidiNote(40),
+                },
             ],
         }
     }
@@ -132,11 +150,26 @@ impl Tuning {
         Self {
             name: "Standard 5-String Banjo (Open G)".into(),
             strings: vec![
-                TunedString { name: "D4".into(), open: MidiNote(62) },
-                TunedString { name: "B3".into(), open: MidiNote(59) },
-                TunedString { name: "G3".into(), open: MidiNote(55) },
-                TunedString { name: "D3".into(), open: MidiNote(50) },
-                TunedString { name: "g4 (drone)".into(), open: MidiNote(67) },
+                TunedString {
+                    name: "D4".into(),
+                    open: MidiNote(62),
+                },
+                TunedString {
+                    name: "B3".into(),
+                    open: MidiNote(59),
+                },
+                TunedString {
+                    name: "G3".into(),
+                    open: MidiNote(55),
+                },
+                TunedString {
+                    name: "D3".into(),
+                    open: MidiNote(50),
+                },
+                TunedString {
+                    name: "g4 (drone)".into(),
+                    open: MidiNote(67),
+                },
             ],
         }
     }
@@ -145,21 +178,30 @@ impl Tuning {
         Self {
             name: "Standard Ukulele (Reentrant GCEA)".into(),
             strings: vec![
-                TunedString { name: "A4".into(), open: MidiNote(69) },
-                TunedString { name: "E4".into(), open: MidiNote(64) },
-                TunedString { name: "C4".into(), open: MidiNote(60) },
-                TunedString { name: "g4 (reentrant)".into(), open: MidiNote(67) },
+                TunedString {
+                    name: "A4".into(),
+                    open: MidiNote(69),
+                },
+                TunedString {
+                    name: "E4".into(),
+                    open: MidiNote(64),
+                },
+                TunedString {
+                    name: "C4".into(),
+                    open: MidiNote(60),
+                },
+                TunedString {
+                    name: "g4 (reentrant)".into(),
+                    open: MidiNote(67),
+                },
             ],
         }
     }
 
     /// Canonical preset slugs. The CLI and any future GUI enumerate options
     /// from this list — one source of truth, no string duplication elsewhere.
-    pub const PRESETS: &'static [&'static str] = &[
-        "standard-guitar",
-        "standard-banjo",
-        "standard-ukulele",
-    ];
+    pub const PRESETS: &'static [&'static str] =
+        &["standard-guitar", "standard-banjo", "standard-ukulele"];
 
     /// Build a tuning from a preset slug. Returns `None` if the slug doesn't
     /// match a known preset (see [`Self::PRESETS`]).
@@ -225,10 +267,7 @@ impl Tuning {
 
             let better = match &best {
                 None => true,
-                Some(b) => {
-                    fret < b.fret
-                        || (fret == b.fret && cents_off.abs() < b.cents_off.abs())
-                }
+                Some(b) => fret < b.fret || (fret == b.fret && cents_off.abs() < b.cents_off.abs()),
             };
             if better {
                 best = Some(candidate);
@@ -303,7 +342,10 @@ mod tests {
 
     #[test]
     fn nearest_string_returns_none_on_empty_tuning() {
-        let empty = Tuning { name: "".into(), strings: vec![] };
+        let empty = Tuning {
+            name: "".into(),
+            strings: vec![],
+        };
         assert!(empty.nearest_string(Frequency::A4).is_none());
     }
 
@@ -319,7 +361,10 @@ mod tests {
         let sharp = Frequency(Frequency::A4.hz() * 2_f32.powf(20.0 / 1200.0));
         let (note, cents) = MidiNote::nearest_to(sharp);
         assert_eq!(note, MidiNote(69));
-        assert!((cents - 20.0).abs() < 0.01, "expected +20 cents, got {cents}");
+        assert!(
+            (cents - 20.0).abs() < 0.01,
+            "expected +20 cents, got {cents}"
+        );
     }
 
     #[test]
@@ -402,7 +447,9 @@ mod tests {
         // user is just very slightly out of tune, not playing a negative fret).
         let uke = Tuning::standard_ukulele();
         let slightly_flat_a4 = Frequency(Frequency::A4.hz() * 2_f32.powf(-30.0 / 1200.0));
-        let m = uke.match_to_fret(slightly_flat_a4, 20).expect("should match");
+        let m = uke
+            .match_to_fret(slightly_flat_a4, 20)
+            .expect("should match");
         assert_eq!(m.fret, 0);
         assert!((m.cents_off + 30.0).abs() < 0.01);
     }

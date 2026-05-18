@@ -11,10 +11,9 @@
 //! colour, etc.) in subsequent writes are interpreted too — so the `color`
 //! helpers below are safe to embed in `update` payloads.
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use crossterm::{
-    cursor,
-    execute,
+    cursor, execute,
     terminal::{Clear, ClearType},
 };
 use std::io::{self, BufRead, IsTerminal, Write};
@@ -119,11 +118,7 @@ pub fn select(prompt: &str, options: &[&str]) -> Result<usize> {
 
 /// Like [`select`], but empty input returns `default_idx`. The default is
 /// marked with a `*` in the printed menu.
-pub fn select_with_default(
-    prompt: &str,
-    options: &[&str],
-    default_idx: usize,
-) -> Result<usize> {
+pub fn select_with_default(prompt: &str, options: &[&str], default_idx: usize) -> Result<usize> {
     if options.is_empty() {
         return Err(anyhow!("select_with_default: no options provided"));
     }
@@ -169,9 +164,7 @@ pub fn select_with_default(
             )?;
         }
     }
-    Err(anyhow!(
-        "select_with_default: too many invalid attempts"
-    ))
+    Err(anyhow!("select_with_default: too many invalid attempts"))
 }
 
 /// Prompt for a free-form value with a default. Empty input returns the default;
@@ -185,9 +178,7 @@ where
     let stdin = io::stdin();
     let stderr = io::stderr();
     if !stdin.is_terminal() || !stderr.is_terminal() {
-        return Err(anyhow!(
-            "prompt_parsed: stdin or stderr is not a terminal"
-        ));
+        return Err(anyhow!("prompt_parsed: stdin or stderr is not a terminal"));
     }
     let mut stderr_lock = stderr.lock();
     let mut stdin_lock = stdin.lock();
