@@ -1,0 +1,37 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/twanga-core",
+    "crates/twanga-dsp",
+    "crates/twanga-synth",
+    "crates/twanga-audio",
+    "crates/twanga-tabs",
+    "crates/twanga-tui",
+    "crates/twanga-cli",
+    "crates/twanga-bench",
+    "crates/twanga-app",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "MIT OR Apache-2.0"
+authors = ["Andrew"]
+
+[workspace.dependencies]
+anyhow = "1"
+cpal = "0.15"
+rustfft = "6"
+clap = { version = "4", features = ["derive"] }
+ringbuf = "0.4"
+crossterm = "0.28"
+ctrlc = "3"
+
+# Keep DSP-critical code optimised even in dev so `cargo run` is usable for
+# live tuning without `--release`.
+[profile.dev.package.rustfft]
+opt-level = 3
+
+[profile.dev.package.twanga-dsp]
+opt-level = 3

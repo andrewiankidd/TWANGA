@@ -1,0 +1,18 @@
+[package]
+name = "twanga-bench"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Latency + pitch-detection accuracy benchmark binary (separate from `cargo bench`)."
+
+[[bin]]
+name = "twanga-bench"
+path = "src/main.rs"
+
+[dependencies]
+twanga-core = { path = "../twanga-core" }
+twanga-dsp = { path = "../twanga-dsp" }
+twanga-audio = { path = "../twanga-audio" }
+anyhow.workspace = true

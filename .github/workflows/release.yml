@@ -1,0 +1,133 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag (e.g. v0.1.0). Must already exist or be valid for a fresh draft.'
+        required: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            archive: zip
+            bin: twanga.exe
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            archive: tar.gz
+            bin: twanga
+          - target: x86_64-apple-darwin
+            os: macos-13
+            archive: tar.gz
+            bin: twanga
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            archive: tar.gz
+            bin: twanga
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install audio deps (linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-${{ matrix.target }}
+
+      - name: Build
+        run: cargo build --release --target ${{ matrix.target }} -p twanga-cli
+
+      - name: Resolve tag + artifact name
+        id: meta
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            tag="${{ inputs.tag }}"
+          else
+            tag="${GITHUB_REF#refs/tags/}"
+          fi
+          name="twanga-${tag}-${{ matrix.target }}"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+
+      - name: Stage archive contents
+        shell: bash
+        run: |
+          name="${{ steps.meta.outputs.name }}"
+          stage="dist/$name"
+          mkdir -p "$stage/examples"
+          cp "target/${{ matrix.target }}/release/${{ matrix.bin }}" "$stage/"
+          cp README.md LICENSE-MIT LICENSE-APACHE "$stage/"
+          cp assets/examples/*.alphatex "$stage/examples/"
+
+      - name: Pack zip
+        if: matrix.archive == 'zip'
+        shell: pwsh
+        working-directory: dist
+        run: Compress-Archive -Path "${{ steps.meta.outputs.name }}" -DestinationPath "${{ steps.meta.outputs.name }}.zip"
+
+      - name: Pack tar.gz
+        if: matrix.archive == 'tar.gz'
+        shell: bash
+        working-directory: dist
+        run: tar -czf "${{ steps.meta.outputs.name }}.tar.gz" "${{ steps.meta.outputs.name }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.meta.outputs.name }}
+          path: dist/${{ steps.meta.outputs.name }}.${{ matrix.archive }}
+          if-no-files-found: error
+
+  release:
+    name: Publish draft release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve tag
+        id: meta
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "tag=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Create draft release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.meta.outputs.tag }}
+          name: TWANGA ${{ steps.meta.outputs.tag }}
+          draft: true
+          generate_release_notes: true
+          files: dist/*

@@ -1,0 +1,22 @@
+/target/
+**/*.rs.bk
+
+# Tauri-generated artifacts (once `cargo tauri init` is run in crates/twanga-app)
+/crates/twanga-app/gen/
+/crates/twanga-app/target/
+
+# Frontend
+/frontend/dist/
+/frontend/node_modules/
+
+# User recordings produced by `twanga record`
+/recordings/
+
+# Claude Code local settings (machine-specific; settings.json IS committed)
+.claude/settings.local.json
+
+# OS / editor
+.DS_Store
+*.swp
+*.swo
+.idea/

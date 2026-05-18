@@ -1,0 +1,20 @@
+[package]
+name = "twanga-app"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Tauri shell. Run `cargo install tauri-cli@^2` then `cargo tauri init` in this crate."
+
+[dependencies]
+twanga-core = { path = "../twanga-core" }
+twanga-dsp = { path = "../twanga-dsp" }
+twanga-audio = { path = "../twanga-audio" }
+anyhow.workspace = true
+
+# Uncomment after `cargo install tauri-cli@^2` and `cargo tauri init` have been run here.
+# tauri = { version = "2", features = [] }
+#
+# [build-dependencies]
+# tauri-build = { version = "2", features = [] }

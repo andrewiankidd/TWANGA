@@ -1,0 +1,22 @@
+[package]
+name = "twanga-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "TWANGA CLI — `twanga tune`, `twanga devices`, `twanga convert`."
+
+[[bin]]
+name = "twanga"
+path = "src/main.rs"
+
+[dependencies]
+twanga-core = { path = "../twanga-core" }
+twanga-audio = { path = "../twanga-audio" }
+twanga-dsp = { path = "../twanga-dsp" }
+twanga-synth = { path = "../twanga-synth" }
+twanga-tabs = { path = "../twanga-tabs" }
+twanga-tui = { path = "../twanga-tui" }
+anyhow.workspace = true
+clap.workspace = true

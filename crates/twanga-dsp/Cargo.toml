@@ -1,0 +1,15 @@
+[package]
+name = "twanga-dsp"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Pure pitch detection. No IO, no async, no allocs in the hot path."
+
+[dependencies]
+twanga-core = { path = "../twanga-core" }
+
+[dev-dependencies]
+twanga-synth = { path = "../twanga-synth" }
+rustfft.workspace = true

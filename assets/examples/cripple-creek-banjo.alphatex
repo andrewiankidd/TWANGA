@@ -1,0 +1,17 @@
+\title "Cripple Creek"
+\subtitle "Standard 5-String Banjo (Open G), clawhammer"
+\copyright "Traditional Appalachian melody (public domain). Arrangement under MIT or Apache-2.0."
+\tempo 110
+\tuning D4 B3 G3 D3 G4
+.
+// A Part — high section, fret 5 on string 1 gives the high G ringing
+// against the open 5th-string drone (same pitch, different finger).
+:8 5.1 0.5 5.1 0.5 | 0.1 0.5 1.2 0.5 |
+:8 0.2 0.5 0.2 0.5 | 2.3 0.5 0.3 0.5 |
+:8 5.1 0.5 5.1 0.5 | 0.1 0.5 1.2 0.5 |
+:8 0.2 0.5 2.3 0.5 | 0.3 0.5 0.3 0.5 |
+// B Part — low section, melody drops to strings 2 and 3.
+:8 0.2 0.5 0.2 0.5 | 2.3 0.5 0.3 0.5 |
+:8 0.2 0.5 0.2 0.5 | 0.2 0.5 0.3 0.5 |
+:8 0.2 0.5 0.2 0.5 | 2.3 0.5 0.3 0.5 |
+:8 0.2 0.5 0.3 0.5 | 0.3 0.5 0.3 0.5 |
