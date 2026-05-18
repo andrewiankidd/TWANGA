@@ -14,16 +14,6 @@ Most instrument-trainer software is locked: subscription pricing, walled song li
 
 The author is an amateur dev and amateur musician learning Rust through this project. Set your expectations accordingly.
 
-## Project status
-
-**Functional end-to-end on the CLI.** All three core flows work today:
-
-- **Tuner** — live multi-string display (per-target cents indicator) or chromatic mode (snap to nearest 12-TET note). Cable hum / silence are gated out.
-- **Tab recorder** — capture what you play as alphaTex (open standard, alphaTab-compatible). Saved to `recordings/<timestamp>.alphatex` with per-block fret detection.
-- **Tab playback** — load an alphaTex file, scroll a cursor through it at tempo, optional metronome click on each beat, optional "wait" practice mode that pauses until you play each note. `--loop` for full or section repeats. `--tuning <preset>` transposes the tab onto a different instrument (so a uke recording plays on banjo and vice versa).
-
-The Tauri shell (desktop UI) is the next milestone. Same domain code (`twanga-core`, `twanga-dsp`, `twanga-tabs`, etc.) — the GUI is just a different presentation layer.
-
 ## Workspace layout
 
 Multi-crate Cargo workspace. Each crate has a narrow, deliberately-enforced responsibility:
@@ -85,31 +75,156 @@ cargo run -p twanga-cli --features twanga-audio/asio -- tune
 - [`twinkle-twinkle-uke.alphatex`](assets/examples/twinkle-twinkle-uke.alphatex) — Twinkle Twinkle Little Star, standard uke (GCEA), 12 bars.
 - [`cripple-creek-banjo.alphatex`](assets/examples/cripple-creek-banjo.alphatex) — Cripple Creek (Appalachian trad), standard 5-string banjo (open G), clawhammer-style with drone, 16 bars.
 
-## Roadmap
+## CLI screenshots
 
-| Milestone | Status |
-|-----------|--------|
-| Workspace scaffold | done |
-| Domain model (`Tuning`, `MidiNote`, `Frequency`) | done |
-| Tuner (YIN + CPAL + multi-string UI + chromatic mode) | done |
-| Tab recorder → alphaTex | done |
-| Tab playback (cursor view + metronome + wait mode + loop) | done |
-| Tauri shell init + first window | next |
-| Tab rendering via alphaTab in the Tauri webview | after Tauri shell |
-| Chord trainer with polyphonic *verification* (not transcription) | follows |
-| Slow-down practice (time-stretch via `rubato` or signalsmith-stretch) | follows |
-| Section looper / adaptive difficulty / tab fade-out | follows |
-| Right-hand pattern trainer (banjo rolls, uke strums) | follows |
-| GP5 / MusicXML import in `twanga-tabs` | follows |
-| Mobile (Tauri Mobile) | v2 |
+Each subcommand opens with a banner and a randomly-picked splash; the body is whatever flow you asked for. Notes below are from running the three flows against the bundled Twinkle Twinkle uke example.
 
-## Scope (what TWANGA isn't)
+### Tuner — `twanga tune`
 
-- **Not a tab library.** Tabs are a legal grey zone. The app ships empty. Users bring their own `.gp5` / `.gpx` / `.xml` files. Community sharing happens off-platform, like emulator ROMs.
-- **Not a custom-content player for proprietary game formats.** That's [slopsmith](https://github.com/byrongamatos/slopsmith)'s niche.
-- **No free polyphonic transcription in v1.** Polyphonic transcription remains an open problem in the open-source world. v1 covers monophonic transcription (record-to-tab) and polyphonic *verification* (classify against a known chord set). Free polyphonic transcription is an explicit stretch goal, not v1.
-- **No runtime AI.** Pitch detection is deterministic DSP. AI is used during *development* (Claude Code), not in the shipped binary.
-- **Mobile is v2.** Desktop tuner first; Android Oboe / AAudio quirks deferred.
+```
+$ cargo run -p twanga-cli -- tune
+
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.13s
+     Running `target\debug\twanga.exe tune`
+
+════════════════════════════════════════════════════════════════
+████████ ██     ██  █████  ███    ██  ██████   █████
+   ██    ██     ██ ██   ██ ████   ██ ██       ██   ██
+   ██    ██  █  ██ ███████ ██ ██  ██ ██   ███ ███████
+   ██    ██ ███ ██ ██   ██ ██  ██ ██ ██    ██ ██   ██
+   ██     ███ ███  ██   ██ ██   ████  ██████  ██   ██
+════════════════════════════════════════════════════════════════
+  Twang, Wince, Apologise, Notate, Groan, Again
+════════════════════════════════════════════════════════════════
+
+Choose a tuning:
+   1) (chromatic — guesses the nearest note)
+   2) standard-guitar
+   3) standard-banjo
+   4) standard-ukulele
+> 4
+
+Tuning: Standard Ukulele (Reentrant GCEA) (4 strings)
+Device: Microphone (Default)
+Audio:  48000 Hz, 1 channel(s)
+
+─────────────────────────────────────────────────
+  Controls: type 'q' + Enter to stop  (or Ctrl-C)
+─────────────────────────────────────────────────
+
+A4               | current:    442.10 Hz | target:    440.00 Hz | Tune Down! (+8.2 cents)
+E4               | current:    326.40 Hz | target:    329.63 Hz | Tune Up! (-17.0 cents)
+C4               | current:    261.10 Hz | target:    261.63 Hz | Tuned! (-3.5 cents)
+g4 (reentrant)   | current:    392.10 Hz | target:    392.00 Hz | Tuned! (+0.4 cents)
+```
+
+### Recorder — `twanga record`
+
+```
+$ cargo run -p twanga-cli -- record
+
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.13s
+     Running `target\debug\twanga.exe record`
+
+════════════════════════════════════════════════════════════════
+████████ ██     ██  █████  ███    ██  ██████   █████
+   ██    ██     ██ ██   ██ ████   ██ ██       ██   ██
+   ██    ██  █  ██ ███████ ██ ██  ██ ██   ███ ███████
+   ██    ██ ███ ██ ██   ██ ██  ██ ██ ██    ██ ██   ██
+   ██     ███ ███  ██   ██ ██   ████  ██████  ██   ██
+════════════════════════════════════════════════════════════════
+  Trustworthy, Without Ads, No Garbage Attached
+════════════════════════════════════════════════════════════════
+
+Choose a tuning to record against:
+   1) standard-guitar
+   2) standard-banjo
+   3) standard-ukulele
+> 3
+Tempo (BPM) [120]:
+Resolution:
+   1) 1/4
+ * 2) 1/8
+   3) 1/16
+   4) 1/32
+>
+Block width (columns per scrolling block) [32]:
+
+Tuning:     Standard Ukulele (Reentrant GCEA) (4 strings)
+Device:     Microphone (Default)
+Audio:      48000 Hz
+Tempo:      120 BPM, 1/8 notes (250 ms/col)
+Block:      32 cols (8000 ms wide)
+Saving to:  recordings/recording-1779133041.alphatex
+
+─────────────────────────────────────────────────
+  Controls: type 'q' + Enter to stop  (or Ctrl-C)
+─────────────────────────────────────────────────
+
+A4             | --------0000--------------------
+E4             | ----------------11110000--------
+C4             | 0000--------------------222200--
+g4 (reentrant) | ----0000----00------------------
+
+A4             | --------------------------------
+E4             | ----11110000--------11110000----
+C4             | ------------22--------------22--
+g4 (reentrant) | 0000----------------0000--------
+
+A4             | --------0000--------------------
+E4             | ----------------11110000--------
+C4             | 0000--------------------222200--
+g4 (reentrant) | ----0000----00------------------
+```
+
+### Playback — `twanga play ... --bpm 60 --wait`
+
+```
+$ cargo run -p twanga-cli -- play assets/examples/twinkle-twinkle-uke.alphatex --bpm 60 --wait
+
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.13s
+     Running `target\debug\twanga.exe play assets/examples/twinkle-twinkle-uke.alphatex --bpm 60 --wait`
+
+════════════════════════════════════════════════════════════════
+████████ ██     ██  █████  ███    ██  ██████   █████
+   ██    ██     ██ ██   ██ ████   ██ ██       ██   ██
+   ██    ██  █  ██ ███████ ██ ██  ██ ██   ███ ███████
+   ██    ██ ███ ██ ██   ██ ██  ██ ██ ██    ██ ██   ██
+   ██     ███ ███  ██   ██ ██   ████  ██████  ██   ██
+════════════════════════════════════════════════════════════════
+  Tunes Whatever's Approximately Notated, Generously Allowing
+════════════════════════════════════════════════════════════════
+
+Choose a tuning for playback:
+ * 1) (as recorded in file: A4 E4 C4 G4)
+   2) standard-guitar
+   3) standard-banjo
+   4) standard-ukulele
+> 4
+Playback:   assets/examples/twinkle-twinkle-uke.alphatex
+Subtitle:   for standard ukulele (GCEA, reentrant)
+Transposed: standard-ukulele (A4 E4 C4 G4)
+Tempo:      60 BPM, 1/4 notes (1000 ms/col)
+Metronome:  on
+Wait mode:  on
+Loop:       off
+
+─────────────────────────────────────────────────
+  Controls: type 'q' + Enter to stop  (or Ctrl-C)
+─────────────────────────────────────────────────
+
+A4 | ----00------[-]-----------
+E4 | --------1100[-]-----1100--
+C4 | 00----------[2]20-------2-
+G4 | --00--0-----[-]---00------
+     col 13/48  (bar 4, beat 1)
+```
+
+## Project docs
+
+- [Project status](docs/PROJECT_STATUS.md) — current capability and the next milestone.
+- [Roadmap](docs/ROADMAP.md) — milestone table.
+- [Scope](docs/SCOPE.md) — what TWANGA deliberately isn't.
 
 ## Acknowledgements
 
