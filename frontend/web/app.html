@@ -2816,6 +2816,23 @@
                 el('recorder-hint').textContent = 'nothing recorded yet';
                 return;
             }
+
+            // Prompt for a title — passes through into both the alphaTex
+            // `\title` header and the filename. Browser `prompt()` returns
+            // `null` if the user cancels (Esc / Cancel button); abort the
+            // save in that case. Blank string = "no title" (same as the
+            // CLI's blank-prompt default).
+            const rawTitle = window.prompt(
+                'Recording title (leave blank for no title):',
+                '',
+            );
+            if (rawTitle === null) {
+                el('recorder-hint').textContent = 'save cancelled';
+                return;
+            }
+            const title = rawTitle.trim();
+            const titleArg = title.length > 0 ? title : undefined;
+
             let alphaTex;
             try {
                 alphaTex = serialize_recording(
@@ -2824,6 +2841,7 @@
                     recState.bpm,
                     recState.resolutionDenom,
                     recState.score.columns,
+                    titleArg,
                 );
             } catch (err) {
                 console.error('serialize_recording failed', err);
@@ -2832,20 +2850,26 @@
                 return;
             }
 
-            // Trigger a browser download. Filename mirrors the CLI's
-            // `recording-<timestamp>.alphatex` shape but uses ISO format
-            // so it sorts naturally in a file picker.
+            // Filename derivation mirrors the CLI exactly:
+            //   - title provided  →  `<slug>-<ISO-timestamp>.alphatex`
+            //   - title blank     →  `twanga-recording-<ISO-timestamp>.alphatex`
+            // Timestamp is always appended so two recordings with the same
+            // title don't collide in the browser's download dir.
             const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+            const filename = title.length > 0
+                ? `${slugify(title)}-${stamp}.alphatex`
+                : `twanga-recording-${stamp}.alphatex`;
+
             const blob = new Blob([alphaTex], { type: 'text/plain;charset=utf-8' });
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
-            a.download = `twanga-recording-${stamp}.alphatex`;
+            a.download = filename;
             document.body.appendChild(a);
             a.click();
             document.body.removeChild(a);
             setTimeout(() => URL.revokeObjectURL(url), 1000);
-            el('recorder-hint').textContent = `saved twanga-recording-${stamp}.alphatex`;
+            el('recorder-hint').textContent = `saved ${filename}`;
         }
 
         // Stop recording cleanly if the user navigates away mid-take —

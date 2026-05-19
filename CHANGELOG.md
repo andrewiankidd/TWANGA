@@ -8,6 +8,20 @@ dated section.
 
 ## [Unreleased]
 
+### Added
+
+- Recording titles on both `twanga record` and the browser Recorder.
+  CLI: new `--title` flag with the three-form pattern (`--title value`
+  / `--title` bare → prompt / omitted → prompt). Filename derives from
+  the title (`<slug>-<unix-secs>.alphatex`) when one is provided;
+  blank input keeps the pre-feature `recording-<unix-secs>.alphatex`
+  shape. GUI Recorder: Save now opens a title prompt before download,
+  with the same blank-is-no-title fallback. The title flows into the
+  alphaTex `\title` header via the canonical `AlphaTexWriter`, so
+  files round-trip through `twanga play` and surface in its header
+  (new "Title:" line) as well as in the parsed `ParsedTab.title`
+  field for any future tooling.
+
 ### Changed
 
 - Tunings list rows now stack the display name on top and the slug on

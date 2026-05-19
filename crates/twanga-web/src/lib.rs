@@ -159,6 +159,7 @@ pub fn serialize_recording(
     bpm: u32,
     resolution_denom: u32,
     columns_json: JsValue,
+    title: Option<String>,
 ) -> Result<String, String> {
     let entry: twanga_core::PresetEntry = serde_wasm_bindgen::from_value(preset_json)
         .map_err(|e| format!("malformed tuning shape: {e}"))?;
@@ -167,6 +168,7 @@ pub fn serialize_recording(
     let columns: Vec<Vec<Option<u8>>> = serde_wasm_bindgen::from_value(columns_json)
         .map_err(|e| format!("malformed columns shape: {e}"))?;
 
+    let title_ref = title.as_deref();
     let mut buf: Vec<u8> = Vec::new();
     {
         let mut w = twanga_tabs::alphatex::AlphaTexWriter::new(
@@ -175,6 +177,7 @@ pub fn serialize_recording(
             &capo,
             bpm,
             resolution_denom,
+            title_ref,
         )
         .map_err(|e| e.to_string())?;
         for col in &columns {
@@ -855,18 +858,54 @@ mod tests {
         let capo = twanga_core::Capo::uniform(guitar.strings.len(), 0);
         let mut buf: Vec<u8> = Vec::new();
         {
-            let mut w = twanga_tabs::alphatex::AlphaTexWriter::new(
-                &mut buf, &guitar, &capo, 120, 8,
-            )
-            .unwrap();
-            w.write_column(&[Some(0), None, None, None, None, None]).unwrap();
-            w.write_column(&[None, Some(2), None, None, None, None]).unwrap();
+            let mut w =
+                twanga_tabs::alphatex::AlphaTexWriter::new(&mut buf, &guitar, &capo, 120, 8, None)
+                    .unwrap();
+            w.write_column(&[Some(0), None, None, None, None, None])
+                .unwrap();
+            w.write_column(&[None, Some(2), None, None, None, None])
+                .unwrap();
             w.finalize().unwrap();
         }
         let text = String::from_utf8(buf).unwrap();
-        assert!(text.contains("\\tempo 120"), "expected tempo line in: {text}");
+        assert!(
+            text.contains("\\tempo 120"),
+            "expected tempo line in: {text}"
+        );
         assert!(text.contains("\\tuning"), "expected tuning line in: {text}");
-        assert!(!text.contains("capo="), "no capo should be embedded: {text}");
+        assert!(
+            !text.contains("capo="),
+            "no capo should be embedded: {text}"
+        );
+        assert!(!text.contains("\\title"), "no title when None: {text}");
+    }
+
+    #[test]
+    fn serialize_recording_emits_title_when_provided() {
+        // Title flows through the WASM binding into `\title "..."` so a
+        // browser-saved recording carries the user's chosen name. Same
+        // writer the CLI uses, so the file is byte-identical to a CLI
+        // recording with the same inputs.
+        let guitar = twanga_core::Tuning::standard_guitar();
+        let capo = twanga_core::Capo::uniform(guitar.strings.len(), 0);
+        let mut buf: Vec<u8> = Vec::new();
+        {
+            let mut w = twanga_tabs::alphatex::AlphaTexWriter::new(
+                &mut buf,
+                &guitar,
+                &capo,
+                120,
+                8,
+                Some("My Recording"),
+            )
+            .unwrap();
+            w.finalize().unwrap();
+        }
+        let text = String::from_utf8(buf).unwrap();
+        assert!(
+            text.contains("\\title \"My Recording\""),
+            "expected \\title line in: {text}"
+        );
     }
 
     #[test]

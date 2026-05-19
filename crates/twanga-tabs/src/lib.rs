@@ -29,6 +29,12 @@ pub mod alphatex {
     #[derive(Debug, Clone)]
     pub struct ParsedTab {
         pub tempo: u32,
+        /// Optional `\title "..."` text — the human-readable name the user
+        /// gave to this recording (e.g. `"Cripple Creek take 3"`). Distinct
+        /// from `subtitle` which TWANGA uses for the tuning name + capo
+        /// annotation; `title` is purely the song / take name. `None` for
+        /// pre-title-feature recordings that didn't write one.
+        pub title: Option<String>,
         /// Optional `\subtitle "..."` text. Used by TWANGA to label the recording
         /// with its tuning name (e.g. `"Standard Ukulele (Reentrant GCEA)"`), so
         /// later playback can show the user what the recording was made against
@@ -130,6 +136,7 @@ pub mod alphatex {
 
             ParsedTab {
                 tempo: self.tempo,
+                title: self.title.clone(),
                 // Preserve the original subtitle. The header line in `twanga play`
                 // also surfaces the transposition explicitly, so the user always
                 // sees both "what was recorded against" and "what's being played
@@ -162,6 +169,7 @@ pub mod alphatex {
     /// Parse the subset of alphaTex that [`AlphaTexWriter`] emits.
     pub fn parse(input: &str) -> Result<ParsedTab, ParseError> {
         let mut tempo: Option<u32> = None;
+        let mut title: Option<String> = None;
         let mut subtitle: Option<String> = None;
         let mut tuning_names: Vec<String> = Vec::new();
         let mut columns: Vec<TabColumn> = Vec::new();
@@ -180,6 +188,12 @@ pub mod alphatex {
                             .parse()
                             .map_err(|_| ParseError::BadTempo(rest.trim().to_string()))?,
                     );
+                } else if let Some(rest) = trimmed.strip_prefix("\\title") {
+                    // `\title` is captured for display ("Title:" line on play
+                    // headers, future Playback screen heading). Stored as the
+                    // unquoted string; older recordings without a `\title`
+                    // round-trip cleanly with `None`.
+                    title = Some(unquote(rest.trim()).to_string());
                 } else if let Some(rest) = trimmed.strip_prefix("\\subtitle") {
                     subtitle = Some(unquote(rest.trim()).to_string());
                 } else if let Some(rest) = trimmed.strip_prefix("\\tuning") {
@@ -196,6 +210,7 @@ pub mod alphatex {
 
         Ok(ParsedTab {
             tempo: tempo.unwrap_or(120),
+            title,
             subtitle,
             tuning_names,
             columns,
@@ -325,7 +340,15 @@ pub mod alphatex {
             capo: &Capo,
             bpm: u32,
             resolution_denom: u32,
+            title: Option<&str>,
         ) -> io::Result<Self> {
+            // `\title` goes first when present — it's the user's chosen name
+            // for the recording (e.g. "Cripple Creek take 3"). Optional;
+            // pre-title-feature recordings just don't have one and round-trip
+            // cleanly as `None`.
+            if let Some(t) = title.map(str::trim).filter(|t| !t.is_empty()) {
+                writeln!(writer, "\\title \"{}\"", t.replace('"', "\\\""))?;
+            }
             // Subtitle gives the file a human-readable label for the tuning it
             // was recorded against, so anything that opens it later (alphaTab,
             // a text editor, our own play command) can show "Standard Ukulele"
@@ -419,9 +442,15 @@ pub mod alphatex {
         {
             let mut buf = Vec::new();
             {
-                let mut w =
-                    AlphaTexWriter::new(&mut buf, &uke(), &Capo::none(uke().strings.len()), 120, 8)
-                        .unwrap();
+                let mut w = AlphaTexWriter::new(
+                    &mut buf,
+                    &uke(),
+                    &Capo::none(uke().strings.len()),
+                    120,
+                    8,
+                    None,
+                )
+                .unwrap();
                 f(&mut w).unwrap();
                 w.finalize().unwrap();
             }
@@ -507,12 +536,146 @@ pub mod alphatex {
         }
 
         #[test]
+        fn parser_extracts_title_with_quotes() {
+            let input = "\\title \"Cripple Creek take 3\"\n\\tempo 120\n\\tuning A4 E4 C4 G4\n.\n";
+            let parsed = parse(input).unwrap();
+            assert_eq!(parsed.title.as_deref(), Some("Cripple Creek take 3"));
+        }
+
+        #[test]
+        fn parser_title_is_none_for_pre_title_files() {
+            // Older recordings (no `\title` line) parse cleanly with `None`,
+            // preserving the same shape as the pre-feature codebase.
+            let input = "\\subtitle \"Standard Uke\"\n\\tempo 120\n\\tuning A4 E4 C4 G4\n.\n";
+            let parsed = parse(input).unwrap();
+            assert_eq!(parsed.title, None);
+        }
+
+        #[test]
+        fn writer_emits_title_when_provided() {
+            let mut buf = Vec::new();
+            {
+                let mut w = AlphaTexWriter::new(
+                    &mut buf,
+                    &uke(),
+                    &Capo::none(uke().strings.len()),
+                    120,
+                    8,
+                    Some("Cripple Creek take 3"),
+                )
+                .unwrap();
+                w.finalize().unwrap();
+            }
+            let text = String::from_utf8(buf).unwrap();
+            assert!(
+                text.contains("\\title \"Cripple Creek take 3\""),
+                "expected \\title line in: {text}"
+            );
+        }
+
+        #[test]
+        fn writer_omits_title_line_when_none() {
+            let mut buf = Vec::new();
+            {
+                let mut w = AlphaTexWriter::new(
+                    &mut buf,
+                    &uke(),
+                    &Capo::none(uke().strings.len()),
+                    120,
+                    8,
+                    None,
+                )
+                .unwrap();
+                w.finalize().unwrap();
+            }
+            let text = String::from_utf8(buf).unwrap();
+            assert!(
+                !text.contains("\\title"),
+                "expected no \\title line in: {text}"
+            );
+        }
+
+        #[test]
+        fn writer_treats_blank_title_as_no_title() {
+            // Empty / whitespace-only titles are a frequent UX edge case
+            // (user hits enter on the prompt without typing anything). Treat
+            // them as "no title" rather than writing `\title ""` which would
+            // be technically valid but useless.
+            let mut buf = Vec::new();
+            {
+                let mut w = AlphaTexWriter::new(
+                    &mut buf,
+                    &uke(),
+                    &Capo::none(uke().strings.len()),
+                    120,
+                    8,
+                    Some("   "),
+                )
+                .unwrap();
+                w.finalize().unwrap();
+            }
+            let text = String::from_utf8(buf).unwrap();
+            assert!(!text.contains("\\title"), "blank title was emitted: {text}");
+        }
+
+        #[test]
+        fn writer_escapes_quotes_in_title() {
+            let mut buf = Vec::new();
+            {
+                let mut w = AlphaTexWriter::new(
+                    &mut buf,
+                    &uke(),
+                    &Capo::none(uke().strings.len()),
+                    120,
+                    8,
+                    Some(r#"My "Quoted" Title"#),
+                )
+                .unwrap();
+                w.finalize().unwrap();
+            }
+            let text = String::from_utf8(buf).unwrap();
+            assert!(
+                text.contains(r#"\title "My \"Quoted\" Title""#),
+                "expected escaped quotes in title line: {text}"
+            );
+        }
+
+        #[test]
+        fn title_round_trips_through_writer_and_parser() {
+            // Write + parse cycle should preserve the title verbatim. Same
+            // pattern as the capo round-trip test above.
+            let mut buf = Vec::new();
+            {
+                let mut w = AlphaTexWriter::new(
+                    &mut buf,
+                    &uke(),
+                    &Capo::none(uke().strings.len()),
+                    120,
+                    8,
+                    Some("Cripple Creek take 3"),
+                )
+                .unwrap();
+                w.write_column(&[Some(0), None, None, None]).unwrap();
+                w.finalize().unwrap();
+            }
+            let text = String::from_utf8(buf).unwrap();
+            let parsed = parse(&text).unwrap();
+            assert_eq!(parsed.title.as_deref(), Some("Cripple Creek take 3"));
+        }
+
+        #[test]
         fn writer_emits_subtitle_from_tuning_name() {
             let mut buf = Vec::new();
             {
-                let mut w =
-                    AlphaTexWriter::new(&mut buf, &uke(), &Capo::none(uke().strings.len()), 120, 8)
-                        .unwrap();
+                let mut w = AlphaTexWriter::new(
+                    &mut buf,
+                    &uke(),
+                    &Capo::none(uke().strings.len()),
+                    120,
+                    8,
+                    None,
+                )
+                .unwrap();
                 w.finalize().unwrap();
             }
             let text = String::from_utf8(buf).unwrap();
@@ -528,7 +691,7 @@ pub mod alphatex {
             let uke_t = uke();
             let capo = Capo::uniform(uke_t.strings.len(), 3);
             {
-                let mut w = AlphaTexWriter::new(&mut buf, &uke_t, &capo, 120, 8).unwrap();
+                let mut w = AlphaTexWriter::new(&mut buf, &uke_t, &capo, 120, 8, None).unwrap();
                 w.finalize().unwrap();
             }
             let text = String::from_utf8(buf).unwrap();
@@ -554,7 +717,7 @@ pub mod alphatex {
                 offsets: vec![3, 3, 3, 3, 0],
             };
             {
-                let mut w = AlphaTexWriter::new(&mut buf, &banjo, &capo, 110, 8).unwrap();
+                let mut w = AlphaTexWriter::new(&mut buf, &banjo, &capo, 110, 8, None).unwrap();
                 w.finalize().unwrap();
             }
             let text = String::from_utf8(buf).unwrap();
@@ -683,9 +846,15 @@ pub mod alphatex {
             let mut buf = Vec::new();
             let uke = uke();
             {
-                let mut w =
-                    AlphaTexWriter::new(&mut buf, &uke, &Capo::none(uke.strings.len()), 100, 8)
-                        .unwrap();
+                let mut w = AlphaTexWriter::new(
+                    &mut buf,
+                    &uke,
+                    &Capo::none(uke.strings.len()),
+                    100,
+                    8,
+                    None,
+                )
+                .unwrap();
                 w.write_column(&[Some(0), None, None, None]).unwrap(); // A open
                 w.write_column(&[None, None, Some(3), None]).unwrap(); // C fret 3
                 w.write_column(&[None; 4]).unwrap(); // rest

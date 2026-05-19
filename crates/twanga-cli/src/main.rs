@@ -111,6 +111,13 @@ enum Command {
         /// no value to be prompted.
         #[arg(long, num_args = 0..=1, default_missing_value = "")]
         capo: Option<String>,
+        /// Human-readable title for the recording — written to `\title` in the
+        /// alphaTex header AND used to derive the filename
+        /// (`<slug>-<unix-secs>.alphatex` if provided, `recording-<unix-secs>`
+        /// otherwise). Omit or pass `--title` with no value to be prompted.
+        /// Accept the blank default to keep the pre-title filename shape.
+        #[arg(long, num_args = 0..=1, default_missing_value = "")]
+        title: Option<String>,
     },
     /// List available audio input devices.
     Devices,
@@ -504,6 +511,30 @@ fn resolve_block_width(arg: Option<String>) -> Result<usize> {
     )
 }
 
+/// Resolve `--title` for `record`. Three-form pattern: explicit value
+/// passes through, bare flag prompts (default blank → no title), omission
+/// also defers to a prompt. Blank input is preserved as `None` so the
+/// recording lands at `recording-<unix-secs>.alphatex` like the pre-title
+/// era. Any non-blank value flows into `\title` and into the filename slug.
+fn resolve_title(arg: Option<String>) -> Result<Option<String>> {
+    if let Some(s) = arg {
+        // `flag_value` strips bare-form empties; we handle blanks below, so
+        // bypass it here and treat the raw arg as the user's input.
+        let trimmed = s.trim();
+        return Ok(if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
+        });
+    }
+    // No flag passed: prompt with a blank default. User can press enter to
+    // skip — the recording falls back to the pre-title filename shape.
+    let raw: String = twanga_tui::prompt_parsed("Title (blank = no title)", String::new(), |s| {
+        Ok::<_, String>(s.trim().to_string())
+    })?;
+    Ok(if raw.is_empty() { None } else { Some(raw) })
+}
+
 fn validate_block_width(n: usize) -> Result<()> {
     if (4..=200).contains(&n) {
         Ok(())
@@ -721,15 +752,24 @@ const MAX_FRET: u8 = 20;
 /// Folder (relative to CWD) where `twanga record` writes its output files.
 const RECORDINGS_DIR: &str = "recordings";
 
-/// Open a timestamped alphaTex recording file for `twanga record`. Writes the
-/// header against the BASE tuning + capo (the writer encodes the capo into
-/// the `\subtitle` line so the file round-trips through other tools), and
-/// returns the path + a streaming writer ready for per-column writes.
+/// Open an alphaTex recording file for `twanga record`. Writes the header
+/// against the BASE tuning + capo (the writer encodes the capo into the
+/// `\subtitle` line so the file round-trips through other tools), embeds
+/// the optional `title` into `\title`, and returns the path + a streaming
+/// writer ready for per-column writes.
+///
+/// Filename:
+/// - `title` provided → `<slug>-<unix-secs>.alphatex` (timestamp suffix
+///   guarantees uniqueness even if the user records the same song twice).
+/// - `title` blank/`None` → `recording-<unix-secs>.alphatex` (the original
+///   pre-title-feature shape, so older tooling that globs for
+///   `recording-*.alphatex` keeps working).
 fn open_recording_file(
     base_tuning: &Tuning,
     capo: &Capo,
     bpm: u32,
     resolution_denom: u32,
+    title: Option<&str>,
 ) -> Result<(PathBuf, AlphaTexWriter<BufWriter<File>>)> {
     let dir = PathBuf::from(RECORDINGS_DIR);
     fs::create_dir_all(&dir)
@@ -738,7 +778,11 @@ fn open_recording_file(
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0);
-    let path = dir.join(format!("recording-{secs}.alphatex"));
+    let stem = match title.map(str::trim).filter(|t| !t.is_empty()) {
+        Some(t) => format!("{}-{secs}", slugify(t)),
+        None => format!("recording-{secs}"),
+    };
+    let path = dir.join(format!("{stem}.alphatex"));
     let file =
         File::create(&path).with_context(|| format!("failed to create '{}'", path.display()))?;
     let writer = AlphaTexWriter::new(
@@ -747,6 +791,7 @@ fn open_recording_file(
         capo,
         bpm,
         resolution_denom,
+        title,
     )
     .with_context(|| format!("failed to write alphaTex header to '{}'", path.display()))?;
     Ok((path, writer))
@@ -770,6 +815,7 @@ fn run_recorder(
     bpm: u32,
     resolution_denom: u32,
     block_width: usize,
+    title: Option<String>,
 ) -> Result<()> {
     let mut stream = InputStream::open()?;
     let sample_rate = stream.sample_rate;
@@ -790,8 +836,11 @@ fn run_recorder(
     let mut tuner = Tuner::new(TunerMode::Chromatic, sample_rate);
 
     let (recording_path, mut recording_writer) =
-        open_recording_file(&base_tuning, &capo, bpm, resolution_denom)?;
+        open_recording_file(&base_tuning, &capo, bpm, resolution_denom, title.as_deref())?;
 
+    if let Some(t) = &title {
+        eprintln!("Title:      {t}");
+    }
     eprintln!("Tuning:     {tuning_name} ({string_count} strings)");
     if !capo.is_none() {
         if let Some(n) = capo.is_uniform() {
@@ -896,13 +945,15 @@ fn main() -> Result<()> {
             resolution,
             block_width,
             capo,
+            title,
         } => {
             let t = resolve_tuning(tuning)?;
             let c = resolve_capo(capo, &t)?;
             let bpm = resolve_bpm(bpm)?;
             let denom = resolve_resolution(resolution)?;
             let bw = resolve_block_width(block_width)?;
-            run_recorder(t, c, bpm, denom, bw)?;
+            let title = resolve_title(title)?;
+            run_recorder(t, c, bpm, denom, bw, title)?;
         }
         Command::Play {
             path,
@@ -1052,6 +1103,9 @@ fn run_playback(
     let name_width = tab.tuning_names.iter().map(|n| n.len()).max().unwrap_or(0);
 
     eprintln!("Playback:   {}", path.display());
+    if let Some(title) = tab.title.as_deref() {
+        eprintln!("Title:      {title}");
+    }
     if let Some(subtitle) = tab.subtitle_display() {
         // Strips any `; capo=...` machine annotation so the header line stays
         // human-readable; the resolved capo gets its own "Capo:" line below.
