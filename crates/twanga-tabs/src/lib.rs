@@ -183,7 +183,7 @@ pub mod alphatex {
                 } else if let Some(rest) = trimmed.strip_prefix("\\subtitle") {
                     subtitle = Some(unquote(rest.trim()).to_string());
                 } else if let Some(rest) = trimmed.strip_prefix("\\tuning") {
-                    tuning_names = rest.trim().split_whitespace().map(String::from).collect();
+                    tuning_names = rest.split_whitespace().map(String::from).collect();
                 } else if trimmed == "." {
                     in_body = true;
                 }
@@ -225,7 +225,7 @@ pub mod alphatex {
                     tokens.push(std::mem::take(&mut current));
                 }
                 current.push('(');
-                while let Some(next) = chars.next() {
+                for next in chars.by_ref() {
                     current.push(next);
                     if next == ')' {
                         break;

@@ -4159,7 +4159,6 @@ version = "0.1.0"
 dependencies = [
  "tauri",
  "tauri-build",
- "twanga-core",
 ]
 
 [[package]]
@@ -4169,7 +4168,6 @@ dependencies = [
  "anyhow",
  "cpal",
  "ringbuf",
- "twanga-core",
 ]
 
 [[package]]
@@ -4177,9 +4175,6 @@ name = "twanga-bench"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "twanga-audio",
- "twanga-core",
- "twanga-dsp",
 ]
 
 [[package]]
@@ -4189,7 +4184,6 @@ dependencies = [
  "anyhow",
  "clap",
  "directories",
- "serde",
  "toml 0.8.23",
  "twanga-audio",
  "twanga-core",
@@ -4227,7 +4221,6 @@ dependencies = [
 name = "twanga-tabs"
 version = "0.1.0"
 dependencies = [
- "anyhow",
  "twanga-core",
 ]
 
@@ -4245,14 +4238,11 @@ dependencies = [
 name = "twanga-web"
 version = "0.1.0"
 dependencies = [
- "js-sys",
  "serde",
  "serde-wasm-bindgen",
  "twanga-core",
  "twanga-dsp",
- "twanga-tabs",
  "wasm-bindgen",
- "web-sys",
 ]
 
 [[package]]

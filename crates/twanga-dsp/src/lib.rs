@@ -293,7 +293,7 @@ mod tests {
     #[test]
     fn yin_returns_none_for_too_short_buffer() {
         let mut yin = Yin::new(0.15);
-        assert!(yin.detect(&vec![0.0_f32; 2], 44100).is_none());
+        assert!(yin.detect(&[0.0_f32; 2], 44100).is_none());
     }
 
     #[test]

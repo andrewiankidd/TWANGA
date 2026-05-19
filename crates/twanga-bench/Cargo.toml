@@ -6,13 +6,14 @@ rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
 description = "Latency + pitch-detection accuracy benchmark binary (separate from `cargo bench`)."
+publish = false
 
 [[bin]]
 name = "twanga-bench"
 path = "src/main.rs"
 
 [dependencies]
-twanga-core = { path = "../twanga-core" }
-twanga-dsp = { path = "../twanga-dsp" }
-twanga-audio = { path = "../twanga-audio" }
+# Placeholder bin — twanga-core / -dsp / -audio will get re-added once
+# the actual benchmark harness is wired. cargo-machete flags them today
+# because the stub `main.rs` only uses `anyhow`.
 anyhow.workspace = true

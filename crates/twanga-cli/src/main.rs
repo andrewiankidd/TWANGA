@@ -947,6 +947,11 @@ const PLAYBACK_WINDOW_COLS: usize = 24;
 /// Tolerance for wait-mode note matching, in cents.
 const WAIT_MATCH_CENTS: f32 = 50.0;
 
+// 8 args is one over clippy's default ceiling. The arguments are
+// independent user-CLI-flag values aggregated for the playback flow;
+// bundling them into a struct just to satisfy the lint is more
+// ceremony than clarity at this size.
+#[allow(clippy::too_many_arguments)]
 fn run_playback(
     path: PathBuf,
     parsed: ParsedTab,

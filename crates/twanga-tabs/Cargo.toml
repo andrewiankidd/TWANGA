@@ -6,7 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
 description = "Tab format parsers/serialisers (GP5, MusicXML, alphaTex). Import-only — no hosting."
+publish = false
 
 [dependencies]
 twanga-core = { path = "../twanga-core" }
-anyhow.workspace = true

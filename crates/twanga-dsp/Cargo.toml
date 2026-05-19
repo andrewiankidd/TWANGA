@@ -6,6 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
 description = "Pure pitch detection. No IO, no async, no allocs in the hot path."
+publish = false
 
 [dependencies]
 twanga-core = { path = "../twanga-core" }

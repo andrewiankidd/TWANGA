@@ -6,6 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
 description = "Pure audio synthesis primitives — sines, harmonic stacks, envelopes, deterministic noise. No IO."
+publish = false
 
 [dependencies]
 twanga-core = { path = "../twanga-core" }

@@ -208,7 +208,7 @@ mod tests {
     fn save_then_load_round_trips() {
         let path = scratch_path("round_trip");
         let entry = sample_user_entry();
-        save_user_tunings_at(&path, &[entry.clone()]).expect("save");
+        save_user_tunings_at(&path, std::slice::from_ref(&entry)).expect("save");
         let recovered = load_user_tunings_at(&path).expect("load");
         assert_eq!(recovered, vec![entry]);
     }

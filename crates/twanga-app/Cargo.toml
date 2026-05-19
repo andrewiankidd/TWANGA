@@ -6,6 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
 description = "TWANGA Tauri desktop shell — hosts the shared frontend/web/ bundle in a native window (Windows/macOS/Linux today; iOS/Android via Tauri Mobile)."
+publish = false
 build = "build.rs"
 
 # Tauri 2's recommended split: a `lib` exposes the `run()` entry point that
@@ -20,7 +21,6 @@ name = "twanga-app"
 path = "src/main.rs"
 
 [dependencies]
-twanga-core = { path = "../twanga-core" }
 tauri = { version = "2", features = [] }
 
 [build-dependencies]

@@ -6,13 +6,13 @@ rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
 description = "Realtime audio capture. CPAL wrapper. ASIO behind the `asio` feature on Windows."
+publish = false
 
 [features]
 default = []
 asio = ["cpal/asio"]
 
 [dependencies]
-twanga-core = { path = "../twanga-core" }
 cpal.workspace = true
 anyhow.workspace = true
 ringbuf.workspace = true

@@ -6,6 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
 description = "TWANGA domain types (Frequency, MidiNote, TunedString, Tuning). No IO."
+publish = false
 
 [dependencies]
 serde = { workspace = true }

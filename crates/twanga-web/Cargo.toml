@@ -5,7 +5,8 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
-description = "WASM bindings: exposes twanga-core / twanga-dsp / twanga-tabs to the browser frontend."
+description = "WASM bindings: exposes twanga-core / twanga-dsp to the browser frontend."
+publish = false
 
 [lib]
 # cdylib so wasm-bindgen can post-process the binary; rlib so the workspace can
@@ -15,16 +16,10 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 twanga-core = { path = "../twanga-core" }
 twanga-dsp = { path = "../twanga-dsp" }
-twanga-tabs = { path = "../twanga-tabs" }
 wasm-bindgen = "0.2.121"
-js-sys = "0.3"
 serde = { workspace = true }
 serde-wasm-bindgen = "0.6"
-
-[dependencies.web-sys]
-version = "0.3"
-features = [
-    # Enough to read the audio context + getUserMedia later; harmless to opt
-    # into now so the API surface is set in stone for downstream JS.
-    "console",
-]
+# `twanga-tabs`, `js-sys`, `web-sys` will be re-added once the WASM bridge
+# actually needs them (alphaTex round-trip / direct DOM access from Rust /
+# Web Audio bindings written in Rust rather than JS). Today the bridge
+# exposes only twanga-core / twanga-dsp surfaces, so machete flags them.
