@@ -10,6 +10,25 @@ dated section.
 
 ### Added
 
+- "Couldn't fit on fretboard" indicator on every existing flow.
+  Detected pitches that no `(string, fret)` combination within
+  `MAX_FRET=20` can reach used to be silently dropped on `twanga
+  record` and on `twanga play --tuning <other>` transposes. Now:
+  - `twanga record` shows an aggregate counter in the status line
+    while recording: `M:SS | N cols | X dropped (out of fretboard
+    range)`. Per-event logging would be too noisy.
+  - `twanga play --tuning <other>` pre-scans the transposed tab and
+    prints a "Skipped:" preamble before the cursor starts, listing
+    up to 8 unique note names that couldn't be placed. User can
+    bail (Ctrl-C / `q + Enter`) if it's worse than expected.
+  - Browser Recorder mirrors the CLI's record behaviour: a `✗ N
+    dropped` suffix on the live status hint while recording (with a
+    tooltip explaining what "dropped" means) and on the post-stop
+    summary. New `ParsedTab::transpose_to_with_report(target,
+    max_fret) -> (ParsedTab, Vec<DroppedNote>)` in `twanga-tabs`
+    backs the CLI play side; the original `transpose_to` is now a
+    thin wrapper around it. 2 new cargo tests (round-trip empty
+    + reports unreachable pitches).
 - Live duration / progress display on every record + play surface.
   - `twanga record`: a status line below the scrolling tab block
     showing `M:SS | N cols` (elapsed wall-clock + total committed

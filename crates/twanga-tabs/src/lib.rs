@@ -104,14 +104,31 @@ pub mod alphatex {
         /// Returns the source unchanged if the file has no parseable tuning
         /// header (nothing to transpose against).
         pub fn transpose_to(&self, target: &Tuning, max_fret: u8) -> ParsedTab {
+            self.transpose_to_with_report(target, max_fret).0
+        }
+
+        /// Same as [`Self::transpose_to`] but also returns the list of notes
+        /// that couldn't be reached on the target tuning. The CLI's `play
+        /// --tuning <other>` uses the report to surface a pre-flight summary
+        /// so the user knows what will be missing before the cursor starts.
+        /// Each entry is `(column_index, note_name)` — column index is the
+        /// 0-based position in the source tab, note name is the pitch we
+        /// failed to place (e.g. `"E6"`).
+        pub fn transpose_to_with_report(
+            &self,
+            target: &Tuning,
+            max_fret: u8,
+        ) -> (ParsedTab, Vec<DroppedNote>) {
             let Some(source) = self.tuning() else {
-                return self.clone();
+                return (self.clone(), Vec::new());
             };
 
+            let mut dropped: Vec<DroppedNote> = Vec::new();
             let new_columns: Vec<TabColumn> = self
                 .columns
                 .iter()
-                .map(|col| {
+                .enumerate()
+                .map(|(col_idx, col)| {
                     let mut new_hits = Vec::with_capacity(col.hits.len());
                     for (string, fret) in &col.hits {
                         let source_idx = (*string as usize).saturating_sub(1);
@@ -120,11 +137,24 @@ pub mod alphatex {
                         };
                         let abs_midi = source_string.open.0 as i32 + *fret as i32;
                         if !(0..=127).contains(&abs_midi) {
+                            // Out of MIDI range entirely — report as a drop
+                            // with a synthetic name so the user at least sees
+                            // *something* was unreachable. Realistically this
+                            // branch is unreachable for any musical input.
+                            dropped.push(DroppedNote {
+                                column_index: col_idx,
+                                note: format!("midi-{abs_midi}"),
+                            });
                             continue;
                         }
                         let abs_freq = MidiNote(abs_midi as u8).to_frequency();
                         if let Some(m) = target.match_to_fret(abs_freq, max_fret) {
                             new_hits.push(((m.string_idx + 1) as u8, m.fret));
+                        } else {
+                            dropped.push(DroppedNote {
+                                column_index: col_idx,
+                                note: MidiNote(abs_midi as u8).name(),
+                            });
                         }
                     }
                     TabColumn {
@@ -134,18 +164,32 @@ pub mod alphatex {
                 })
                 .collect();
 
-            ParsedTab {
-                tempo: self.tempo,
-                title: self.title.clone(),
-                // Preserve the original subtitle. The header line in `twanga play`
-                // also surfaces the transposition explicitly, so the user always
-                // sees both "what was recorded against" and "what's being played
-                // now."
-                subtitle: self.subtitle.clone(),
-                tuning_names: target.strings.iter().map(|s| s.open.name()).collect(),
-                columns: new_columns,
-            }
+            (
+                ParsedTab {
+                    tempo: self.tempo,
+                    title: self.title.clone(),
+                    // Preserve the original subtitle. The header line in `twanga play`
+                    // also surfaces the transposition explicitly, so the user always
+                    // sees both "what was recorded against" and "what's being played
+                    // now."
+                    subtitle: self.subtitle.clone(),
+                    tuning_names: target.strings.iter().map(|s| s.open.name()).collect(),
+                    columns: new_columns,
+                },
+                dropped,
+            )
         }
+    }
+
+    /// A note from the source tab that couldn't be placed on the target
+    /// tuning during transposition. Returned by
+    /// [`ParsedTab::transpose_to_with_report`].
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub struct DroppedNote {
+        /// 0-based column index in the source tab.
+        pub column_index: usize,
+        /// Note name we failed to place (e.g. `"E6"`).
+        pub note: String,
     }
 
     #[derive(Debug)]
@@ -838,6 +882,33 @@ pub mod alphatex {
             let transposed = parsed.transpose_to(&banjo, 20);
             // After transposition, the tuning header reflects the target.
             assert_eq!(transposed.tuning_names, vec!["D4", "B3", "G3", "D3", "G4"],);
+        }
+
+        #[test]
+        fn transpose_to_with_report_returns_empty_drops_when_all_notes_fit() {
+            let banjo = Tuning::standard_banjo();
+            let input = "\\tempo 120\n\\tuning A4 E4 C4 G4\n.\n:8 0.3 |\n";
+            let parsed = parse(input).unwrap();
+            let (transposed, dropped) = parsed.transpose_to_with_report(&banjo, 20);
+            assert!(dropped.is_empty(), "expected no drops, got {dropped:?}");
+            assert!(!transposed.columns[0].hits.is_empty());
+        }
+
+        #[test]
+        fn transpose_to_with_report_reports_unreachable_pitches() {
+            // E2 is below the uke's playable range (lowest open is C4 = MIDI
+            // 60; E2 = MIDI 40, four octaves down). Transposing a guitar tab
+            // that hits the low-E string open should report a drop.
+            let uke = uke();
+            // Standard-guitar low-E (string 6) played open: `0.6` at 1/8.
+            let input = "\\tempo 120\n\\tuning E4 B3 G3 D3 A2 E2\n.\n:8 0.6 |\n";
+            let parsed = parse(input).unwrap();
+            let (transposed, dropped) = parsed.transpose_to_with_report(&uke, 20);
+            assert_eq!(dropped.len(), 1, "expected one drop, got {dropped:?}");
+            assert_eq!(dropped[0].column_index, 0);
+            assert_eq!(dropped[0].note, "E2");
+            // Dropped notes don't appear in the transposed output.
+            assert!(transposed.columns[0].hits.is_empty());
         }
 
         #[test]

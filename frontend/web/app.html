@@ -2323,6 +2323,7 @@
             recordingStartTime: 0,
             msPerColumn: 0,
             committedColumns: 0,
+            droppedCount: 0,        // pitches that couldn't reach any fret within MAX_FRET
             tickHandle: null,
             chromaticTuner: null,   // WebTuner in chromatic mode, fed by mic
             presetEntry: null,      // PresetEntry JSON of the active tuning (cached for match calls)
@@ -2697,6 +2698,7 @@
             recState.score = recBuildScoreModel();
             recState.currentMarks = recState.baseLabels.map(() => null);
             recState.committedColumns = 0;
+            recState.droppedCount = 0;
             recState.rendererController?.setScore(recState.score);
             recState.rendererController?.setPlayhead(0);
 
@@ -2725,6 +2727,12 @@
                                 if (m.string_idx < recState.currentMarks.length) {
                                     recState.currentMarks[m.string_idx] = m.fret;
                                 }
+                            } else {
+                                // Detected pitch couldn't be placed on any
+                                // string within MAX_FRET — same as the CLI's
+                                // "dropped" counter. Aggregate, not per-event;
+                                // the hint surfaces it as "✗ N dropped".
+                                recState.droppedCount += 1;
                             }
                         }
                     },
@@ -2772,15 +2780,26 @@
 
         /// Refresh the "recording — M:SS / N cols" hint. Driven by `recTick`
         /// at the column-tick rate; updates feel real-time at 1/8 120 BPM
-        /// (4 Hz), still readable at 1/4 (2 Hz).
+        /// (4 Hz), still readable at 1/4 (2 Hz). When notes have been
+        /// dropped (detected pitch couldn't fit on the active tuning +
+        /// capo within `MAX_FRET`), an "✗ N dropped" suffix appears.
         function recUpdateDurationHint() {
             const elapsedMs = performance.now() - recState.recordingStartTime;
             const elapsedSecs = Math.max(0, Math.floor(elapsedMs / 1000));
             const m = Math.floor(elapsedSecs / 60);
             const s = String(elapsedSecs % 60).padStart(2, '0');
+            const droppedSuffix = recState.droppedCount > 0
+                ? `  ✗ ${recState.droppedCount} dropped`
+                : '';
             el('recorder-hint').textContent =
                 `recording — ${m}:${s} / ${recState.committedColumns} cols  ` +
-                `(${recState.bpm} BPM, 1/${recState.resolutionDenom})`;
+                `(${recState.bpm} BPM, 1/${recState.resolutionDenom})${droppedSuffix}`;
+            // Mirror the dropped count in the hint's `title` so the tooltip
+            // explains what "dropped" means without needing a separate
+            // affordance.
+            el('recorder-hint').title = recState.droppedCount > 0
+                ? `${recState.droppedCount} detected pitches couldn't reach any fret 0–${MAX_FRET} on the active tuning + capo`
+                : '';
         }
 
         function recStopRecording(hintText) {
@@ -2813,9 +2832,12 @@
             el('recorder-save-btn').disabled = recState.committedColumns === 0;
             el('recorder-clear-btn').disabled = false;
             el('recorder-settings').classList.remove('is-recording');
+            const droppedSuffix = recState.droppedCount > 0
+                ? `  ✗ ${recState.droppedCount} dropped`
+                : '';
             el('recorder-hint').textContent =
                 (hintText ?? 'stopped') +
-                ` — ${m}:${s} / ${recState.committedColumns} cols captured`;
+                ` — ${m}:${s} / ${recState.committedColumns} cols captured${droppedSuffix}`;
         }
 
         function recClear() {
@@ -2823,6 +2845,7 @@
             recState.score = recBuildScoreModel();
             recState.currentMarks = recState.baseLabels.map(() => null);
             recState.committedColumns = 0;
+            recState.droppedCount = 0;
             recState.rendererController?.setScore(recState.score);
             recState.rendererController?.setPlayhead(0);
             el('recorder-save-btn').disabled = true;

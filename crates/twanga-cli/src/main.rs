@@ -872,6 +872,11 @@ fn run_recorder(
     let stdin_rx = twanga_tui::spawn_line_reader();
     let mut total_samples: u64 = 0;
     let mut total_columns: u64 = 0;
+    // Aggregate count of detected pitches that no string + fret combo could
+    // reach on the active (post-capo) tuning. Per the parity audit's
+    // "couldn't fit on fretboard" item — silent drops were the previous
+    // behaviour. Per-frame logging is too noisy; aggregate is enough.
+    let mut total_dropped: u64 = 0;
 
     loop {
         if twanga_tui::is_shutdown_requested() {
@@ -895,8 +900,9 @@ fn run_recorder(
             total_samples += n as u64;
             tuner.feed(&buf[..n]);
             for r in tuner.take_readings() {
-                if let Some(m) = effective.match_to_fret(r.detected, MAX_FRET) {
-                    recorder.record_hit(m.string_idx, m.fret);
+                match effective.match_to_fret(r.detected, MAX_FRET) {
+                    Some(m) => recorder.record_hit(m.string_idx, m.fret),
+                    None => total_dropped += 1,
                 }
             }
             for event in recorder.advance(n) {
@@ -915,7 +921,13 @@ fn run_recorder(
                 let elapsed_secs = total_samples / sample_rate.max(1) as u64;
                 let elapsed = format_mmss(elapsed_secs);
                 let mut rows_with_status: Vec<String> = rows.clone();
-                rows_with_status.push(format!("  {elapsed} | {total_columns} cols"));
+                let mut status = format!("  {elapsed} | {total_columns} cols");
+                if total_dropped > 0 {
+                    status.push_str(&format!(
+                        " | {total_dropped} dropped (out of fretboard range)"
+                    ));
+                }
+                rows_with_status.push(status);
                 let d = display.get_or_insert_with(|| MultiLineDisplay::new(n_rows + 1));
                 d.render(&rows_with_status)?;
                 if is_block_complete {
@@ -1042,17 +1054,20 @@ fn run_playback(
     // Transpose if --tuning was provided (either explicitly via flag or via
     // the prompt). The transposed tab carries the target tuning's names in
     // its header, so downstream code (wait mode, display) sees one consistent
-    // tuning throughout.
-    let tab = if let Some(name) = tuning_override.as_deref() {
+    // tuning throughout. We use the *with-report* variant so out-of-range
+    // notes get surfaced to the user up front rather than silently
+    // disappearing — they get a "Skipped notes" preamble before the cursor
+    // starts and can hit `q` if it's worse than they expected.
+    let (tab, dropped) = if let Some(name) = tuning_override.as_deref() {
         let target = lookup_tuning(name).ok_or_else(|| {
             anyhow!(
                 "unknown tuning preset '{name}'. options: {}",
                 known_slugs().join(", ")
             )
         })?;
-        parsed.transpose_to(&target, MAX_FRET)
+        parsed.transpose_to_with_report(&target, MAX_FRET)
     } else {
-        parsed
+        (parsed, Vec::new())
     };
 
     let (loop_start, loop_end, repeat) = parse_loop_spec(loop_spec.as_deref(), tab.columns.len())?;
@@ -1157,6 +1172,28 @@ fn run_playback(
         }
     );
     eprintln!();
+    if !dropped.is_empty() {
+        eprintln!(
+            "Skipped:    {} note{} couldn't fit on the target tuning within fret 0–{MAX_FRET}",
+            dropped.len(),
+            if dropped.len() == 1 { "" } else { "s" },
+        );
+        // Show up to 8 unique note names so the user has a sense of *which*
+        // notes are missing without flooding the terminal on a tab where the
+        // transposition is largely a mismatch. Sort + dedup keeps the order
+        // stable and the output short.
+        let mut unique: Vec<String> = dropped.iter().map(|d| d.note.clone()).collect();
+        unique.sort();
+        unique.dedup();
+        const PREVIEW: usize = 8;
+        let shown: Vec<&str> = unique.iter().take(PREVIEW).map(String::as_str).collect();
+        let extra = unique.len().saturating_sub(PREVIEW);
+        if extra > 0 {
+            eprintln!("            {} (+{extra} more)", shown.join(", "));
+        } else {
+            eprintln!("            {}", shown.join(", "));
+        }
+    }
     eprintln!("─────────────────────────────────────────────────");
     eprintln!("  Controls: type 'q' + Enter to stop  (or Ctrl-C)");
     eprintln!("─────────────────────────────────────────────────");
