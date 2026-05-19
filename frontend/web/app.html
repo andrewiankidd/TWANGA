@@ -784,6 +784,21 @@
             font-size: 0.9rem;
             text-align: center;
         }
+        /* Hide the browser-native number-input spinner arrows everywhere.
+           The BPM / block-width / pre-roll inputs that need increment UX
+           have explicit +/− buttons next to them; the native chevrons
+           are redundant + visually noisy beside our own steppers, and
+           keyboard arrow-keys still work for the standalone pre-roll
+           inputs without them. */
+        input[type="number"]::-webkit-outer-spin-button,
+        input[type="number"]::-webkit-inner-spin-button {
+            -webkit-appearance: none;
+            margin: 0;
+        }
+        input[type="number"] {
+            -moz-appearance: textfield;
+            appearance: textfield;
+        }
         .rec-setting select {
             background: var(--background);
             border: 1px solid var(--border);
