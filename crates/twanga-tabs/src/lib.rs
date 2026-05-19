@@ -21,7 +21,9 @@ pub mod alphatex {
     //! `:N` durations, `fret.string` notes, `(...)` chords, `r` rests, `|` bars).
 
     use std::io::{self, Write};
-    use twanga_core::{MidiNote, TunedString, Tuning};
+    use twanga_core::{
+        Capo, MidiNote, TunedString, Tuning, join_capo_into_subtitle, split_capo_from_subtitle,
+    };
 
     /// Parsed alphaTex file.
     #[derive(Debug, Clone)]
@@ -47,6 +49,26 @@ pub mod alphatex {
     }
 
     impl ParsedTab {
+        /// Extract the recorded capo (if any) from the subtitle field. TWANGA's
+        /// recorder embeds `; capo=<spec>` after the human-readable tuning name
+        /// since alphaTex has no native `\capo` directive. Returns `None` if
+        /// the subtitle is missing, lacks the token, or carries a spec that
+        /// doesn't match the tuning's string count.
+        pub fn capo(&self) -> Option<Capo> {
+            let st = self.subtitle.as_deref()?;
+            let (_, raw) = split_capo_from_subtitle(st);
+            let spec = raw?;
+            Capo::parse(&spec, self.tuning_names.len()).ok()
+        }
+
+        /// The subtitle string with any `; capo=...` annotation stripped.
+        /// Useful when you want to render just the human-readable name.
+        pub fn subtitle_display(&self) -> Option<String> {
+            self.subtitle
+                .as_deref()
+                .map(|s| split_capo_from_subtitle(s).0)
+        }
+
         /// Build a `Tuning` from the file's `\tuning` header. Returns `None`
         /// if the header is missing or contains note names we can't parse.
         pub fn tuning(&self) -> Option<Tuning> {
@@ -300,18 +322,20 @@ pub mod alphatex {
         pub fn new(
             mut writer: W,
             tuning: &Tuning,
+            capo: &Capo,
             bpm: u32,
             resolution_denom: u32,
         ) -> io::Result<Self> {
             // Subtitle gives the file a human-readable label for the tuning it
             // was recorded against, so anything that opens it later (alphaTab,
             // a text editor, our own play command) can show "Standard Ukulele"
-            // without re-deriving it from the `\tuning` notes.
-            writeln!(
-                writer,
-                "\\subtitle \"{}\"",
-                tuning.name.replace('"', "\\\"")
-            )?;
+            // without re-deriving it from the `\tuning` notes. When a capo is
+            // present, we co-opt the same field with a `; capo=<spec>` suffix
+            // (since alphaTex has no native capo directive) — alphaTab still
+            // renders the whole string as a subtitle, our parser pulls the
+            // capo back out via `split_capo_from_subtitle`.
+            let subtitle = join_capo_into_subtitle(&tuning.name, capo);
+            writeln!(writer, "\\subtitle \"{}\"", subtitle.replace('"', "\\\""))?;
             writeln!(writer, "\\tempo {bpm}")?;
             let tuning_str: Vec<String> = tuning.strings.iter().map(|s| s.open.name()).collect();
             writeln!(writer, "\\tuning {}", tuning_str.join(" "))?;
@@ -395,7 +419,9 @@ pub mod alphatex {
         {
             let mut buf = Vec::new();
             {
-                let mut w = AlphaTexWriter::new(&mut buf, &uke(), 120, 8).unwrap();
+                let mut w =
+                    AlphaTexWriter::new(&mut buf, &uke(), &Capo::none(uke().strings.len()), 120, 8)
+                        .unwrap();
                 f(&mut w).unwrap();
                 w.finalize().unwrap();
             }
@@ -484,13 +510,75 @@ pub mod alphatex {
         fn writer_emits_subtitle_from_tuning_name() {
             let mut buf = Vec::new();
             {
-                let mut w = AlphaTexWriter::new(&mut buf, &uke(), 120, 8).unwrap();
+                let mut w =
+                    AlphaTexWriter::new(&mut buf, &uke(), &Capo::none(uke().strings.len()), 120, 8)
+                        .unwrap();
                 w.finalize().unwrap();
             }
             let text = String::from_utf8(buf).unwrap();
             assert!(
                 text.contains("\\subtitle \"Standard Ukulele (Reentrant GCEA)\""),
                 "expected \\subtitle line in: {text}"
+            );
+        }
+
+        #[test]
+        fn writer_encodes_capo_into_subtitle_when_non_zero() {
+            let mut buf = Vec::new();
+            let uke_t = uke();
+            let capo = Capo::uniform(uke_t.strings.len(), 3);
+            {
+                let mut w = AlphaTexWriter::new(&mut buf, &uke_t, &capo, 120, 8).unwrap();
+                w.finalize().unwrap();
+            }
+            let text = String::from_utf8(buf).unwrap();
+            assert!(
+                text.contains("\\subtitle \"Standard Ukulele (Reentrant GCEA); capo=3\""),
+                "expected capo-annotated subtitle in: {text}"
+            );
+            // `\tuning` line is still the BASE pitches — the whole point of
+            // the subtitle convention is that we don't bake the capo into the
+            // string pitches, so the file round-trips on a different capo.
+            assert!(
+                text.contains("\\tuning A4 E4 C4 G4"),
+                "tuning line was: {text}"
+            );
+        }
+
+        #[test]
+        fn parser_round_trips_capo_through_subtitle() {
+            // Partial capo: banjo body capo at fret 3, 5th-string drone left open.
+            let mut buf = Vec::new();
+            let banjo = Tuning::standard_banjo();
+            let capo = Capo {
+                offsets: vec![3, 3, 3, 3, 0],
+            };
+            {
+                let mut w = AlphaTexWriter::new(&mut buf, &banjo, &capo, 110, 8).unwrap();
+                w.finalize().unwrap();
+            }
+            let text = String::from_utf8(buf).unwrap();
+            let parsed = parse(&text).unwrap();
+            let recovered = parsed.capo().expect("parsed capo");
+            assert_eq!(recovered, capo);
+            // subtitle_display drops the machine annotation, leaving the
+            // human-readable name as it was before capo support.
+            assert_eq!(
+                parsed.subtitle_display().as_deref(),
+                Some("Standard 5-String Banjo (Open G)"),
+            );
+        }
+
+        #[test]
+        fn parser_returns_no_capo_for_pre_capo_files() {
+            // Older recordings (no capo support) had a plain subtitle without
+            // any `; capo=` token. Loading such a file must keep working.
+            let input = "\\subtitle \"Standard Ukulele\"\n\\tempo 120\n\\tuning A4 E4 C4 G4\n.\n";
+            let parsed = parse(input).unwrap();
+            assert!(parsed.capo().is_none());
+            assert_eq!(
+                parsed.subtitle_display().as_deref(),
+                Some("Standard Ukulele")
             );
         }
 
@@ -595,7 +683,9 @@ pub mod alphatex {
             let mut buf = Vec::new();
             let uke = uke();
             {
-                let mut w = AlphaTexWriter::new(&mut buf, &uke, 100, 8).unwrap();
+                let mut w =
+                    AlphaTexWriter::new(&mut buf, &uke, &Capo::none(uke.strings.len()), 100, 8)
+                        .unwrap();
                 w.write_column(&[Some(0), None, None, None]).unwrap(); // A open
                 w.write_column(&[None, None, Some(3), None]).unwrap(); // C fret 3
                 w.write_column(&[None; 4]).unwrap(); // rest

@@ -668,11 +668,13 @@ const MAX_FRET: u8 = 20;
 /// Folder (relative to CWD) where `twanga record` writes its output files.
 const RECORDINGS_DIR: &str = "recordings";
 
-/// Open a timestamped alphaTex recording file for `twanga record`. Creates the
-/// `recordings/` directory if it doesn't exist, writes the alphaTex header,
-/// and returns the path + a streaming writer ready for per-column writes.
+/// Open a timestamped alphaTex recording file for `twanga record`. Writes the
+/// header against the BASE tuning + capo (the writer encodes the capo into
+/// the `\subtitle` line so the file round-trips through other tools), and
+/// returns the path + a streaming writer ready for per-column writes.
 fn open_recording_file(
-    tuning: &Tuning,
+    base_tuning: &Tuning,
+    capo: &Capo,
     bpm: u32,
     resolution_denom: u32,
 ) -> Result<(PathBuf, AlphaTexWriter<BufWriter<File>>)> {
@@ -686,8 +688,14 @@ fn open_recording_file(
     let path = dir.join(format!("recording-{secs}.alphatex"));
     let file =
         File::create(&path).with_context(|| format!("failed to create '{}'", path.display()))?;
-    let writer = AlphaTexWriter::new(BufWriter::new(file), tuning, bpm, resolution_denom)
-        .with_context(|| format!("failed to write alphaTex header to '{}'", path.display()))?;
+    let writer = AlphaTexWriter::new(
+        BufWriter::new(file),
+        base_tuning,
+        capo,
+        bpm,
+        resolution_denom,
+    )
+    .with_context(|| format!("failed to write alphaTex header to '{}'", path.display()))?;
     Ok((path, writer))
 }
 
@@ -703,24 +711,42 @@ fn finalize_recording(
     Ok(())
 }
 
-fn run_recorder(tuning: Tuning, bpm: u32, resolution_denom: u32, block_width: usize) -> Result<()> {
+fn run_recorder(
+    base_tuning: Tuning,
+    capo: Capo,
+    bpm: u32,
+    resolution_denom: u32,
+    block_width: usize,
+) -> Result<()> {
     let mut stream = InputStream::open()?;
     let sample_rate = stream.sample_rate;
     let ms_per_col = 240_000 / (bpm * resolution_denom);
 
-    let tuning_name = tuning.name.clone();
-    let string_count = tuning.strings.len();
+    // Effective tuning = base + capo. Used for everything pitch-related at
+    // runtime (display, fret matching). The alphaTex header still gets the
+    // BASE tuning + capo via `open_recording_file`, so the file round-trips
+    // through alphaTab and through `twanga play --capo N`.
+    let effective = capo.apply(&base_tuning).map_err(|e| anyhow!("{e}"))?;
+    let tuning_name = effective.name.clone();
+    let string_count = effective.strings.len();
 
-    let mut recorder = TabRecorder::new(&tuning, sample_rate, ms_per_col, block_width);
+    let mut recorder = TabRecorder::new(&effective, sample_rate, ms_per_col, block_width);
     // Chromatic mode: gives us raw detected frequencies (silence-gated) without
     // imposing the tuner's ±7 semitone string-distance gate, which would clip
     // high-fret recording. We do our own fret-aware string match below.
     let mut tuner = Tuner::new(TunerMode::Chromatic, sample_rate);
 
     let (recording_path, mut recording_writer) =
-        open_recording_file(&tuning, bpm, resolution_denom)?;
+        open_recording_file(&base_tuning, &capo, bpm, resolution_denom)?;
 
     eprintln!("Tuning:     {tuning_name} ({string_count} strings)");
+    if !capo.is_none() {
+        if let Some(n) = capo.is_uniform() {
+            eprintln!("Capo:       {n} (uniform)");
+        } else {
+            eprintln!("Capo:       [{}] (partial)", capo.serialize());
+        }
+    }
     eprintln!("Device:     {}", stream.device_name);
     eprintln!("Audio:      {sample_rate} Hz");
     eprintln!("Tempo:      {bpm} BPM, 1/{resolution_denom} notes ({ms_per_col} ms/col)",);
@@ -761,7 +787,7 @@ fn run_recorder(tuning: Tuning, bpm: u32, resolution_denom: u32, block_width: us
         if n > 0 {
             tuner.feed(&buf[..n]);
             for r in tuner.take_readings() {
-                if let Some(m) = tuning.match_to_fret(r.detected, MAX_FRET) {
+                if let Some(m) = effective.match_to_fret(r.detected, MAX_FRET) {
                     recorder.record_hit(m.string_idx, m.fret);
                 }
             }
@@ -818,11 +844,10 @@ fn main() -> Result<()> {
             twanga_tui::motd::print_banner()?;
             let t = resolve_tuning(tuning)?;
             let c = resolve_capo(capo, &t)?;
-            let effective = c.apply(&t).map_err(|e| anyhow!("{e}"))?;
             let bpm = resolve_bpm(bpm)?;
             let denom = resolve_resolution(resolution)?;
             let bw = resolve_block_width(block_width)?;
-            run_recorder(effective, bpm, denom, bw)?;
+            run_recorder(t, c, bpm, denom, bw)?;
         }
         Command::Play {
             path,
@@ -913,29 +938,38 @@ fn run_playback(
     let ms_per_col = 240_000 / (bpm * resolution_denom);
     let cols_per_beat = (resolution_denom as usize / 4).max(1);
 
-    // Effective tuning for wait-mode pitch comparison: tab's tuning + user's
-    // physical capo. Frets in the tab are interpreted relative to this capo
-    // — fret 0 means "the open string above the capo." Only resolved when we
-    // actually need it (wait mode); transposed display is unaffected.
+    // Capo resolution precedence: `--capo` on the command line wins, otherwise
+    // fall back to whatever the file embedded in `\subtitle`. This means a
+    // recording made with a capo round-trips cleanly without the user having
+    // to remember and re-pass the same `--capo` value on playback — but they
+    // can still override (e.g. take the capo off, or shift its position).
+    let (effective_capo, capo_origin) = if let Some(spec) = capo_spec.as_deref() {
+        let base = tab
+            .tuning()
+            .ok_or_else(|| anyhow!("'\\tuning' header is missing or unparseable"))?;
+        let c = Capo::parse(spec, base.strings.len()).map_err(|e| anyhow!("{e}"))?;
+        (Some(c), "flag")
+    } else if let Some(c) = tab.capo() {
+        (Some(c), "file")
+    } else {
+        (None, "")
+    };
+
+    // Effective tuning for wait-mode pitch comparison: tab's tuning + the
+    // resolved capo. Frets in the tab are interpreted relative to this capo —
+    // fret 0 means "the open string above the capo."
     let tuning_for_wait: Option<Tuning> = if wait {
         let base = tab
             .tuning()
             .ok_or_else(|| anyhow!("'\\tuning' header is missing or unparseable"))?;
-        let capo = resolve_capo(capo_spec.clone(), &base)?;
-        Some(capo.apply(&base).map_err(|e| anyhow!("{e}"))?)
+        let c = effective_capo
+            .clone()
+            .unwrap_or_else(|| Capo::none(base.strings.len()));
+        Some(c.apply(&base).map_err(|e| anyhow!("{e}"))?)
     } else {
         None
     };
-    // Effective capo for the header line, separately tracked because non-wait
-    // playback can still want a header note like "Capo: 3".
-    let header_capo: Option<Capo> = if let Some(spec) = capo_spec.as_deref() {
-        let base = tab
-            .tuning()
-            .ok_or_else(|| anyhow!("'\\tuning' header is missing or unparseable"))?;
-        Some(Capo::parse(spec, base.strings.len()).map_err(|e| anyhow!("{e}"))?)
-    } else {
-        None
-    };
+    let header_capo = effective_capo;
 
     let mut output = if metronome {
         Some(OutputStream::open()?)
@@ -958,7 +992,9 @@ fn run_playback(
     let name_width = tab.tuning_names.iter().map(|n| n.len()).max().unwrap_or(0);
 
     eprintln!("Playback:   {}", path.display());
-    if let Some(subtitle) = tab.subtitle.as_deref() {
+    if let Some(subtitle) = tab.subtitle_display() {
+        // Strips any `; capo=...` machine annotation so the header line stays
+        // human-readable; the resolved capo gets its own "Capo:" line below.
         eprintln!("Subtitle:   {subtitle}");
     }
     if let Some(name) = tuning_override.as_deref() {
@@ -969,11 +1005,15 @@ fn run_playback(
     if let Some(c) = &header_capo
         && !c.is_none()
     {
-        if let Some(n) = c.is_uniform() {
-            eprintln!("Capo:       {n} (uniform)");
+        let suffix = if capo_origin == "file" {
+            " (from file)"
         } else {
-            let pretty: Vec<String> = c.offsets.iter().map(|n| n.to_string()).collect();
-            eprintln!("Capo:       [{}] (partial)", pretty.join(","));
+            ""
+        };
+        if let Some(n) = c.is_uniform() {
+            eprintln!("Capo:       {n} (uniform){suffix}");
+        } else {
+            eprintln!("Capo:       [{}] (partial){suffix}", c.serialize());
         }
     }
     eprintln!("Tempo:      {bpm} BPM, 1/{resolution_denom} notes ({ms_per_col} ms/col)");

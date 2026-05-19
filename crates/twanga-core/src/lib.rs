@@ -293,6 +293,41 @@ pub struct FretMatch {
     pub cents_off: f32,
 }
 
+/// Convention for embedding a capo in an alphaTex `\subtitle` field. The
+/// alphaTex format has no native `\capo` directive, so we co-opt the subtitle
+/// (which alphaTab renders as plain text) by appending `; capo=<spec>` to the
+/// human-readable tuning name. Readers that don't know about the convention
+/// just see it as part of the subtitle; we strip and parse it on load.
+pub const CAPO_SUBTITLE_TOKEN: &str = "; capo=";
+
+/// Split an alphaTex subtitle into `(human_prefix, raw_capo_spec)`. The capo
+/// spec is the substring after the last occurrence of [`CAPO_SUBTITLE_TOKEN`];
+/// returns `(subtitle.to_string(), None)` if the token isn't present. Caller
+/// is responsible for feeding the raw spec to [`Capo::parse`] with the right
+/// string count.
+pub fn split_capo_from_subtitle(subtitle: &str) -> (String, Option<String>) {
+    if let Some(idx) = subtitle.rfind(CAPO_SUBTITLE_TOKEN) {
+        let prefix = subtitle[..idx].trim_end().to_string();
+        let suffix = subtitle[idx + CAPO_SUBTITLE_TOKEN.len()..]
+            .trim()
+            .to_string();
+        (prefix, Some(suffix))
+    } else {
+        (subtitle.to_string(), None)
+    }
+}
+
+/// Format a `(tuning_name, capo)` pair into the subtitle convention. A no-op
+/// capo gives back just the tuning name (no decoration), keeping pre-capo
+/// files byte-identical with the new writer.
+pub fn join_capo_into_subtitle(tuning_name: &str, capo: &Capo) -> String {
+    if capo.is_none() {
+        tuning_name.to_string()
+    } else {
+        format!("{tuning_name}{CAPO_SUBTITLE_TOKEN}{}", capo.serialize())
+    }
+}
+
 /// Per-string semitone offset applied on top of a `Tuning`. Modelled per-string
 /// rather than as a single scalar so partial capos (drop-D capo on guitar) and
 /// the banjo 5th-string spike work through the same code path as a plain
@@ -381,6 +416,22 @@ impl Capo {
             format!("{} (partial capo)", tuning.name)
         };
         Ok(Tuning { name, strings })
+    }
+
+    /// Compact spec inverse of [`Self::parse`]. `"3"` for a uniform capo,
+    /// `"0,2,2,2,2,2"` for per-string. Empty string for a no-op capo.
+    pub fn serialize(&self) -> String {
+        if self.is_none() {
+            return String::new();
+        }
+        if let Some(n) = self.is_uniform() {
+            return n.to_string();
+        }
+        self.offsets
+            .iter()
+            .map(|n| n.to_string())
+            .collect::<Vec<_>>()
+            .join(",")
     }
 
     /// Parse a CLI-supplied capo spec for a tuning with `string_count` strings.
@@ -777,6 +828,68 @@ mod tests {
         let err = Capo::parse("0,2,2", 6).expect_err("should fail");
         assert!(err.contains("3 values"), "unexpected error: {err}");
         assert!(err.contains("6 strings"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn capo_serialize_round_trips_through_parse() {
+        let uniform = Capo::uniform(6, 3);
+        assert_eq!(uniform.serialize(), "3");
+        assert_eq!(Capo::parse(&uniform.serialize(), 6).unwrap(), uniform);
+
+        let partial = Capo {
+            offsets: vec![0, 2, 2, 2, 2, 2],
+        };
+        assert_eq!(partial.serialize(), "0,2,2,2,2,2");
+        assert_eq!(Capo::parse(&partial.serialize(), 6).unwrap(), partial);
+
+        let none = Capo::none(4);
+        assert_eq!(none.serialize(), "");
+        // Round-tripping the empty string back through parse gives back a
+        // no-op capo of the requested length.
+        assert!(Capo::parse("", 4).unwrap().is_none());
+    }
+
+    #[test]
+    fn subtitle_capo_join_split_round_trips() {
+        let name = "Standard Banjo (Open G)";
+
+        // No-op capo: subtitle is just the tuning name, byte-identical with
+        // the pre-capo writer output.
+        let no_capo = Capo::none(5);
+        let st = join_capo_into_subtitle(name, &no_capo);
+        assert_eq!(st, name);
+        let (prefix, capo_spec) = split_capo_from_subtitle(&st);
+        assert_eq!(prefix, name);
+        assert!(capo_spec.is_none());
+
+        // Uniform capo appended after the token.
+        let capo3 = Capo::uniform(5, 3);
+        let st = join_capo_into_subtitle(name, &capo3);
+        assert_eq!(st, "Standard Banjo (Open G); capo=3");
+        let (prefix, capo_spec) = split_capo_from_subtitle(&st);
+        assert_eq!(prefix, name);
+        assert_eq!(capo_spec.as_deref(), Some("3"));
+        assert_eq!(Capo::parse(&capo_spec.unwrap(), 5).unwrap(), capo3);
+
+        // Partial capo (banjo body capo with 5th-string drone left open).
+        let partial = Capo {
+            offsets: vec![3, 3, 3, 3, 0],
+        };
+        let st = join_capo_into_subtitle(name, &partial);
+        assert_eq!(st, "Standard Banjo (Open G); capo=3,3,3,3,0");
+        let (prefix, capo_spec) = split_capo_from_subtitle(&st);
+        assert_eq!(prefix, name);
+        assert_eq!(Capo::parse(&capo_spec.unwrap(), 5).unwrap(), partial);
+    }
+
+    #[test]
+    fn split_capo_uses_last_occurrence_so_tuning_name_can_contain_semicolons() {
+        // Vanishingly unlikely a user would put `; capo=` in their tuning
+        // name, but `rfind` guarantees we still split correctly if they do.
+        let st = "Weird; capo=test name; capo=5";
+        let (prefix, capo_spec) = split_capo_from_subtitle(st);
+        assert_eq!(prefix, "Weird; capo=test name");
+        assert_eq!(capo_spec.as_deref(), Some("5"));
     }
 
     #[test]
