@@ -111,6 +111,12 @@ enum Command {
         /// no value to be prompted.
         #[arg(long, num_args = 0..=1, default_missing_value = "")]
         capo: Option<String>,
+        /// Disable the metronome click (default: on). Same flag shape as the
+        /// playback equivalent — the recorder's metronome ticks on each beat
+        /// boundary derived from the current resolution (e.g. 1/8 → every
+        /// other column). Useful for keeping a steady tempo while playing.
+        #[arg(long)]
+        no_metronome: bool,
         /// Human-readable title for the recording — written to `\title` in the
         /// alphaTex header AND used to derive the filename
         /// (`<slug>-<unix-secs>.alphatex` if provided, `recording-<unix-secs>`
@@ -809,17 +815,32 @@ fn finalize_recording(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn run_recorder(
     base_tuning: Tuning,
     capo: Capo,
     bpm: u32,
     resolution_denom: u32,
     block_width: usize,
+    metronome: bool,
     title: Option<String>,
 ) -> Result<()> {
     let mut stream = InputStream::open()?;
     let sample_rate = stream.sample_rate;
     let ms_per_col = 240_000 / (bpm * resolution_denom);
+    // Same beat-boundary derivation `run_playback` uses: at 1/8 resolution,
+    // every other column is a beat; at 1/16, every fourth; etc.
+    let cols_per_beat = (resolution_denom as usize / 4).max(1);
+
+    // Open an output stream only if the user wants a metronome — saves a
+    // device acquisition + a pre-computed click buffer when the user is
+    // recording to a backing track or doesn't want the click in the mic.
+    let mut output = if metronome {
+        Some(OutputStream::open()?)
+    } else {
+        None
+    };
+    let click = output.as_ref().map(|o| metronome_click(o.sample_rate));
 
     // Effective tuning = base + capo. Used for everything pitch-related at
     // runtime (display, fret matching). The alphaTex header still gets the
@@ -856,6 +877,7 @@ fn run_recorder(
         "Block:      {block_width} cols ({} ms wide)",
         block_width as u32 * ms_per_col,
     );
+    eprintln!("Metronome:  {}", if metronome { "on" } else { "off" });
     eprintln!("Saving to:  {}", recording_path.display());
     eprintln!();
     eprintln!("─────────────────────────────────────────────────");
@@ -915,6 +937,16 @@ fn run_recorder(
                 recording_writer.write_column(column_marks)?;
                 total_columns += 1;
 
+                // Metronome click on each beat boundary. `total_columns` is
+                // 1-based after the increment above, so col 1 (the first
+                // committed column) is treated as the downbeat — same
+                // convention `run_playback` uses.
+                if (total_columns - 1) % cols_per_beat as u64 == 0
+                    && let (Some(out), Some(click)) = (output.as_mut(), click.as_ref())
+                {
+                    out.write(click);
+                }
+
                 // Display: refresh in place for ColumnTick, finalize for BlockComplete.
                 // We render n_rows tab strings + 1 status line below, so the
                 // multi-line display tracks n_rows + 1 rows.
@@ -970,6 +1002,7 @@ fn main() -> Result<()> {
             resolution,
             block_width,
             capo,
+            no_metronome,
             title,
         } => {
             let t = resolve_tuning(tuning)?;
@@ -978,7 +1011,7 @@ fn main() -> Result<()> {
             let denom = resolve_resolution(resolution)?;
             let bw = resolve_block_width(block_width)?;
             let title = resolve_title(title)?;
-            run_recorder(t, c, bpm, denom, bw, title)?;
+            run_recorder(t, c, bpm, denom, bw, !no_metronome, title)?;
         }
         Command::Play {
             path,

@@ -712,6 +712,20 @@
             margin-bottom: 1rem;
             min-height: 200px;
         }
+        /* Metronome toggle sits beside the View dropdown — same visual
+           weight, mid-recording toggleable (the click is generated per
+           beat tick, so changes take effect on the next beat). */
+        .rec-metronome-label {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.4rem;
+            cursor: pointer;
+            user-select: none;
+        }
+        .rec-metronome-label input {
+            accent-color: var(--highlight);
+            cursor: pointer;
+        }
 
         /* Recorder-specific settings (BPM / resolution / block-width). Each
            setting is its own little card with a label + control(s). Disabled
@@ -956,6 +970,10 @@
             <div class="renderer-controls">
                 <label class="renderer-label" for="recorder-renderer-select">View</label>
                 <select id="recorder-renderer-select" class="renderer-select"></select>
+                <label class="renderer-label rec-metronome-label">
+                    <input type="checkbox" id="recorder-metronome-toggle" checked>
+                    Metronome
+                </label>
             </div>
 
             <div class="renderer-host" id="recorder-renderer-host"></div>
@@ -2315,6 +2333,7 @@
             bpm: 120,
             resolutionDenom: 8,
             blockWidth: 32,
+            metronome: true,        // live toggleable mid-recording
 
             // Recording-time ephemeral
             isRecording: false,
@@ -2376,6 +2395,7 @@
                 ? saved.resolutionDenom : 8;
             recState.blockWidth = Number.isInteger(saved.blockWidth) && saved.blockWidth >= 4 && saved.blockWidth <= 200
                 ? saved.blockWidth : 32;
+            recState.metronome = saved.metronome !== false; // default on (older saves have no field)
         }
 
         function recSaveToStorage() {
@@ -2388,6 +2408,7 @@
                     bpm: recState.bpm,
                     resolutionDenom: recState.resolutionDenom,
                     blockWidth: recState.blockWidth,
+                    metronome: recState.metronome,
                 }));
             } catch (e) {
                 console.warn('recorder localStorage write failed', e);
@@ -2628,6 +2649,17 @@
                 resSelect.value = String(recState.resolutionDenom);
                 recSaveToStorage();
             });
+
+            // Metronome toggle — unlike the other settings, this one IS
+            // live-toggleable mid-recording. The click is generated per
+            // beat tick, so flipping the checkbox takes effect on the next
+            // beat boundary; no re-init of the audio context needed.
+            const metToggle = el('recorder-metronome-toggle');
+            metToggle.checked = recState.metronome;
+            metToggle.addEventListener('change', () => {
+                recState.metronome = metToggle.checked;
+                recSaveToStorage();
+            });
         }
 
         // ---- Score model construction --------------------------------------
@@ -2768,7 +2800,15 @@
             if (!recState.isRecording) return;
             const elapsed = performance.now() - recState.recordingStartTime;
             const expected = Math.floor(elapsed / recState.msPerColumn);
+            // Beat boundary detection matches the CLI: at 1/8 resolution
+            // every other column is a beat, at 1/16 every fourth, etc. We
+            // fire the click *before* incrementing committedColumns so the
+            // very first column lands as the downbeat.
+            const colsPerBeat = Math.max(1, Math.floor(recState.resolutionDenom / 4));
             while (recState.committedColumns < expected) {
+                if (recState.metronome && recState.committedColumns % colsPerBeat === 0) {
+                    recPlayMetronomeClick();
+                }
                 recState.score.columns.push([...recState.currentMarks]);
                 recState.currentMarks = recState.baseLabels.map(() => null);
                 recState.committedColumns += 1;
@@ -2776,6 +2816,31 @@
             recState.rendererController?.setScore(recState.score);
             recState.rendererController?.setPlayhead(recState.committedColumns);
             recUpdateDurationHint();
+        }
+
+        /// Synthesise a short 1000 Hz click decaying over ~50 ms, same
+        /// envelope the CLI's `metronome_click` produces. Reuses the live
+        /// `AudioContext` from the mic session — already running at the
+        /// right sample rate, no separate output device to open. Silent
+        /// no-op when the mic isn't live (which can't happen during
+        /// recording, but defensive).
+        function recPlayMetronomeClick() {
+            const ctx = micSession.ctx;
+            if (!ctx) return;
+            const now = ctx.currentTime;
+            // Web Audio's built-in oscillator + gain envelope is cheaper
+            // than buffering a synthesised sine ourselves, and the pulse
+            // doesn't need to be sample-accurate vs the mic input — the
+            // tick driver runs at JS-timer resolution anyway.
+            const osc = ctx.createOscillator();
+            osc.type = 'sine';
+            osc.frequency.value = 1000;
+            const gain = ctx.createGain();
+            gain.gain.setValueAtTime(0.3, now);
+            gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.05);
+            osc.connect(gain).connect(ctx.destination);
+            osc.start(now);
+            osc.stop(now + 0.06);
         }
 
         /// Refresh the "recording — M:SS / N cols" hint. Driven by `recTick`

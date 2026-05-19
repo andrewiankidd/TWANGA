@@ -10,6 +10,17 @@ dated section.
 
 ### Added
 
+- Metronome click on `twanga record`. `--no-metronome` disables it,
+  matching the existing `play` flag exactly (default on). Click
+  fires on every beat boundary derived from the current resolution
+  (1/8 → every other column, 1/16 → every fourth). The recorder's
+  startup header gains a `Metronome:` line for parity with
+  `play`. Browser Recorder gets a live "Metronome" checkbox in the
+  view-controls row — flipping it mid-recording takes effect on the
+  next beat tick. Selection persists in `localStorage`. The browser
+  click is a short 1000 Hz pulse with the same ~50 ms exponential
+  decay the CLI's `metronome_click` produces, played through the
+  live `AudioContext` already open for the mic.
 - "Couldn't fit on fretboard" indicator on every existing flow.
   Detected pitches that no `(string, fret)` combination within
   `MAX_FRET=20` can reach used to be silently dropped on `twanga
