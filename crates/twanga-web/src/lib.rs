@@ -76,6 +76,115 @@ pub fn validate_preset_entry(preset_json: JsValue) -> Result<(), String> {
     validate_entry(&entry)
 }
 
+/// JSON-friendly version of `twanga_core::FretMatch` for crossing the wasm
+/// boundary. The `cents_off` field is dropped from the JS surface for now —
+/// the Recorder only needs the chosen `(string_idx, fret)` pair.
+#[derive(serde::Serialize)]
+struct FretMatchJs {
+    string_idx: usize,
+    fret: u8,
+}
+
+/// Match a detected pitch to a `(string, fret)` pair against the given
+/// `PresetEntry` + capo spec, using the exact same algorithm the CLI's
+/// recorder uses (`Tuning::match_to_fret` after `Capo::apply`). Returns
+/// `null` when no string can reach the pitch within `max_fret`, mirroring
+/// the CLI's silent-discard behaviour.
+///
+/// The JS-side Recorder calls this for every detected frequency from the
+/// chromatic-mode `WebTuner` and feeds the result into its column-tracking
+/// state. Keeping the matching algorithm in Rust means the browser-recorded
+/// `.alphatex` matches what the CLI would have written from the same audio.
+#[wasm_bindgen]
+pub fn match_pitch_to_fret(
+    preset_json: JsValue,
+    capo_spec: &str,
+    freq_hz: f32,
+    max_fret: u8,
+) -> Result<JsValue, String> {
+    let entry: twanga_core::PresetEntry = serde_wasm_bindgen::from_value(preset_json)
+        .map_err(|e| format!("malformed tuning shape: {e}"))?;
+    let tuning = entry.to_tuning();
+    let capo = twanga_core::Capo::parse(capo_spec, tuning.strings.len())?;
+    let effective = capo.apply(&tuning)?;
+    match effective.match_to_fret(twanga_core::Frequency(freq_hz), max_fret) {
+        Some(m) => Ok(serde_wasm_bindgen::to_value(&FretMatchJs {
+            string_idx: m.string_idx,
+            fret: m.fret,
+        })
+        .unwrap()),
+        None => Ok(JsValue::NULL),
+    }
+}
+
+/// Get the built-in `PresetEntry` JSON for a slug. Lets the JS Recorder
+/// pass the same `PresetEntry`-shaped value into [`match_pitch_to_fret`]
+/// and [`serialize_recording`] regardless of whether the active tuning is
+/// built-in or user-defined — both code paths share one `JsValue` shape.
+/// Returns `null` for unknown slugs.
+#[wasm_bindgen]
+pub fn builtin_preset_entry(slug: &str) -> JsValue {
+    match twanga_core::Tuning::builtin_presets()
+        .iter()
+        .find(|p| p.slug == slug)
+    {
+        Some(p) => serde_wasm_bindgen::to_value(p).unwrap(),
+        None => JsValue::NULL,
+    }
+}
+
+/// Serialise a recording to alphaTex via the canonical `AlphaTexWriter`.
+/// The CLI's `twanga record` writes through the exact same writer, so a
+/// browser-saved file is bit-identical to a CLI-saved one given the same
+/// inputs. Inputs:
+///
+/// - `preset_json`: `PresetEntry`-shaped JS object (built-in slugs come
+///   from [`builtin_preset_entry`]; user tunings already live in this
+///   shape in `localStorage`).
+/// - `capo_spec`: `"3"` / `"0,2,2,2,2,2"` / `""` — same syntax as
+///   `--capo` on the CLI.
+/// - `bpm`, `resolution_denom`: same semantics as `--bpm` / `--resolution`.
+/// - `columns_json`: `Array<Array<number | null>>`. Outer = columns in
+///   time order, inner = per-string fret values (or `null` for "not
+///   played that column"). Matches the column-grid score model the
+///   renderers consume.
+///
+/// Returns the full alphaTex file content as a string, ready to write to
+/// a blob URL for download (browser has no filesystem; the CLI writes to
+/// `$CONFIG/twanga/recordings/`).
+#[wasm_bindgen]
+pub fn serialize_recording(
+    preset_json: JsValue,
+    capo_spec: &str,
+    bpm: u32,
+    resolution_denom: u32,
+    columns_json: JsValue,
+) -> Result<String, String> {
+    let entry: twanga_core::PresetEntry = serde_wasm_bindgen::from_value(preset_json)
+        .map_err(|e| format!("malformed tuning shape: {e}"))?;
+    let tuning = entry.to_tuning();
+    let capo = twanga_core::Capo::parse(capo_spec, tuning.strings.len())?;
+    let columns: Vec<Vec<Option<u8>>> = serde_wasm_bindgen::from_value(columns_json)
+        .map_err(|e| format!("malformed columns shape: {e}"))?;
+
+    let mut buf: Vec<u8> = Vec::new();
+    {
+        let mut w = twanga_tabs::alphatex::AlphaTexWriter::new(
+            &mut buf,
+            &tuning,
+            &capo,
+            bpm,
+            resolution_denom,
+        )
+        .map_err(|e| e.to_string())?;
+        for col in &columns {
+            w.write_column(col).map_err(|e| e.to_string())?;
+        }
+        w.finalize().map_err(|e| e.to_string())?;
+    }
+    String::from_utf8(buf).map_err(|e| e.to_string())
+}
+
 /// Slug rules shared between [`validate_preset_entry`] and the tuner
 /// constructors. Matches `validate_slug` in `twanga-cli`'s prompts so the
 /// CLI and browser refuse the same inputs for the same reasons.
@@ -710,6 +819,54 @@ mod tests {
         e.strings[2].name = String::new();
         let err = validate_entry(&e).expect_err("blank string label should fail");
         assert!(err.contains("string 3"), "unexpected error: {err}");
+    }
+
+    // ------------------------------------------------------------------
+    // Recorder-support tests (match_pitch_to_fret / serialize_recording)
+    // ------------------------------------------------------------------
+    //
+    // The wasm-exported variants take `JsValue`, which can't be built off
+    // wasm. The matching + serialisation logic itself lives in the
+    // `twanga-core` / `twanga-tabs` crates (covered by their own test
+    // suites), so here we just confirm the Rust-internal shape we'd produce
+    // before crossing the wasm boundary stays correct.
+
+    #[test]
+    fn match_to_fret_against_capoed_tuning_matches_cli() {
+        // Capo 3 on standard uke. Open A-string becomes C5 (MIDI 72).
+        // Detecting C5 should match string 0 (A-string), fret 0.
+        let uke = twanga_core::Tuning::standard_ukulele();
+        let capo = twanga_core::Capo::uniform(uke.strings.len(), 3);
+        let effective = capo.apply(&uke).unwrap();
+        let c5 = twanga_core::Frequency(twanga_core::MidiNote(72).to_frequency().hz());
+        let m = effective.match_to_fret(c5, 20).expect("should match");
+        assert_eq!(m.string_idx, 0);
+        assert_eq!(m.fret, 0);
+    }
+
+    #[test]
+    fn serialize_recording_round_trips_through_alphatex_writer() {
+        // Smoke test for the writer surface: 2 columns of standard-guitar,
+        // no capo. The output is exercised by twanga-tabs' own tests; here
+        // we just confirm the wiring writes *something* parseable and that
+        // a non-capo recording doesn't accidentally embed `capo=` into the
+        // subtitle.
+        let guitar = twanga_core::Tuning::standard_guitar();
+        let capo = twanga_core::Capo::uniform(guitar.strings.len(), 0);
+        let mut buf: Vec<u8> = Vec::new();
+        {
+            let mut w = twanga_tabs::alphatex::AlphaTexWriter::new(
+                &mut buf, &guitar, &capo, 120, 8,
+            )
+            .unwrap();
+            w.write_column(&[Some(0), None, None, None, None, None]).unwrap();
+            w.write_column(&[None, Some(2), None, None, None, None]).unwrap();
+            w.finalize().unwrap();
+        }
+        let text = String::from_utf8(buf).unwrap();
+        assert!(text.contains("\\tempo 120"), "expected tempo line in: {text}");
+        assert!(text.contains("\\tuning"), "expected tuning line in: {text}");
+        assert!(!text.contains("capo="), "no capo should be embedded: {text}");
     }
 
     #[test]

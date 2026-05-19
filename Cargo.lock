@@ -4242,6 +4242,7 @@ dependencies = [
  "serde-wasm-bindgen",
  "twanga-core",
  "twanga-dsp",
+ "twanga-tabs",
  "wasm-bindgen",
 ]
 

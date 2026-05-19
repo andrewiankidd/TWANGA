@@ -16,10 +16,11 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 twanga-core = { path = "../twanga-core" }
 twanga-dsp = { path = "../twanga-dsp" }
+twanga-tabs = { path = "../twanga-tabs" }
 wasm-bindgen = "0.2.121"
 serde = { workspace = true }
 serde-wasm-bindgen = "0.6"
-# `twanga-tabs`, `js-sys`, `web-sys` will be re-added once the WASM bridge
-# actually needs them (alphaTex round-trip / direct DOM access from Rust /
-# Web Audio bindings written in Rust rather than JS). Today the bridge
-# exposes only twanga-core / twanga-dsp surfaces, so machete flags them.
+# `js-sys`, `web-sys` will be re-added once the WASM bridge actually needs
+# them (direct DOM access from Rust / Web Audio bindings written in Rust
+# rather than JS). Today the bridge exposes only twanga-core / twanga-dsp
+# / twanga-tabs surfaces, so machete flags them.
