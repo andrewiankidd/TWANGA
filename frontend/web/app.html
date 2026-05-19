@@ -888,6 +888,120 @@
         }
         .toast-actions button:hover { filter: brightness(1.1); }
 
+        /* Library list — rows of available tabs (bundled examples + user
+           recordings), each with Play / Download / Delete actions. Shape
+           parallels the Tunings list so the two screens feel consistent. */
+        .tab-library {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+            margin: 0.5rem 0 1rem;
+        }
+        .tab-library-row {
+            display: flex;
+            align-items: center;
+            gap: 0.7rem;
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 0.6rem 0.9rem;
+        }
+        .tab-library-row .info {
+            display: flex;
+            flex-direction: column;
+            gap: 0.15rem;
+            min-width: 0;
+            flex: 1;
+        }
+        .tab-library-row .title {
+            font-weight: 700;
+            color: var(--primary);
+            font-size: 0.95rem;
+            line-height: 1.2;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .tab-library-row .meta {
+            color: var(--muted);
+            font-size: 0.72rem;
+            font-family: monospace;
+            line-height: 1.2;
+            display: flex;
+            gap: 0.5rem;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        .tab-library-row .actions {
+            display: flex;
+            gap: 0.4rem;
+            flex-shrink: 0;
+        }
+        .tab-library-row .actions button {
+            background: transparent;
+            border: 1px solid var(--border);
+            color: var(--text);
+            border-radius: 4px;
+            padding: 0.3rem 0.7rem;
+            font-size: 0.8rem;
+            font-family: "Montserrat", sans-serif;
+            font-weight: 700;
+            cursor: pointer;
+        }
+        .tab-library-row .actions button.primary {
+            background: var(--highlight);
+            border-color: var(--highlight);
+            color: var(--background);
+        }
+        .tab-library-row .actions button.danger {
+            color: var(--err);
+        }
+        .tab-library-row .actions button:hover { filter: brightness(1.1); }
+
+        /* Drop zone for `.alphatex` imports. Same visual language as the
+           Tunings "Add new tuning" form so the library screen reads as
+           "list above, import below." */
+        .drop-zone {
+            border: 2px dashed var(--border);
+            border-radius: var(--radius);
+            padding: 1.4rem 1rem;
+            text-align: center;
+            color: var(--muted);
+            margin-bottom: 1rem;
+            transition: border-color 0.15s, color 0.15s, background 0.15s;
+        }
+        .drop-zone.is-dragover {
+            border-color: var(--highlight);
+            color: var(--highlight);
+            background: rgba(245, 158, 11, 0.06);
+        }
+        .drop-zone label.action {
+            cursor: pointer;
+            display: inline-block;
+            margin-top: 0.3rem;
+        }
+
+        /* Playback header — title + subtitle + tuning info shown above
+           the renderer once a tab is loaded. */
+        .playback-header {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 0.7rem 0.9rem;
+            margin-bottom: 0.9rem;
+        }
+        .playback-header .pt-title {
+            font-weight: 700;
+            color: var(--primary);
+            font-size: 1rem;
+            margin-bottom: 0.15rem;
+        }
+        .playback-header .pt-subtitle {
+            color: var(--muted);
+            font-size: 0.8rem;
+            font-family: monospace;
+        }
+
         .coming-soon {
             background: var(--card);
             border: 1px solid var(--border);
@@ -949,9 +1063,9 @@
                     <span class="title">Recorder</span>
                     <span class="desc">Capture what you play, choose how you see it</span>
                 </button>
-                <button class="menu-btn" disabled title="Tab playback in browser comes after the recorder">
+                <button class="menu-btn" data-screen="playback">
                     <span class="title">Playback</span>
-                    <span class="desc">Scroll a cursor through a tab at tempo (soon)</span>
+                    <span class="desc">Load a tab, play along, wait / loop / transpose</span>
                 </button>
                 <button class="menu-btn" data-screen="tunings">
                     <span class="title">Tunings</span>
@@ -1100,6 +1214,126 @@
                 <button class="action secondary" id="recorder-pause-btn" disabled>Pause</button>
                 <button class="action secondary" id="recorder-save-btn" disabled>Save .alphatex</button>
                 <button class="action secondary" id="recorder-clear-btn">Clear</button>
+            </div>
+        </section>
+
+        <!-- Playback screen — combined library view + per-tab playback
+             view. Until a tab is loaded, only the library list + drop
+             zone are visible. Loading a tab swaps in the tuning controls,
+             renderer, and transport. -->
+        <section id="screen-playback" class="screen">
+            <div class="back-row">
+                <button class="back-btn" data-back>← Menu</button>
+            </div>
+            <h2>Playback</h2>
+            <p class="subtitle">
+                Pick a tab from your library, drop a <code>.alphatex</code>
+                file to import one, or replay something you recorded. The
+                renderer below mirrors what the CLI's <code>twanga play</code>
+                shows, with the same wait / loop / metronome controls.
+            </p>
+
+            <div class="browser-storage-banner">
+                <strong>Browser storage warning.</strong>
+                User recordings live in the browser's local storage. Bundled
+                examples ship with the app and can't be deleted. The desktop
+                app reads from your real filesystem and doesn't need this
+                warning.
+            </div>
+
+            <!-- LIBRARY VIEW — visible until a tab is loaded -->
+            <div id="playback-library-view">
+                <div class="tab-library" id="playback-library-list"></div>
+                <div class="drop-zone" id="playback-drop-zone">
+                    Drop a <code>.alphatex</code> file here, or
+                    <label class="action secondary">
+                        <input type="file" accept=".alphatex,.txt" id="playback-file-input" hidden>
+                        Choose file
+                    </label>
+                </div>
+                <p class="tuner-hint" id="playback-library-hint">
+                    Recordings made on this screen's sibling Recorder appear here automatically.
+                </p>
+            </div>
+
+            <!-- PLAYBACK VIEW — visible while a tab is loaded -->
+            <div id="playback-tab-view" hidden>
+                <div class="back-row">
+                    <button class="back-btn" id="playback-back-to-library-btn">← Library</button>
+                </div>
+
+                <div class="playback-header">
+                    <div class="pt-title" id="playback-pt-title">—</div>
+                    <div class="pt-subtitle" id="playback-pt-subtitle">—</div>
+                </div>
+
+                <!-- Tuning + capo controller (third consumer of the shared
+                     factory). Used to transpose the loaded tab to a
+                     different instrument and apply a capo for wait-mode
+                     pitch comparison. -->
+                <div class="tuning-picker" id="playback-tuning-picker"></div>
+                <p class="picker-hint">
+                    Re-tune to play this tab on a different instrument. Notes that can't fit on the target are listed below.
+                </p>
+
+                <div class="active-tuning-row">
+                    <div class="active-tuning-name" id="playback-active-tuning-name">—</div>
+                    <div class="capo-control" id="playback-capo-control" hidden>
+                        <span class="capo-label">Capo</span>
+                        <div class="capo-uniform" id="playback-capo-uniform">
+                            <button class="capo-btn" id="playback-capo-down" aria-label="Decrease capo">−</button>
+                            <span class="capo-value" id="playback-capo-value">0</span>
+                            <button class="capo-btn" id="playback-capo-up" aria-label="Increase capo">+</button>
+                        </div>
+                        <button class="capo-mode-toggle" id="playback-capo-mode-toggle"
+                                title="Toggle per-string capo">
+                            Per-string
+                        </button>
+                    </div>
+                </div>
+                <div class="capo-per-string" id="playback-capo-per-string" hidden></div>
+
+                <div class="rec-settings">
+                    <div class="rec-setting">
+                        <label for="playback-bpm">BPM</label>
+                        <button class="capo-btn" id="playback-bpm-down" aria-label="Decrease BPM">−</button>
+                        <input type="number" id="playback-bpm" min="20" max="400" step="1" value="120">
+                        <button class="capo-btn" id="playback-bpm-up" aria-label="Increase BPM">+</button>
+                        <button class="capo-btn" id="playback-bpm-reset" aria-label="Reset to file tempo" title="Reset to file tempo">↺</button>
+                    </div>
+                    <div class="rec-setting">
+                        <label for="playback-loop">Loop</label>
+                        <input type="text" id="playback-loop" placeholder="off / full / 0:20" value="off">
+                    </div>
+                </div>
+
+                <div class="renderer-controls">
+                    <label class="renderer-label" for="playback-renderer-select">View</label>
+                    <select id="playback-renderer-select" class="renderer-select"></select>
+                    <label class="renderer-label rec-metronome-label">
+                        <input type="checkbox" id="playback-metronome-toggle" checked>
+                        Metronome
+                    </label>
+                    <label class="renderer-label rec-preroll-label" title="Count-in ticks before playback starts">
+                        Pre-roll
+                        <input type="number" id="playback-preroll-input" min="0" max="16" step="1" value="4">
+                    </label>
+                    <label class="renderer-label rec-metronome-label" title="Pause playhead until you play the next note">
+                        <input type="checkbox" id="playback-wait-toggle">
+                        Wait
+                    </label>
+                </div>
+
+                <div class="form-error" id="playback-skipped-notes" hidden></div>
+                <div class="renderer-host" id="playback-renderer-host"></div>
+
+                <p class="tuner-hint" id="playback-hint">click Play to start</p>
+
+                <div class="row">
+                    <button class="action" id="playback-play-btn">Play</button>
+                    <button class="action secondary" id="playback-pause-btn" disabled>Pause</button>
+                    <button class="action secondary" id="playback-stop-btn" disabled>Stop</button>
+                </div>
             </div>
         </section>
 
@@ -1369,6 +1603,12 @@
             // BPM, resolution, block-width) plus the renderer dropdown,
             // mic capture loop, and save-to-alphaTex.
             initRecorder();
+
+            // Playback screen — library list + per-tab playback view.
+            // Library merges bundled examples with user recordings from
+            // IndexedDB; per-tab view re-uses the renderer + tuning
+            // controller infrastructure.
+            initPlayback();
 
             // Menu navigation.
             document.querySelectorAll('[data-screen]').forEach((btn) => {
@@ -2851,6 +3091,412 @@
         window.addEventListener('hashchange', () => {
             if (location.hash.replace(/^#/, '') !== 'recorder' && recState.isRecording) {
                 recStopRecording('Recording stopped (left screen).');
+            }
+        });
+
+        // ----------------------------------------------------------------
+        // Playback screen — combined library view + per-tab playback
+        // ----------------------------------------------------------------
+        //
+        // Two states inside the same `#screen-playback` section:
+        //
+        //  - **Library view** — list of bundled examples + user recordings
+        //    from `library.list()`, each with Load / Download / Delete.
+        //    Drop-zone below for importing local `.alphatex` files.
+        //  - **Playback view** — once a tab is loaded, library list is
+        //    hidden and the per-tab UI appears: tuning controller
+        //    (third consumer of the shared factory!), renderer host,
+        //    transport controls. Back-to-library button restores the
+        //    list view.
+        //
+        // The playback ENGINE (interval-driven playhead + wait mode +
+        // pre-roll + metronome + Pause/Stop) lands in Phase 6 of the
+        // batch; this commit is the scaffold.
+
+        const playbackState = {
+            tuning: null,           // tuning controller (third consumer)
+            rendererController: null,
+            loadedTab: null,        // { id, title, parsed: WebParsedTab, transposed, dropped }
+            isPlaying: false,
+            isPaused: false,
+        };
+
+        function initPlayback() {
+            playbackState.rendererController = wireRendererHost({
+                selectId: 'playback-renderer-select',
+                hostId: 'playback-renderer-host',
+                storageKey: 'twanga-playback-renderer-v1',
+                initialScore: sampleScore(),
+            });
+
+            renderPlaybackLibrary();
+            wirePlaybackDropZone();
+            el('playback-back-to-library-btn').addEventListener('click', playbackUnload);
+
+            // Tuning controller is instantiated lazily on first tab load —
+            // before that, the controller's DOM (capo control etc) is
+            // inside `playback-tab-view` which is hidden. `makeTuningController`
+            // touches its DOM during init() so deferring saves us from a
+            // brittle "elements not yet visible" interaction.
+        }
+
+        /// Render the library list (bundled examples first, then user
+        /// recordings newest-first). Each row has Load + (for user tabs)
+        /// Download / Delete actions.
+        async function renderPlaybackLibrary() {
+            const list = el('playback-library-list');
+            list.replaceChildren();
+            let entries;
+            try {
+                entries = await library.list();
+            } catch (e) {
+                console.warn('library.list failed', e);
+                entries = [];
+            }
+            if (entries.length === 0) {
+                const empty = document.createElement('div');
+                empty.className = 'empty-state';
+                empty.textContent =
+                    'No tabs yet — drop a .alphatex file to import, or record one in the Recorder.';
+                list.appendChild(empty);
+                return;
+            }
+            for (const entry of entries) {
+                list.appendChild(renderLibraryRow(entry));
+            }
+        }
+
+        function renderLibraryRow(entry) {
+            const row = document.createElement('div');
+            row.className = 'tab-library-row';
+
+            const info = document.createElement('div');
+            info.className = 'info';
+
+            const title = document.createElement('div');
+            title.className = 'title';
+            title.textContent = entry.title;
+            info.appendChild(title);
+
+            const meta = document.createElement('div');
+            meta.className = 'meta';
+            const sourceLabel = document.createElement('span');
+            sourceLabel.textContent = entry.source;
+            meta.appendChild(sourceLabel);
+            if (entry.source !== 'bundled') {
+                const tag = document.createElement('span');
+                tag.className = 'backup-tag';
+                if (entry.lastBackedUpAt) {
+                    tag.classList.add('is-fresh');
+                    tag.textContent = `Backed up ${playbackTimeAgo(entry.lastBackedUpAt)}`;
+                } else {
+                    tag.classList.add('is-stale');
+                    tag.textContent = 'Never backed up';
+                }
+                meta.appendChild(tag);
+            }
+            info.appendChild(meta);
+            row.appendChild(info);
+
+            const actions = document.createElement('div');
+            actions.className = 'actions';
+
+            const loadBtn = document.createElement('button');
+            loadBtn.className = 'primary';
+            loadBtn.type = 'button';
+            loadBtn.textContent = 'Load';
+            loadBtn.addEventListener('click', () => playbackLoad(entry.id));
+            actions.appendChild(loadBtn);
+
+            if (entry.source !== 'bundled') {
+                const dlBtn = document.createElement('button');
+                dlBtn.type = 'button';
+                dlBtn.textContent = 'Download';
+                dlBtn.addEventListener('click', () => playbackDownload(entry.id));
+                actions.appendChild(dlBtn);
+
+                const delBtn = document.createElement('button');
+                delBtn.className = 'danger';
+                delBtn.type = 'button';
+                delBtn.textContent = 'Delete';
+                delBtn.addEventListener('click', async () => {
+                    if (!confirm(`Delete "${entry.title}"? This cannot be undone.`)) return;
+                    await library.deleteTab(entry.id);
+                    renderPlaybackLibrary();
+                });
+                actions.appendChild(delBtn);
+            }
+
+            row.appendChild(actions);
+            return row;
+        }
+
+        function playbackTimeAgo(ts) {
+            const secs = Math.max(0, Math.floor((Date.now() - ts) / 1000));
+            if (secs < 60) return 'just now';
+            const mins = Math.floor(secs / 60);
+            if (mins < 60) return `${mins} min ago`;
+            const hours = Math.floor(mins / 60);
+            if (hours < 24) return `${hours} h ago`;
+            const days = Math.floor(hours / 24);
+            return `${days} day${days === 1 ? '' : 's'} ago`;
+        }
+
+        async function playbackLoad(id) {
+            let entry;
+            try {
+                entry = await library.load(id);
+            } catch (e) {
+                console.error('library.load failed', e);
+                el('playback-hint').textContent = `failed to load: ${e?.message ?? e}`;
+                return;
+            }
+            let parsed;
+            try {
+                parsed = parse_alphatex(entry.alphatex);
+            } catch (e) {
+                console.error('parse_alphatex failed', e);
+                showToast({ message: `Failed to parse tab: ${e}`, actions: [] });
+                return;
+            }
+
+            playbackState.loadedTab = {
+                id: entry.id,
+                title: entry.title,
+                parsed,
+                transposed: parsed, // no transposition until user picks a tuning
+                dropped: [],
+            };
+
+            // Lazy-init the tuning controller on first load — see note in
+            // initPlayback() for why deferring is needed.
+            if (!playbackState.tuning) {
+                playbackState.tuning = makeTuningController({
+                    pickerId: 'playback-tuning-picker',
+                    activeNameId: 'playback-active-tuning-name',
+                    capoControlId: 'playback-capo-control',
+                    capoUniformId: 'playback-capo-uniform',
+                    capoDownId: 'playback-capo-down',
+                    capoUpId: 'playback-capo-up',
+                    capoValueId: 'playback-capo-value',
+                    capoModeToggleId: 'playback-capo-mode-toggle',
+                    capoPerStringId: 'playback-capo-per-string',
+                    storageKey: 'twanga-playback-tuning-v1',
+                    includeChromatic: false,
+                    onChange: () => playbackRecomputeTransposition(),
+                });
+                // Default to the first available tuning if the controller
+                // didn't already have a saved choice (i.e. first-visit user).
+                if (!playbackState.tuning.getMode()) {
+                    const builtins = builtin_tuning_slugs();
+                    if (builtins.length) playbackState.tuning.select(builtins[0]);
+                }
+            }
+
+            // Header
+            el('playback-pt-title').textContent = entry.title;
+            el('playback-pt-subtitle').textContent =
+                parsed.subtitle_display() ?? `${parsed.tuning_names().join(' ')} · ${parsed.tempo()} BPM`;
+
+            // BPM input pre-loads with the file's tempo; user can override.
+            el('playback-bpm').value = String(parsed.tempo());
+
+            // Swap views
+            el('playback-library-view').hidden = true;
+            el('playback-tab-view').hidden = false;
+
+            // Initial transposition (no-op if controller's tuning matches
+            // the file's). Renderer score is built from the transposed
+            // tab so the picker change immediately reflects in the view.
+            playbackRecomputeTransposition();
+        }
+
+        /// Recompute the transposed tab whenever the user changes the
+        /// active tuning or the file changes. Updates the "Skipped"
+        /// preamble + feeds the renderer with the new column grid.
+        function playbackRecomputeTransposition() {
+            if (!playbackState.loadedTab) return;
+            const tuning = playbackState.tuning;
+            const entry = tuning?.getPresetEntry();
+            const src = playbackState.loadedTab.parsed;
+            let transposed = src;
+            let dropped = [];
+            if (entry) {
+                try {
+                    transposed = src.transpose_to(entry, MAX_FRET);
+                    const droppedJs = src.transpose_to_dropped_notes(entry, MAX_FRET);
+                    dropped = Array.isArray(droppedJs) ? droppedJs : [];
+                } catch (e) {
+                    console.warn('transpose failed', e);
+                    transposed = src;
+                    dropped = [];
+                }
+            }
+            // Free the previous transposed handle if it's distinct from the source.
+            if (playbackState.loadedTab.transposed
+                && playbackState.loadedTab.transposed !== playbackState.loadedTab.parsed
+                && playbackState.loadedTab.transposed !== transposed) {
+                playbackState.loadedTab.transposed.free?.();
+            }
+            playbackState.loadedTab.transposed = transposed;
+            playbackState.loadedTab.dropped = dropped;
+
+            // "Skipped:" preamble shows up to 8 unique names.
+            const skipBox = el('playback-skipped-notes');
+            if (dropped.length === 0) {
+                skipBox.hidden = true;
+                skipBox.textContent = '';
+            } else {
+                const unique = [...new Set(dropped.map((d) => d.note))].sort();
+                const preview = unique.slice(0, 8).join(', ');
+                const extra = unique.length > 8 ? ` (+${unique.length - 8} more)` : '';
+                skipBox.hidden = false;
+                skipBox.textContent =
+                    `Skipped: ${dropped.length} note${dropped.length === 1 ? '' : 's'} ` +
+                    `couldn't fit on the target tuning — ${preview}${extra}`;
+            }
+
+            playbackPushScoreToRenderer();
+        }
+
+        /// Convert the currently-active transposed `WebParsedTab` into the
+        /// renderer's column-grid score model and push it.
+        function playbackPushScoreToRenderer() {
+            const tab = playbackState.loadedTab?.transposed;
+            if (!tab) return;
+            const stringCount = tab.tuning_names().length;
+            const numCols = tab.columns_count();
+            const columns = [];
+            let firstDenom = 8;
+            for (let i = 0; i < numCols; i++) {
+                const col = tab.column_at(i);
+                if (!col) continue;
+                if (i === 0) firstDenom = col.duration_denom || 8;
+                const marks = new Array(stringCount).fill(null);
+                for (const [s, f] of (col.hits ?? [])) {
+                    const idx = s - 1;
+                    if (idx >= 0 && idx < stringCount) marks[idx] = f;
+                }
+                columns.push(marks);
+            }
+            const score = {
+                tempo: tab.tempo(),
+                resolutionDenom: firstDenom,
+                columnsPerBar: firstDenom,
+                tuning: {
+                    name: tab.tuning_names().join(' '),
+                    strings: tab.tuning_names().map((n) => ({ name: n, midi: 0 })),
+                },
+                capoSpec: tab.capo_spec(),
+                columns,
+            };
+            playbackState.rendererController?.setScore(score);
+            playbackState.rendererController?.setPlayhead(0);
+        }
+
+        function playbackUnload() {
+            // Phase 6: stop any in-flight playback before tearing down.
+            playbackState.loadedTab?.parsed?.free?.();
+            if (playbackState.loadedTab?.transposed
+                && playbackState.loadedTab.transposed !== playbackState.loadedTab.parsed) {
+                playbackState.loadedTab.transposed.free?.();
+            }
+            playbackState.loadedTab = null;
+            el('playback-library-view').hidden = false;
+            el('playback-tab-view').hidden = true;
+            renderPlaybackLibrary();
+        }
+
+        async function playbackDownload(id) {
+            let entry;
+            try { entry = await library.load(id); }
+            catch (e) {
+                console.error('library.load for download failed', e);
+                showToast({ message: `Download failed: ${e?.message ?? e}`, actions: [] });
+                return;
+            }
+            const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+            const filename = `${slugify(entry.title || 'recording')}-${stamp}.alphatex`;
+            const blob = new Blob([entry.alphatex], { type: 'text/plain;charset=utf-8' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            setTimeout(() => URL.revokeObjectURL(url), 1000);
+            await library.markDownloaded(id);
+            renderPlaybackLibrary();
+        }
+
+        function wirePlaybackDropZone() {
+            const zone = el('playback-drop-zone');
+            const input = el('playback-file-input');
+
+            const importFile = (file) => {
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = async (e) => {
+                    const content = String(e.target?.result ?? '');
+                    let parsedTitle = null;
+                    try {
+                        // Validate by parsing first — saves a half-broken
+                        // file ending up in the library. The parsed handle
+                        // is freed immediately; we just want the title.
+                        const parsed = parse_alphatex(content);
+                        parsedTitle = parsed.title();
+                        parsed.free?.();
+                    } catch (err) {
+                        console.error('import parse failed', err);
+                        showToast({ message: `Import failed: ${err?.message ?? err}`, actions: [] });
+                        return;
+                    }
+                    const title = parsedTitle || file.name.replace(/\.[^.]+$/, '');
+                    try {
+                        await library.save({ title, alphatex: content, source: 'imported' });
+                    } catch (err) {
+                        console.error('library.save (import) failed', err);
+                        showToast({ message: `Library save failed: ${err?.message ?? err}`, actions: [] });
+                        return;
+                    }
+                    renderPlaybackLibrary();
+                    showToast({ message: `Imported "${title}" into the library.`, actions: [] });
+                };
+                reader.onerror = () => {
+                    showToast({ message: 'Failed to read file', actions: [] });
+                };
+                reader.readAsText(file);
+            };
+
+            input.addEventListener('change', () => {
+                const file = input.files?.[0];
+                if (file) importFile(file);
+                input.value = '';
+            });
+
+            zone.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                zone.classList.add('is-dragover');
+            });
+            zone.addEventListener('dragleave', () => {
+                zone.classList.remove('is-dragover');
+            });
+            zone.addEventListener('drop', (e) => {
+                e.preventDefault();
+                zone.classList.remove('is-dragover');
+                const file = e.dataTransfer?.files?.[0];
+                if (file) importFile(file);
+            });
+        }
+
+        // Re-render the library list whenever the user returns to it —
+        // a new recording made on the Recorder screen since their last
+        // visit needs to show up automatically.
+        window.addEventListener('hashchange', () => {
+            if ((location.hash.replace(/^#/, '') || 'menu') === 'playback'
+                && !playbackState.loadedTab) {
+                renderPlaybackLibrary();
             }
         });
 
