@@ -58,6 +58,119 @@ pub fn detect_pitch(samples: &[f32], sample_rate: u32) -> Option<f32> {
     yin.detect(samples, sample_rate).map(|f| f.hz())
 }
 
+/// Stateful tuner — the WASM mirror of `twanga_dsp::Tuner`. Buffers incoming
+/// samples across multiple `feed` calls (web audio worklets post 128-sample
+/// chunks; the YIN window is ~8K samples), drains readings on demand.
+///
+/// Two factory constructors:
+/// - `WebTuner.new_chromatic(sr)` — nearest-12-TET-note mode; one reading
+///   per accepted detection, label is the note name (`A4`, `C#3`, …).
+/// - `WebTuner.new_for_strings(slug, sr)` — per-string mode against the
+///   built-in tuning identified by `slug` (`standard-guitar`, etc.). At most
+///   one reading per string per analysis window, gated against detections
+///   that aren't plausibly any string in the tuning.
+#[wasm_bindgen]
+pub struct WebTuner {
+    inner: twanga_dsp::Tuner,
+    string_labels: Vec<String>,
+}
+
+#[derive(serde::Serialize)]
+struct ReadingJs {
+    label: String,
+    detected_hz: f32,
+    target_hz: f32,
+    cents: f32,
+}
+
+#[derive(serde::Serialize)]
+struct StringInfoJs {
+    label: String,
+    open_hz: f32,
+    midi: u8,
+}
+
+#[wasm_bindgen]
+impl WebTuner {
+    /// Build a chromatic tuner. Use this when the user hasn't picked an
+    /// instrument — readings carry the nearest-MIDI note name as the label.
+    pub fn new_chromatic(sample_rate: u32) -> WebTuner {
+        WebTuner {
+            inner: twanga_dsp::Tuner::new(twanga_dsp::TunerMode::Chromatic, sample_rate),
+            string_labels: Vec::new(),
+        }
+    }
+
+    /// Build a per-string tuner from a built-in preset slug
+    /// (`standard-guitar` / `standard-banjo` / `standard-ukulele` / `drop-d-guitar`
+    /// / `tenor-banjo` / `tenor-ukulele`). Errors if the slug is unknown so
+    /// the JS side surfaces a clear message rather than silently falling back.
+    /// Returns `Result<_, String>` rather than `Result<_, JsError>` so the
+    /// same code paths can run in `cargo test` on native targets — the
+    /// `JsError::new` import panics outside wasm.
+    pub fn new_for_strings(slug: &str, sample_rate: u32) -> Result<WebTuner, String> {
+        let tuning = twanga_core::Tuning::from_preset(slug)
+            .ok_or_else(|| format!("unknown tuning slug: {slug}"))?;
+        let labels = tuning.strings.iter().map(|s| s.name.clone()).collect();
+        Ok(WebTuner {
+            inner: twanga_dsp::Tuner::new(twanga_dsp::TunerMode::Strings(tuning), sample_rate),
+            string_labels: labels,
+        })
+    }
+
+    /// The string labels in string-number order (string 1 first). Lets the
+    /// frontend render the per-string rows up-front, before any audio has
+    /// been fed, so the layout doesn't shift around when the first reading
+    /// arrives. Returns an empty array for chromatic-mode tuners.
+    pub fn string_labels(&self) -> Vec<String> {
+        self.string_labels.clone()
+    }
+
+    /// Open-string info (label, open Hz, MIDI) for each string in the
+    /// per-string tuner. Returns an empty array for chromatic tuners.
+    /// Useful for the UI to show "A4 — 440.00 Hz" target headers.
+    pub fn strings_info(&self) -> JsValue {
+        let info: Vec<StringInfoJs> = match self.inner.mode() {
+            twanga_dsp::TunerMode::Strings(t) => t
+                .strings
+                .iter()
+                .map(|s| StringInfoJs {
+                    label: s.name.clone(),
+                    open_hz: s.open.to_frequency().hz(),
+                    midi: s.open.0,
+                })
+                .collect(),
+            twanga_dsp::TunerMode::Chromatic => Vec::new(),
+        };
+        serde_wasm_bindgen::to_value(&info).unwrap()
+    }
+
+    /// Push mono f32 samples into the analysis buffer. Same call pattern as
+    /// the native `Tuner::feed`. Worklet chunks (128 samples on most
+    /// browsers) accumulate across calls until a YIN window fills.
+    pub fn feed(&mut self, samples: &[f32]) {
+        self.inner.feed(samples);
+    }
+
+    /// Drain accumulated readings. Each entry is `{ label, detected_hz,
+    /// target_hz, cents }`. In `Strings` mode multiple strings can produce
+    /// readings per call; the UI should treat the result as "updates for
+    /// these strings" and leave others unchanged.
+    pub fn take_readings(&mut self) -> JsValue {
+        let readings: Vec<ReadingJs> = self
+            .inner
+            .take_readings()
+            .map(|r| ReadingJs {
+                label: r.label,
+                detected_hz: r.detected.hz(),
+                target_hz: r.target.hz(),
+                cents: r.cents,
+            })
+            .collect();
+        serde_wasm_bindgen::to_value(&readings).unwrap()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     //! `#[wasm_bindgen]` macros expand to regular fn bodies when compiling for
@@ -152,5 +265,69 @@ mod tests {
         // None rather than panic.
         let buf = vec![0.5_f32; 4];
         let _ = detect_pitch(&buf, 48_000); // just confirm no panic
+    }
+
+    /// Helper: synthetic sine wave of `freq` Hz, length samples, normalised
+    /// to ±1. Mirrors the test fixture pattern from twanga-dsp.
+    fn sine(freq: f32, sample_rate: u32, n: usize) -> Vec<f32> {
+        (0..n)
+            .map(|i| (2.0 * std::f32::consts::PI * freq * i as f32 / sample_rate as f32).sin())
+            .collect()
+    }
+
+    #[test]
+    fn web_tuner_strings_labels_match_preset() {
+        // Per-string-tuner labels must come back in preset order — the
+        // browser UI relies on this to lay out rows top-to-bottom in
+        // string-number order (string 1 first).
+        let t = WebTuner::new_for_strings("standard-ukulele", 48_000).unwrap();
+        assert_eq!(t.string_labels(), vec!["A4", "E4", "C4", "g4 (reentrant)"]);
+    }
+
+    #[test]
+    fn web_tuner_rejects_unknown_slug() {
+        // `WebTuner` doesn't implement Debug (no value in deriving on a
+        // wasm-bindgen exported struct), so use `is_err()` rather than
+        // `unwrap_err()`, which would need Debug on the success type.
+        assert!(WebTuner::new_for_strings("not-a-tuning", 48_000).is_err());
+    }
+
+    #[test]
+    fn web_tuner_chromatic_has_no_string_labels() {
+        let t = WebTuner::new_chromatic(48_000);
+        assert!(t.string_labels().is_empty());
+    }
+
+    #[test]
+    fn web_tuner_strings_detects_a4_against_uke_a_string() {
+        // 440 Hz fed in should produce a reading labelled "A4" (the uke's
+        // first string) within a few cents of zero.
+        let mut t = WebTuner::new_for_strings("standard-ukulele", 48_000).unwrap();
+        // Native Tuner needs enough samples to fill a window (8192). Feed
+        // a generous run so we definitely get a reading out.
+        let samples = sine(440.0, 48_000, 16_384);
+        t.inner.feed(&samples);
+        let readings: Vec<_> = t.inner.take_readings().collect();
+        assert!(
+            !readings.is_empty(),
+            "expected at least one reading for 440 Hz"
+        );
+        let first = &readings[0];
+        assert_eq!(first.label, "A4");
+        assert!(
+            first.cents.abs() < 5.0,
+            "expected near-zero cents on the A string, got {:.2}",
+            first.cents
+        );
+    }
+
+    #[test]
+    fn web_tuner_chromatic_identifies_440hz_as_a4() {
+        let mut t = WebTuner::new_chromatic(48_000);
+        let samples = sine(440.0, 48_000, 16_384);
+        t.inner.feed(&samples);
+        let readings: Vec<_> = t.inner.take_readings().collect();
+        assert!(!readings.is_empty());
+        assert_eq!(readings[0].label, "A4");
     }
 }
