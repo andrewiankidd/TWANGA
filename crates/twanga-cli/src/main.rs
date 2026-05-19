@@ -684,6 +684,13 @@ fn is_quit_input(input: &str) -> bool {
     matches!(input, "q" | "quit" | "exit")
 }
 
+/// Toggle for `--pause` / "p + Enter" on record + play. Lower-case
+/// `p` is the documented control; `pause` is a typo-friendly long
+/// form following the same pattern as `q` / `quit`.
+fn is_pause_input(input: &str) -> bool {
+    matches!(input, "p" | "pause")
+}
+
 fn run_chromatic(mut tuner: Tuner, mut stream: InputStream) -> Result<()> {
     let mut status = StatusLine::new();
     let use_color = status.is_terminal();
@@ -925,7 +932,7 @@ fn run_recorder(
     eprintln!("Saving to:  {}", recording_path.display());
     eprintln!();
     eprintln!("─────────────────────────────────────────────────");
-    eprintln!("  Controls: type 'q' + Enter to stop  (or Ctrl-C)");
+    eprintln!("  Controls: 'q' + Enter to stop, 'p' + Enter to pause/resume");
     eprintln!("─────────────────────────────────────────────────");
     eprintln!();
 
@@ -951,6 +958,7 @@ fn run_recorder(
     // "couldn't fit on fretboard" item — silent drops were the previous
     // behaviour. Per-frame logging is too noisy; aggregate is enough.
     let mut total_dropped: u64 = 0;
+    let mut paused = false;
 
     loop {
         if twanga_tui::is_shutdown_requested() {
@@ -968,8 +976,23 @@ fn run_recorder(
                     "Recording stopped.",
                 );
             }
+            if is_pause_input(&input) {
+                paused = !paused;
+                if paused {
+                    eprintln!("\n[paused — press 'p' + Enter to resume]");
+                } else {
+                    eprintln!("[resuming]");
+                }
+            }
         }
         let n = stream.read(&mut buf);
+        if paused {
+            // While paused: still drain the audio buffer to keep the device
+            // from backing up, but don't feed the tuner or advance the
+            // recorder. Time stops; resuming picks up at the same column.
+            std::thread::sleep(std::time::Duration::from_millis(20));
+            continue;
+        }
         if n > 0 {
             total_samples += n as u64;
             tuner.feed(&buf[..n]);
@@ -1287,13 +1310,14 @@ fn run_playback(
         }
     }
     eprintln!("─────────────────────────────────────────────────");
-    eprintln!("  Controls: type 'q' + Enter to stop  (or Ctrl-C)");
+    eprintln!("  Controls: 'q' + Enter to stop, 'p' + Enter to pause/resume");
     eprintln!("─────────────────────────────────────────────────");
     eprintln!();
 
     let stdin_rx = twanga_tui::spawn_line_reader();
     // One row per string + one for the position/progress line.
     let mut display = MultiLineDisplay::new(tab.tuning_names.len() + 1);
+    let mut paused = false;
 
     if run_pre_roll(pre_roll, bpm, &mut output, click.as_ref(), &stdin_rx)? {
         eprintln!("Playback cancelled during pre-roll.");
@@ -1301,7 +1325,8 @@ fn run_playback(
     }
 
     'session: loop {
-        for col_idx in loop_start..loop_end {
+        let mut col_idx = loop_start;
+        while col_idx < loop_end {
             if twanga_tui::is_shutdown_requested() {
                 eprintln!();
                 eprintln!("Playback stopped.");
@@ -1313,6 +1338,18 @@ fn run_playback(
                     eprintln!("Playback stopped.");
                     return Ok(());
                 }
+                if is_pause_input(&input) {
+                    paused = !paused;
+                    if paused {
+                        eprintln!("\n[paused — press 'p' + Enter to resume]");
+                    } else {
+                        eprintln!("[resuming]");
+                    }
+                }
+            }
+            if paused {
+                std::thread::sleep(std::time::Duration::from_millis(50));
+                continue; // don't advance col_idx
             }
 
             let column = &tab.columns[col_idx];
@@ -1355,6 +1392,7 @@ fn run_playback(
             } else {
                 std::thread::sleep(std::time::Duration::from_millis(ms_per_col as u64));
             }
+            col_idx += 1;
         }
         if !repeat {
             break 'session;

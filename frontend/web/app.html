@@ -1006,6 +1006,7 @@
 
             <div class="row">
                 <button class="action" id="recorder-start-btn">Start recording</button>
+                <button class="action secondary" id="recorder-pause-btn" disabled>Pause</button>
                 <button class="action secondary" id="recorder-save-btn" disabled>Save .alphatex</button>
                 <button class="action secondary" id="recorder-clear-btn">Clear</button>
             </div>
@@ -2362,11 +2363,14 @@
 
             // Recording-time ephemeral
             isRecording: false,
+            isPaused: false,        // pause/resume freezes the tick driver mid-take
             preRollActive: false,   // count-in is firing; Stop aborts it
             preRollAbort: false,    // set by Stop click during pre-roll
             score: null,            // { tempo, tuning, columns, ... }
             currentMarks: [],       // marks accumulating in the current uncommitted column
             recordingStartTime: 0,
+            pausedAtMs: 0,          // performance.now() when pause started
+            totalPausedMs: 0,       // cumulative time spent paused this take
             msPerColumn: 0,
             committedColumns: 0,
             droppedCount: 0,        // pitches that couldn't reach any fret within MAX_FRET
@@ -2758,11 +2762,48 @@
                     });
                 }
             });
+            el('recorder-pause-btn').addEventListener('click', recTogglePause);
             el('recorder-save-btn').addEventListener('click', recSave);
             el('recorder-clear-btn').addEventListener('click', () => {
                 if (recState.isRecording || recState.preRollActive) return;
                 recClear();
             });
+
+            // Spacebar shortcut for pause/resume while the Recorder screen
+            // is active. Scoped via the screen-active check so it doesn't
+            // hijack typing in the Tunings form's text inputs.
+            document.addEventListener('keydown', (e) => {
+                if (e.code !== 'Space') return;
+                if (!el('screen-recorder').classList.contains('active')) return;
+                // Don't steal space when the user is typing in an input.
+                const t = e.target;
+                if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT')) return;
+                if (!recState.isRecording) return;
+                e.preventDefault();
+                recTogglePause();
+            });
+        }
+
+        /// Toggle pause/resume during a live recording. Pause freezes the
+        /// tick driver (no new columns commit, no metronome clicks fire),
+        /// records the elapsed-paused-time so the wall-clock-based tick
+        /// loop doesn't fast-forward through missed beats on resume.
+        function recTogglePause() {
+            if (!recState.isRecording) return;
+            if (recState.isPaused) {
+                // Resuming: account for the duration we were paused so the
+                // next tick computes `expected` correctly.
+                const pausedMs = performance.now() - recState.pausedAtMs;
+                recState.totalPausedMs += pausedMs;
+                recState.isPaused = false;
+                el('recorder-pause-btn').textContent = 'Pause';
+                recUpdateDurationHint();
+            } else {
+                recState.isPaused = true;
+                recState.pausedAtMs = performance.now();
+                el('recorder-pause-btn').textContent = 'Resume';
+                el('recorder-hint').textContent = `paused — ${recState.committedColumns} cols captured so far`;
+            }
         }
 
         async function recStartRecording() {
@@ -2876,7 +2917,11 @@
             recState.tickHandle = setInterval(recTick, Math.max(20, recState.msPerColumn / 4));
 
             recState.isRecording = true;
+            recState.isPaused = false;
+            recState.totalPausedMs = 0;
             el('recorder-start-btn').textContent = 'Stop recording';
+            el('recorder-pause-btn').disabled = false;
+            el('recorder-pause-btn').textContent = 'Pause';
             el('recorder-save-btn').disabled = true;
             el('recorder-clear-btn').disabled = true;
             el('recorder-settings').classList.add('is-recording');
@@ -2885,7 +2930,13 @@
 
         function recTick() {
             if (!recState.isRecording) return;
-            const elapsed = performance.now() - recState.recordingStartTime;
+            if (recState.isPaused) return;
+            // Subtract any cumulative pause time so the wall-clock-based
+            // column count doesn't fast-forward through missed beats when
+            // resuming after a long pause.
+            const elapsed = performance.now()
+                - recState.recordingStartTime
+                - recState.totalPausedMs;
             const expected = Math.floor(elapsed / recState.msPerColumn);
             // Beat boundary detection matches the CLI: at 1/8 resolution
             // every other column is a beat, at 1/16 every fourth, etc. We
@@ -2936,7 +2987,9 @@
         /// dropped (detected pitch couldn't fit on the active tuning +
         /// capo within `MAX_FRET`), an "✗ N dropped" suffix appears.
         function recUpdateDurationHint() {
-            const elapsedMs = performance.now() - recState.recordingStartTime;
+            const elapsedMs = performance.now()
+                - recState.recordingStartTime
+                - recState.totalPausedMs;
             const elapsedSecs = Math.max(0, Math.floor(elapsedMs / 1000));
             const m = Math.floor(elapsedSecs / 60);
             const s = String(elapsedSecs % 60).padStart(2, '0');
@@ -2975,15 +3028,27 @@
             recState.rendererController?.setScore(recState.score);
             recState.rendererController?.setPlayhead(Math.max(0, recState.committedColumns - 1));
 
-            const elapsedMs = performance.now() - recState.recordingStartTime;
+            // Subtract any paused time so the final stamp matches what the
+            // user saw during recording. If we stopped during pause, the
+            // current pause segment also counts.
+            const pauseAccrual = recState.isPaused
+                ? performance.now() - recState.pausedAtMs
+                : 0;
+            const elapsedMs = performance.now()
+                - recState.recordingStartTime
+                - recState.totalPausedMs
+                - pauseAccrual;
             const elapsedSecs = Math.max(0, Math.floor(elapsedMs / 1000));
             const m = Math.floor(elapsedSecs / 60);
             const s = String(elapsedSecs % 60).padStart(2, '0');
 
             el('recorder-start-btn').textContent = 'Start recording';
+            el('recorder-pause-btn').disabled = true;
+            el('recorder-pause-btn').textContent = 'Pause';
             el('recorder-save-btn').disabled = recState.committedColumns === 0;
             el('recorder-clear-btn').disabled = false;
             el('recorder-settings').classList.remove('is-recording');
+            recState.isPaused = false;
             const droppedSuffix = recState.droppedCount > 0
                 ? `  ✗ ${recState.droppedCount} dropped`
                 : '';

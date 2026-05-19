@@ -10,6 +10,17 @@ dated section.
 
 ### Added
 
+- Pause / resume on `twanga record`, `twanga play`, and the browser
+  Recorder. CLI: type `p` + Enter (or `pause`) to toggle; pause
+  freezes the column-tick driver / playhead, resume continues at
+  the same column. The header "Controls:" line on record + play
+  now documents both `q` (stop) and `p` (pause). GUI: a new Pause
+  button next to Start, plus a Spacebar shortcut while the
+  Recorder screen is active (scoped so it doesn't hijack typing in
+  text inputs). The wall-clock-based tick driver subtracts
+  cumulative paused-time so resuming after a long pause doesn't
+  fast-forward through missed beats. Wait-mode pause is the
+  prerequisite for the eventual "undo last column" GUI affordance.
 - Pre-roll / count-in on `twanga record` and `twanga play` (CLI),
   and on the browser Recorder (GUI). New `--pre-roll <N>` flag with
   the standard three-form pattern; default 4 ticks (one bar at
