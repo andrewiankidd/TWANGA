@@ -1,0 +1,36 @@
+version: 2
+updates:
+  # Cargo workspace dependencies. Weekly to keep noise down — pinned versions
+  # are workspace-wide in /Cargo.toml.
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: deps
+    groups:
+      # Bundle minor + patch bumps into one PR per group so review surface
+      # is one diff rather than N. Major bumps still come as individual PRs.
+      patches:
+        applies-to: version-updates
+        update-types:
+          - minor
+          - patch
+
+  # GitHub Actions used in .github/workflows/. Same cadence.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: ci
+    groups:
+      patches:
+        applies-to: version-updates
+        update-types:
+          - minor
+          - patch
