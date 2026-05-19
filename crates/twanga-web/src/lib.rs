@@ -188,6 +188,139 @@ pub fn serialize_recording(
     String::from_utf8(buf).map_err(|e| e.to_string())
 }
 
+/// Stateful wrapper around `twanga_tabs::alphatex::ParsedTab`. Same shape
+/// as `WebTuner` — JS holds an opaque handle, calls accessor methods to
+/// read fields, and frees it via `.free()` when done. Used by the browser
+/// Playback screen to ingest `.alphatex` files (drop-zone uploads + the
+/// bundled examples) and ask for transpositions onto different tunings.
+///
+/// We don't expose `ParsedTab` as a serializable JSON blob because the
+/// score model + transpose logic both want identity (you parse once, then
+/// transpose multiple times to compare different target tunings). Same
+/// reason `WebTuner` stays stateful.
+#[wasm_bindgen]
+pub struct WebParsedTab {
+    inner: twanga_tabs::alphatex::ParsedTab,
+}
+
+#[derive(serde::Serialize)]
+struct ColumnJs {
+    duration_denom: u32,
+    /// `[string_number_1_based, fret]` pairs. Empty = rest.
+    hits: Vec<(u8, u8)>,
+}
+
+#[derive(serde::Serialize)]
+struct DroppedNoteJs {
+    column_index: usize,
+    note: String,
+}
+
+/// Parse `.alphatex` text into a `WebParsedTab`. Returns the parse error
+/// as a string on failure — matches the shape `serialize_recording` uses.
+#[wasm_bindgen]
+pub fn parse_alphatex(text: &str) -> Result<WebParsedTab, String> {
+    twanga_tabs::alphatex::parse(text)
+        .map(|inner| WebParsedTab { inner })
+        .map_err(|e| e.to_string())
+}
+
+#[wasm_bindgen]
+impl WebParsedTab {
+    /// User-given title (from `\title "..."`). `None` for older files
+    /// that predate the title feature.
+    pub fn title(&self) -> Option<String> {
+        self.inner.title.clone()
+    }
+
+    /// Subtitle stripped of any `; capo=...` machine annotation —
+    /// human-readable label only. `None` for files without `\subtitle`.
+    pub fn subtitle_display(&self) -> Option<String> {
+        self.inner.subtitle_display()
+    }
+
+    /// File tempo (BPM). Defaults to 120 for files that omit `\tempo`.
+    pub fn tempo(&self) -> u32 {
+        self.inner.tempo
+    }
+
+    /// Open-string note names in string-number order, e.g. `["A4", "E4",
+    /// "C4", "G4"]`. Used by the Playback screen's tuning header.
+    pub fn tuning_names(&self) -> Vec<String> {
+        self.inner.tuning_names.clone()
+    }
+
+    /// `Capo` spec from the `\subtitle` field (`; capo=<spec>` suffix),
+    /// serialized back to the same `"3"` / `"0,2,2,2,2,2"` string format
+    /// the CLI's `--capo` accepts. Empty string if the file has no capo.
+    pub fn capo_spec(&self) -> String {
+        self.inner.capo().map(|c| c.serialize()).unwrap_or_default()
+    }
+
+    /// Number of columns in the parsed tab. The Playback engine walks
+    /// `0..columns_count()` calling `column_at(i)` for each.
+    pub fn columns_count(&self) -> usize {
+        self.inner.columns.len()
+    }
+
+    /// One column by index. Returns `{ duration_denom, hits }` where
+    /// `hits` is `[[string_1_based, fret], ...]`. Empty hits = rest.
+    /// Returns `null` if `idx >= columns_count()` rather than panicking,
+    /// so the JS loop can defensively detect end-of-tab.
+    pub fn column_at(&self, idx: usize) -> JsValue {
+        match self.inner.columns.get(idx) {
+            Some(col) => serde_wasm_bindgen::to_value(&ColumnJs {
+                duration_denom: col.duration_denom,
+                hits: col.hits.clone(),
+            })
+            .unwrap(),
+            None => JsValue::NULL,
+        }
+    }
+
+    /// Transpose to a different tuning, given a `PresetEntry`-shaped JS
+    /// object (use `builtin_preset_entry(slug)` to get one for a built-in
+    /// or pass a user-defined tuning directly). Returns the transposed
+    /// tab as a fresh `WebParsedTab` plus the list of notes that couldn't
+    /// fit on the target within `max_fret`. The browser Playback screen
+    /// shows the dropped-notes list as a pre-flight "Skipped:" preamble
+    /// before the cursor starts.
+    pub fn transpose_to(&self, preset_json: JsValue, max_fret: u8) -> Result<WebParsedTab, String> {
+        let entry: twanga_core::PresetEntry = serde_wasm_bindgen::from_value(preset_json)
+            .map_err(|e| format!("malformed tuning shape: {e}"))?;
+        let target = entry.to_tuning();
+        let (transposed, _dropped) = self.inner.transpose_to_with_report(&target, max_fret);
+        Ok(WebParsedTab { inner: transposed })
+    }
+
+    /// Same as `transpose_to` but also returns the list of dropped notes.
+    /// Two methods because wasm-bindgen can't return both a heap-managed
+    /// struct (`WebParsedTab`) and a serializable value in one tuple
+    /// without going through JsValue serialisation for the whole thing —
+    /// which costs the struct's identity. JS callers wanting both call
+    /// `transpose_to_dropped_notes` first (cheap; no transposition done
+    /// again under the hood — but for v1 we re-run since it's still O(N)
+    /// over column hits and not hot).
+    pub fn transpose_to_dropped_notes(
+        &self,
+        preset_json: JsValue,
+        max_fret: u8,
+    ) -> Result<JsValue, String> {
+        let entry: twanga_core::PresetEntry = serde_wasm_bindgen::from_value(preset_json)
+            .map_err(|e| format!("malformed tuning shape: {e}"))?;
+        let target = entry.to_tuning();
+        let (_transposed, dropped) = self.inner.transpose_to_with_report(&target, max_fret);
+        let js_dropped: Vec<DroppedNoteJs> = dropped
+            .into_iter()
+            .map(|d| DroppedNoteJs {
+                column_index: d.column_index,
+                note: d.note,
+            })
+            .collect();
+        Ok(serde_wasm_bindgen::to_value(&js_dropped).unwrap())
+    }
+}
+
 /// Slug rules shared between [`validate_preset_entry`] and the tuner
 /// constructors. Matches `validate_slug` in `twanga-cli`'s prompts so the
 /// CLI and browser refuse the same inputs for the same reasons.
@@ -906,6 +1039,56 @@ mod tests {
             text.contains("\\title \"My Recording\""),
             "expected \\title line in: {text}"
         );
+    }
+
+    // ---- WebParsedTab parse / accessor / transpose tests ----
+
+    #[test]
+    fn parse_alphatex_round_trips_title_subtitle_tempo_tuning() {
+        let input = "\\title \"Cripple Creek\"\n\
+                     \\subtitle \"Standard Banjo (Open G)\"\n\
+                     \\tempo 110\n\
+                     \\tuning D4 B3 G3 D3 G4\n\
+                     .\n\
+                     :8 0.3 |\n";
+        let parsed = parse_alphatex(input).expect("parse");
+        assert_eq!(parsed.title().as_deref(), Some("Cripple Creek"));
+        assert_eq!(
+            parsed.subtitle_display().as_deref(),
+            Some("Standard Banjo (Open G)")
+        );
+        assert_eq!(parsed.tempo(), 110);
+        assert_eq!(parsed.tuning_names(), vec!["D4", "B3", "G3", "D3", "G4"]);
+        assert_eq!(parsed.columns_count(), 1);
+        assert_eq!(parsed.capo_spec(), "");
+    }
+
+    #[test]
+    fn parse_alphatex_extracts_capo_from_subtitle() {
+        let input = "\\subtitle \"Standard Banjo (Open G); capo=3,3,3,3,0\"\n\
+                     \\tempo 110\n\
+                     \\tuning D4 B3 G3 D3 G4\n\
+                     .\n";
+        let parsed = parse_alphatex(input).expect("parse");
+        // Capo serialises back to the same per-string syntax the CLI uses.
+        assert_eq!(parsed.capo_spec(), "3,3,3,3,0");
+        // subtitle_display strips the `; capo=...` machine annotation.
+        assert_eq!(
+            parsed.subtitle_display().as_deref(),
+            Some("Standard Banjo (Open G)")
+        );
+    }
+
+    #[test]
+    fn parse_alphatex_surfaces_parse_errors_as_strings() {
+        // Bad `\tempo` value: the parser returns ParseError::BadTempo,
+        // which we map to a `Result<_, String>` for the wasm boundary.
+        // `WebParsedTab` doesn't implement Debug (no point on a
+        // wasm-bindgen exported struct), so use `.err()` rather than
+        // `.expect_err()`.
+        let input = "\\tempo not-a-number\n\\tuning A4 E4 C4 G4\n.\n";
+        let err = parse_alphatex(input).err().expect("expected parse error");
+        assert!(err.contains("bad tempo"), "unexpected error: {err}");
     }
 
     #[test]
