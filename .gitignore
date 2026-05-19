@@ -12,6 +12,10 @@
 # `cargo build --target wasm32-unknown-unknown -p twanga-web --release`
 # followed by `wasm-bindgen --target web --out-dir frontend/web/pkg ...`.
 /frontend/web/pkg/
+# Bundled alphaTex examples — copied from the canonical
+# `assets/examples/` at build time (CI + local Tauri dev). See the
+# `pages.yml` workflow + `crates/twanga-app/README.md` dev steps.
+/frontend/web/assets/
 
 # User recordings produced by `twanga record`
 /recordings/

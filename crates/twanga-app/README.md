@@ -49,7 +49,17 @@ cargo build --target wasm32-unknown-unknown -p twanga-web --release
 wasm-bindgen --target web --out-dir frontend/web/pkg \
     target/wasm32-unknown-unknown/release/twanga_web.wasm
 
-# 2. Launch the Tauri shell pointing at frontend/web/
+# 2. Copy the bundled alphaTex examples into the site root. The browser
+#    library fetches them from `assets/examples/` relative to the bundle;
+#    the canonical files live at the repo root so the CLI can use them
+#    too. `frontend/web/assets/` is gitignored — same pattern as
+#    `frontend/web/pkg/`. CI's pages.yml workflow runs the same copy.
+mkdir -p frontend/web/assets && cp -r assets/examples frontend/web/assets/
+# Windows PowerShell equivalent (run from repo root):
+#   New-Item -ItemType Directory -Force frontend/web/assets | Out-Null
+#   Copy-Item -Recurse -Force assets/examples frontend/web/assets/
+
+# 3. Launch the Tauri shell pointing at frontend/web/
 cargo tauri dev
 ```
 
