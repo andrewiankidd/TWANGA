@@ -413,8 +413,7 @@ mod tests {
         // E4 → G4, C4 → D#4 (Eb4), reentrant g4 → A#4 (Bb4). The labels
         // come from `MidiNote::name()` of the shifted MIDI value, which
         // is `Capo::apply`'s convention when the offset is non-zero.
-        let t =
-            WebTuner::new_for_strings_with_capo("standard-ukulele", "3", 48_000).unwrap();
+        let t = WebTuner::new_for_strings_with_capo("standard-ukulele", "3", 48_000).unwrap();
         let labels = t.string_labels();
         assert_eq!(labels, vec!["C5", "G4", "D#4", "A#4"]);
 
@@ -442,8 +441,7 @@ mod tests {
         // Banjo body capo on fret 3, 5th-string drone left open. The drone
         // label `g4 (drone)` should survive because its offset is 0; the
         // body strings get relabelled to their new MIDI names.
-        let t = WebTuner::new_for_strings_with_capo("standard-banjo", "3,3,3,3,0", 48_000)
-            .unwrap();
+        let t = WebTuner::new_for_strings_with_capo("standard-banjo", "3,3,3,3,0", 48_000).unwrap();
         let labels = t.string_labels();
         // Body strings: D4+3=F4, B3+3=D4, G3+3=A#3, D3+3=F3.
         assert_eq!(&labels[..4], &["F4", "D4", "A#3", "F3"]);
@@ -456,8 +454,6 @@ mod tests {
     fn web_tuner_with_invalid_capo_returns_err() {
         // Capo spec with wrong length should propagate the Capo::parse
         // error message up to the JS side, not panic.
-        assert!(
-            WebTuner::new_for_strings_with_capo("standard-ukulele", "1,2", 48_000).is_err()
-        );
+        assert!(WebTuner::new_for_strings_with_capo("standard-ukulele", "1,2", 48_000).is_err());
     }
 }
