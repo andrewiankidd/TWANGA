@@ -1,6 +1,8 @@
 //! Domain types and a small amount of shared static content. No IO, no async, no algorithms.
 
+use serde::{Deserialize, Serialize};
 use std::fmt;
+use std::sync::LazyLock;
 
 /// MOTD splash strings — one per line. Shared between the CLIs (banner on
 /// startup) and the future Tauri main menu (random splash per visit, à la
@@ -113,105 +115,108 @@ pub struct Tuning {
     pub strings: Vec<TunedString>,
 }
 
+/// On-disk schema for a single tuning entry. The same shape is used for the
+/// built-in `presets.toml` (compiled into the binary) and the user-config file
+/// (`$CONFIG/twanga/tunings.toml`). This lets the CLI's "define a custom
+/// tuning" flow round-trip through the exact same format the maintainer would
+/// hand-edit in source — so promoting a user creation to a built-in is just
+/// copying the TOML block over.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+pub struct PresetEntry {
+    pub slug: String,
+    pub name: String,
+    pub strings: Vec<PresetString>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+pub struct PresetString {
+    pub name: String,
+    pub midi: u8,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct PresetFile {
+    #[serde(default, rename = "tuning")]
+    pub tunings: Vec<PresetEntry>,
+}
+
+impl PresetEntry {
+    pub fn to_tuning(&self) -> Tuning {
+        Tuning {
+            name: self.name.clone(),
+            strings: self
+                .strings
+                .iter()
+                .map(|s| TunedString {
+                    name: s.name.clone(),
+                    open: MidiNote(s.midi),
+                })
+                .collect(),
+        }
+    }
+
+    pub fn from_tuning(slug: impl Into<String>, t: &Tuning) -> Self {
+        Self {
+            slug: slug.into(),
+            name: t.name.clone(),
+            strings: t
+                .strings
+                .iter()
+                .map(|s| PresetString {
+                    name: s.name.clone(),
+                    midi: s.open.0,
+                })
+                .collect(),
+        }
+    }
+}
+
+const BUILTIN_PRESETS_TOML: &str = include_str!("presets.toml");
+
+static BUILTIN_PRESETS: LazyLock<Vec<PresetEntry>> = LazyLock::new(|| {
+    let file: PresetFile = toml::from_str(BUILTIN_PRESETS_TOML)
+        .expect("crates/twanga-core/src/presets.toml is malformed (TWANGA bug)");
+    file.tunings
+});
+
 impl Tuning {
     pub fn standard_guitar() -> Self {
-        Self {
-            name: "Standard Guitar".into(),
-            strings: vec![
-                TunedString {
-                    name: "E4".into(),
-                    open: MidiNote(64),
-                },
-                TunedString {
-                    name: "B3".into(),
-                    open: MidiNote(59),
-                },
-                TunedString {
-                    name: "G3".into(),
-                    open: MidiNote(55),
-                },
-                TunedString {
-                    name: "D3".into(),
-                    open: MidiNote(50),
-                },
-                TunedString {
-                    name: "A2".into(),
-                    open: MidiNote(45),
-                },
-                TunedString {
-                    name: "E2".into(),
-                    open: MidiNote(40),
-                },
-            ],
-        }
+        Self::from_preset("standard-guitar")
+            .expect("standard-guitar preset missing from built-in registry")
     }
 
     pub fn standard_banjo() -> Self {
-        Self {
-            name: "Standard 5-String Banjo (Open G)".into(),
-            strings: vec![
-                TunedString {
-                    name: "D4".into(),
-                    open: MidiNote(62),
-                },
-                TunedString {
-                    name: "B3".into(),
-                    open: MidiNote(59),
-                },
-                TunedString {
-                    name: "G3".into(),
-                    open: MidiNote(55),
-                },
-                TunedString {
-                    name: "D3".into(),
-                    open: MidiNote(50),
-                },
-                TunedString {
-                    name: "g4 (drone)".into(),
-                    open: MidiNote(67),
-                },
-            ],
-        }
+        Self::from_preset("standard-banjo")
+            .expect("standard-banjo preset missing from built-in registry")
     }
 
     pub fn standard_ukulele() -> Self {
-        Self {
-            name: "Standard Ukulele (Reentrant GCEA)".into(),
-            strings: vec![
-                TunedString {
-                    name: "A4".into(),
-                    open: MidiNote(69),
-                },
-                TunedString {
-                    name: "E4".into(),
-                    open: MidiNote(64),
-                },
-                TunedString {
-                    name: "C4".into(),
-                    open: MidiNote(60),
-                },
-                TunedString {
-                    name: "g4 (reentrant)".into(),
-                    open: MidiNote(67),
-                },
-            ],
-        }
+        Self::from_preset("standard-ukulele")
+            .expect("standard-ukulele preset missing from built-in registry")
     }
 
-    /// Canonical preset slugs. The CLI and any future GUI enumerate options
-    /// from this list — one source of truth, no string duplication elsewhere.
-    pub const PRESETS: &'static [&'static str] =
-        &["standard-guitar", "standard-banjo", "standard-ukulele"];
+    /// All built-in preset entries in the order they appear in `presets.toml`.
+    /// User-defined tunings live in `$CONFIG/twanga/tunings.toml` and are
+    /// merged with these by the CLI — twanga-core stays IO-free.
+    pub fn builtin_presets() -> &'static [PresetEntry] {
+        &BUILTIN_PRESETS
+    }
 
-    /// Build a tuning from a preset slug. Returns `None` if the slug doesn't
-    /// match a known preset (see [`Self::PRESETS`]).
-    pub fn from_preset(name: &str) -> Option<Tuning> {
-        match name {
-            "standard-guitar" => Some(Self::standard_guitar()),
-            "standard-banjo" => Some(Self::standard_banjo()),
-            "standard-ukulele" => Some(Self::standard_ukulele()),
-            _ => None,
-        }
+    /// Slugs of the built-in presets, in registry order. Use this when
+    /// rendering a chooser that only includes shipped tunings; use the CLI's
+    /// merged loader if you want user-defined tunings too.
+    pub fn builtin_slugs() -> Vec<&'static str> {
+        BUILTIN_PRESETS.iter().map(|p| p.slug.as_str()).collect()
+    }
+
+    /// Build a tuning from a built-in preset slug. Returns `None` if the slug
+    /// doesn't match anything in `presets.toml`. Does NOT consult the user
+    /// config file — that's the CLI's job.
+    pub fn from_preset(slug: &str) -> Option<Tuning> {
+        BUILTIN_PRESETS
+            .iter()
+            .find(|p| p.slug == slug)
+            .map(|p| p.to_tuning())
     }
 
     /// Returns the open string nearest in pitch to `freq`, with the signed cents
@@ -452,6 +457,167 @@ mod tests {
             .expect("should match");
         assert_eq!(m.fret, 0);
         assert!((m.cents_off + 30.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn builtin_registry_contains_three_canonical_slugs() {
+        let slugs = Tuning::builtin_slugs();
+        assert!(slugs.contains(&"standard-guitar"));
+        assert!(slugs.contains(&"standard-banjo"));
+        assert!(slugs.contains(&"standard-ukulele"));
+    }
+
+    #[test]
+    fn registry_backed_guitar_matches_canonical_open_pitches() {
+        let g = Tuning::standard_guitar();
+        assert_eq!(g.strings.len(), 6);
+        assert_eq!(g.strings[0].open, MidiNote(64)); // E4
+        assert_eq!(g.strings[5].open, MidiNote(40)); // E2
+    }
+
+    #[test]
+    fn registry_backed_banjo_keeps_drone_as_string_5() {
+        let b = Tuning::standard_banjo();
+        assert_eq!(b.strings.len(), 5);
+        // 5th-string drone is higher in pitch than the 4th string — the whole
+        // point of the registry round-trip preserving string-number order.
+        assert!(b.strings[4].open > b.strings[3].open);
+        assert_eq!(b.strings[4].open, MidiNote(67));
+    }
+
+    #[test]
+    fn registry_backed_ukulele_keeps_reentrant_g_as_string_4() {
+        let u = Tuning::standard_ukulele();
+        assert_eq!(u.strings.len(), 4);
+        assert_eq!(u.strings[3].open, MidiNote(67)); // reentrant g4
+        assert!(u.strings[3].open > u.strings[2].open); // higher than C4 string
+    }
+
+    #[test]
+    fn from_preset_returns_none_for_unknown_slug() {
+        assert!(Tuning::from_preset("standard-mandolin").is_none());
+        assert!(Tuning::from_preset("").is_none());
+    }
+
+    #[test]
+    fn preset_entry_round_trips_through_toml() {
+        let original = PresetEntry {
+            slug: "custom-test".into(),
+            name: "Custom Test Tuning".into(),
+            strings: vec![
+                PresetString {
+                    name: "A4".into(),
+                    midi: 69,
+                },
+                PresetString {
+                    name: "D4".into(),
+                    midi: 62,
+                },
+            ],
+        };
+        let file = PresetFile {
+            tunings: vec![original.clone()],
+        };
+        let serialised = toml::to_string(&file).expect("serialise");
+        let parsed: PresetFile = toml::from_str(&serialised).expect("parse");
+        assert_eq!(parsed.tunings, vec![original]);
+    }
+
+    #[test]
+    fn preset_entry_round_trips_through_tuning() {
+        let entry = PresetEntry {
+            slug: "tenor-banjo".into(),
+            name: "Tenor Banjo (CGDA)".into(),
+            strings: vec![
+                PresetString {
+                    name: "A4".into(),
+                    midi: 69,
+                },
+                PresetString {
+                    name: "D4".into(),
+                    midi: 62,
+                },
+                PresetString {
+                    name: "G3".into(),
+                    midi: 55,
+                },
+                PresetString {
+                    name: "C3".into(),
+                    midi: 48,
+                },
+            ],
+        };
+        let tuning = entry.to_tuning();
+        let recovered = PresetEntry::from_tuning(&entry.slug, &tuning);
+        assert_eq!(recovered, entry);
+    }
+
+    #[test]
+    fn drop_d_guitar_only_differs_from_standard_on_string_six() {
+        let std = Tuning::standard_guitar();
+        let drop = Tuning::from_preset("drop-d-guitar").expect("drop-d-guitar preset");
+        assert_eq!(drop.strings.len(), 6);
+        // String 1-5 (indices 0-4) must match standard guitar exactly.
+        for i in 0..5 {
+            assert_eq!(
+                drop.strings[i].open,
+                std.strings[i].open,
+                "string {} should match standard guitar",
+                i + 1
+            );
+        }
+        // String 6 is dropped from E2 (40) to D2 (38).
+        assert_eq!(std.strings[5].open, MidiNote(40));
+        assert_eq!(drop.strings[5].open, MidiNote(38));
+    }
+
+    #[test]
+    fn tenor_banjo_is_fifths_cgda() {
+        let t = Tuning::from_preset("tenor-banjo").expect("tenor-banjo preset");
+        assert_eq!(t.strings.len(), 4);
+        // String-1-first: A3 D3 G2 C2 — each string a fifth (7 semitones) lower.
+        assert_eq!(t.strings[0].open, MidiNote(57)); // A3
+        assert_eq!(t.strings[1].open, MidiNote(50)); // D3
+        assert_eq!(t.strings[2].open, MidiNote(43)); // G2
+        assert_eq!(t.strings[3].open, MidiNote(36)); // C2
+        for i in 0..3 {
+            assert_eq!(
+                t.strings[i].open.0 - t.strings[i + 1].open.0,
+                7,
+                "consecutive strings should be a fifth apart"
+            );
+        }
+    }
+
+    #[test]
+    fn tenor_ukulele_uses_low_g_not_reentrant() {
+        let t = Tuning::from_preset("tenor-ukulele").expect("tenor-ukulele preset");
+        assert_eq!(t.strings.len(), 4);
+        let g3 = t.strings[3].open;
+        let c4 = t.strings[2].open;
+        // String 4 (G) is BELOW the C string — low-G, not the reentrant high-g
+        // that standard ukulele uses. Whole point of the separate preset.
+        assert!(g3 < c4, "tenor-ukulele G should be below C (low-G)");
+        assert_eq!(g3, MidiNote(55));
+    }
+
+    #[test]
+    fn builtin_presets_parse_with_all_slugs_unique() {
+        let presets = Tuning::builtin_presets();
+        let mut seen = std::collections::HashSet::new();
+        for p in presets {
+            assert!(
+                seen.insert(&p.slug),
+                "duplicate slug in built-in registry: {}",
+                p.slug
+            );
+            assert!(
+                !p.name.is_empty(),
+                "preset {} has empty display name",
+                p.slug
+            );
+            assert!(!p.strings.is_empty(), "preset {} has zero strings", p.slug);
+        }
     }
 
     #[test]

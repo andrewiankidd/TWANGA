@@ -1,0 +1,73 @@
+# Built-in tuning presets. Same schema as the user-defined file at
+# $CONFIG/twanga/tunings.toml — anything you can put here you can put there.
+#
+# `slug`     — lowercase-kebab-case ID, stable, used by --tuning <slug> and menus.
+# `name`     — human-readable display name shown in headers and prompts.
+# `strings`  — string-number order (string 1 first), NOT pitch order. This matters
+#              for the banjo 5th-string drone and the ukulele's reentrant high G.
+# `midi`     — open-string pitch as a MIDI note number (A4 = 69, middle C = 60).
+
+[[tuning]]
+slug = "standard-guitar"
+name = "Standard Guitar"
+strings = [
+    { name = "E4", midi = 64 },
+    { name = "B3", midi = 59 },
+    { name = "G3", midi = 55 },
+    { name = "D3", midi = 50 },
+    { name = "A2", midi = 45 },
+    { name = "E2", midi = 40 },
+]
+
+[[tuning]]
+slug = "standard-banjo"
+name = "Standard 5-String Banjo (Open G)"
+strings = [
+    { name = "D4", midi = 62 },
+    { name = "B3", midi = 59 },
+    { name = "G3", midi = 55 },
+    { name = "D3", midi = 50 },
+    { name = "g4 (drone)", midi = 67 },
+]
+
+[[tuning]]
+slug = "standard-ukulele"
+name = "Standard Ukulele (Reentrant GCEA)"
+strings = [
+    { name = "A4", midi = 69 },
+    { name = "E4", midi = 64 },
+    { name = "C4", midi = 60 },
+    { name = "g4 (reentrant)", midi = 67 },
+]
+
+[[tuning]]
+slug = "drop-d-guitar"
+name = "Drop D Guitar (DADGBE)"
+strings = [
+    { name = "E4", midi = 64 },
+    { name = "B3", midi = 59 },
+    { name = "G3", midi = 55 },
+    { name = "D3", midi = 50 },
+    { name = "A2", midi = 45 },
+    { name = "D2", midi = 38 },
+]
+
+[[tuning]]
+slug = "tenor-banjo"
+name = "Tenor Banjo (Jazz CGDA)"
+strings = [
+    { name = "A3", midi = 57 },
+    { name = "D3", midi = 50 },
+    { name = "G2", midi = 43 },
+    { name = "C2", midi = 36 },
+]
+
+[[tuning]]
+slug = "tenor-ukulele"
+name = "Tenor Ukulele (Low-G GCEA)"
+strings = [
+    { name = "A4", midi = 69 },
+    { name = "E4", midi = 64 },
+    { name = "C4", midi = 60 },
+    { name = "G3", midi = 55 },
+]

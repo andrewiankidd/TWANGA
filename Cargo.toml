@@ -27,6 +27,9 @@ clap = { version = "4", features = ["derive"] }
 ringbuf = "0.4"
 crossterm = "0.28"
 ctrlc = "3"
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+directories = "5"
 
 # Keep DSP-critical code optimised even in dev so `cargo run` is usable for
 # live tuning without `--release`.

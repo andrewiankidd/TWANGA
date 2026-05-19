@@ -1,3 +1,5 @@
+mod tunings;
+
 use anyhow::{Context, Result, anyhow};
 use clap::{Parser, Subcommand};
 use std::fs::{self, File};
@@ -5,7 +7,7 @@ use std::io::BufWriter;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 use twanga_audio::{InputStream, OutputStream};
-use twanga_core::{Frequency, TunedString, Tuning};
+use twanga_core::{Frequency, MidiNote, PresetEntry, PresetString, TunedString, Tuning};
 use twanga_dsp::{Tuner, TunerMode, TunerReading};
 use twanga_synth::{exp_decay, sine};
 use twanga_tabs::{
@@ -91,34 +93,226 @@ enum Command {
     Devices,
     /// Convert a tab file from one format to another.
     Convert { input: String, output: String },
+    /// Manage user-defined tunings stored at the platform config dir alongside
+    /// the built-in presets.
+    Tunings {
+        #[command(subcommand)]
+        action: TuningsAction,
+    },
 }
 
-/// CLI mode menu for `tune`: index 0 is chromatic; the rest map to `Tuning::PRESETS`.
-fn tune_menu_options() -> Vec<&'static str> {
-    let mut v = Vec::with_capacity(1 + Tuning::PRESETS.len());
-    v.push("(no instrument — chromatic tuner)");
-    v.extend_from_slice(Tuning::PRESETS);
+#[derive(Subcommand)]
+enum TuningsAction {
+    /// List all known tunings (built-in + user-defined).
+    List,
+    /// Show the path to the user-tunings config file.
+    Path,
+    /// Define a new tuning interactively and save it to the user config.
+    Add,
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// `twanga tunings` subcommand
+// ──────────────────────────────────────────────────────────────────────────
+
+fn run_tunings_list() -> Result<()> {
+    let known = tunings::all_known_tunings();
+    if known.is_empty() {
+        eprintln!("(no tunings registered)");
+        return Ok(());
+    }
+    for k in known {
+        let tag = match k.origin {
+            tunings::Origin::Builtin => "built-in",
+            tunings::Origin::User => "user",
+        };
+        let pitches: Vec<String> = k
+            .entry
+            .strings
+            .iter()
+            .map(|s| MidiNote(s.midi).name())
+            .collect();
+        println!(
+            "{slug:<22} {tag:<10} {name} — [{pitches}]",
+            slug = k.slug,
+            tag = tag,
+            name = k.entry.name,
+            pitches = pitches.join(" "),
+        );
+    }
+    Ok(())
+}
+
+fn run_tunings_path() -> Result<()> {
+    let path = tunings::user_tunings_path()
+        .ok_or_else(|| anyhow!("no user config directory available on this platform"))?;
+    println!("{}", path.display());
+    if path.exists() {
+        eprintln!("(file exists)");
+    } else {
+        eprintln!("(file does not exist yet — run `twanga tunings add` to create it)");
+    }
+    Ok(())
+}
+
+fn run_tunings_add() -> Result<()> {
+    twanga_tui::motd::print_banner()?;
+    eprintln!("Define a new tuning. Strings are entered in string-number order");
+    eprintln!("(string 1 first), NOT pitch order — this matters for the banjo");
+    eprintln!("5th-string drone and the ukulele's reentrant high G. For reentrant");
+    eprintln!("or drone labels, hand-edit the TOML afterwards (see `tunings path`).");
+    eprintln!();
+
+    let string_count: usize = twanga_tui::prompt_parsed("How many strings?", 6_usize, |s| {
+        s.parse::<usize>().map_err(|e| e.to_string()).and_then(|n| {
+            if (1..=20).contains(&n) {
+                Ok(n)
+            } else {
+                Err("expected 1-20".into())
+            }
+        })
+    })?;
+
+    let mut strings: Vec<PresetString> = Vec::with_capacity(string_count);
+    for i in 1..=string_count {
+        let pitch = prompt_required_note(&format!("String {i} open pitch (e.g. A4, C#3)"))?;
+        strings.push(PresetString {
+            name: pitch.name(),
+            midi: pitch.0,
+        });
+    }
+
+    let default_name = "My Tuning".to_string();
+    let name: String =
+        twanga_tui::prompt_parsed("Display name", default_name, |s| Ok::<_, String>(s.into()))?;
+
+    let default_slug = slugify(&name);
+    let slug: String = twanga_tui::prompt_parsed("Slug (kebab-case)", default_slug, |s| {
+        validate_slug(s).map(|_| s.to_string())
+    })?;
+
+    let entry = PresetEntry {
+        slug: slug.clone(),
+        name: name.clone(),
+        strings,
+    };
+
+    let path = tunings::add_user_tuning(entry)?;
+    eprintln!();
+    eprintln!("Saved '{slug}' to {}", path.display());
+    eprintln!("It will appear in the tune/record/play menus from now on.");
+    Ok(())
+}
+
+/// Prompt for a required MIDI note (no default — empty input retries).
+fn prompt_required_note(prompt: &str) -> Result<MidiNote> {
+    use std::io::{BufRead, IsTerminal, Write};
+    let stdin = std::io::stdin();
+    let stderr = std::io::stderr();
+    if !stdin.is_terminal() || !stderr.is_terminal() {
+        return Err(anyhow!(
+            "prompt_required_note: stdin or stderr is not a terminal"
+        ));
+    }
+    let mut stderr_lock = stderr.lock();
+    let mut stdin_lock = stdin.lock();
+    let mut line = String::new();
+    for _ in 0..5 {
+        write!(stderr_lock, "{prompt}: ")?;
+        stderr_lock.flush()?;
+        line.clear();
+        stdin_lock.read_line(&mut line)?;
+        let trimmed = line.trim();
+        if let Some(m) = MidiNote::from_name(trimmed) {
+            return Ok(m);
+        }
+        writeln!(stderr_lock, "invalid note name (try A4, C#3, etc.)")?;
+    }
+    Err(anyhow!("too many invalid note names"))
+}
+
+/// Lowercase, replace non-alphanumeric runs with single hyphens, trim hyphens.
+/// `"Tenor Banjo (CGDA)"` → `"tenor-banjo-cgda"`.
+fn slugify(name: &str) -> String {
+    let mut out = String::with_capacity(name.len());
+    let mut last_was_hyphen = true;
+    for c in name.chars() {
+        if c.is_ascii_alphanumeric() {
+            out.push(c.to_ascii_lowercase());
+            last_was_hyphen = false;
+        } else if !last_was_hyphen {
+            out.push('-');
+            last_was_hyphen = true;
+        }
+    }
+    if out.ends_with('-') {
+        out.pop();
+    }
+    if out.is_empty() {
+        out.push_str("custom-tuning");
+    }
+    out
+}
+
+fn validate_slug(s: &str) -> std::result::Result<(), String> {
+    if s.is_empty() {
+        return Err("slug cannot be empty".into());
+    }
+    if !s
+        .chars()
+        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+    {
+        return Err("slug must be lowercase ASCII letters, digits, and hyphens".into());
+    }
+    if s.starts_with('-') || s.ends_with('-') {
+        return Err("slug cannot start or end with a hyphen".into());
+    }
+    Ok(())
+}
+
+/// Slug list for menus — built-in presets first, then user-defined.
+fn known_slugs() -> Vec<String> {
+    tunings::all_known_tunings()
+        .into_iter()
+        .map(|k| k.slug)
+        .collect()
+}
+
+/// Resolve a slug to a `Tuning` via the merged registry. Returns `None` if
+/// the slug isn't in either the built-in or the user file.
+fn lookup_tuning(slug: &str) -> Option<Tuning> {
+    tunings::lookup(slug).map(|k| k.to_tuning())
+}
+
+/// CLI mode menu for `tune`: index 0 is chromatic; the rest are slugs from
+/// the merged registry (built-in + user-defined).
+fn tune_menu_options() -> Vec<String> {
+    let slugs = known_slugs();
+    let mut v = Vec::with_capacity(1 + slugs.len());
+    v.push("(no instrument — chromatic tuner)".to_string());
+    v.extend(slugs);
     v
 }
 
 fn resolve_mode(arg: Option<String>) -> Result<TunerMode> {
     if let Some(name) = arg {
-        let tuning = Tuning::from_preset(&name).ok_or_else(|| {
+        let tuning = lookup_tuning(&name).ok_or_else(|| {
             anyhow!(
                 "unknown preset '{name}'. options: {}",
-                Tuning::PRESETS.join(", ")
+                known_slugs().join(", ")
             )
         })?;
         return Ok(TunerMode::Strings(tuning));
     }
 
     let options = tune_menu_options();
-    let idx = twanga_tui::select("Choose a tuning:", &options)?;
+    let refs: Vec<&str> = options.iter().map(|s| s.as_str()).collect();
+    let idx = twanga_tui::select("Choose a tuning:", &refs)?;
     if idx == 0 {
         Ok(TunerMode::Chromatic)
     } else {
-        let preset = options[idx];
-        let tuning = Tuning::from_preset(preset)
+        let slug = &options[idx];
+        let tuning = lookup_tuning(slug)
             .ok_or_else(|| anyhow!("preset registry desync; report this bug"))?;
         Ok(TunerMode::Strings(tuning))
     }
@@ -126,16 +320,17 @@ fn resolve_mode(arg: Option<String>) -> Result<TunerMode> {
 
 fn resolve_tuning(arg: Option<String>) -> Result<Tuning> {
     if let Some(name) = arg {
-        return Tuning::from_preset(&name).ok_or_else(|| {
+        return lookup_tuning(&name).ok_or_else(|| {
             anyhow!(
                 "unknown preset '{name}'. options: {}",
-                Tuning::PRESETS.join(", ")
+                known_slugs().join(", ")
             )
         });
     }
-    let idx = twanga_tui::select("Choose a tuning to record against:", Tuning::PRESETS)?;
-    Tuning::from_preset(Tuning::PRESETS[idx])
-        .ok_or_else(|| anyhow!("preset registry desync; report this bug"))
+    let slugs = known_slugs();
+    let refs: Vec<&str> = slugs.iter().map(|s| s.as_str()).collect();
+    let idx = twanga_tui::select("Choose a tuning to record against:", &refs)?;
+    lookup_tuning(&slugs[idx]).ok_or_else(|| anyhow!("preset registry desync; report this bug"))
 }
 
 /// If `arg` is provided, return as-is. Otherwise prompt with the file's own
@@ -153,15 +348,16 @@ fn resolve_play_tuning(arg: Option<String>, tab: &ParsedTab) -> Result<Option<St
         return Ok(None);
     }
     let as_recorded = format!("(as recorded in file: {})", tab.tuning_names.join(" "));
-    let mut owned: Vec<String> = Vec::with_capacity(1 + Tuning::PRESETS.len());
+    let slugs = known_slugs();
+    let mut owned: Vec<String> = Vec::with_capacity(1 + slugs.len());
     owned.push(as_recorded);
-    owned.extend(Tuning::PRESETS.iter().map(|s| (*s).to_string()));
+    owned.extend(slugs.iter().cloned());
     let refs: Vec<&str> = owned.iter().map(|s| s.as_str()).collect();
     let idx = twanga_tui::select_with_default("Choose a tuning for playback:", &refs, 0)?;
     if idx == 0 {
         Ok(None)
     } else {
-        Ok(Some(Tuning::PRESETS[idx - 1].to_string()))
+        Ok(Some(slugs[idx - 1].clone()))
     }
 }
 
@@ -612,6 +808,11 @@ fn main() -> Result<()> {
         Command::Convert { input, output } => {
             println!("convert: not yet implemented ({input} -> {output})");
         }
+        Command::Tunings { action } => match action {
+            TuningsAction::List => run_tunings_list()?,
+            TuningsAction::Path => run_tunings_path()?,
+            TuningsAction::Add => run_tunings_add()?,
+        },
     }
     Ok(())
 }
@@ -639,10 +840,10 @@ fn run_playback(
     // its header, so downstream code (wait mode, display) sees one consistent
     // tuning throughout.
     let tab = if let Some(name) = tuning_override.as_deref() {
-        let target = Tuning::from_preset(name).ok_or_else(|| {
+        let target = lookup_tuning(name).ok_or_else(|| {
             anyhow!(
                 "unknown tuning preset '{name}'. options: {}",
-                Tuning::PRESETS.join(", ")
+                known_slugs().join(", ")
             )
         })?;
         parsed.transpose_to(&target, MAX_FRET)
@@ -921,4 +1122,46 @@ fn matches_any_expected(detected: Frequency, expected: &[(u8, u8)], tuning: &Tun
         }
     }
     false
+}
+
+#[cfg(test)]
+mod slug_tests {
+    use super::*;
+
+    #[test]
+    fn slugify_normalises_spaces_and_parens() {
+        assert_eq!(slugify("Tenor Banjo (CGDA)"), "tenor-banjo-cgda");
+    }
+
+    #[test]
+    fn slugify_handles_trailing_punctuation_without_dangling_hyphen() {
+        assert_eq!(slugify("Drop D Guitar!"), "drop-d-guitar");
+    }
+
+    #[test]
+    fn slugify_strips_leading_punctuation_too() {
+        assert_eq!(slugify("...Standard Guitar"), "standard-guitar");
+    }
+
+    #[test]
+    fn slugify_empty_input_falls_back_to_placeholder() {
+        assert_eq!(slugify(""), "custom-tuning");
+        assert_eq!(slugify("???"), "custom-tuning");
+    }
+
+    #[test]
+    fn validate_slug_accepts_canonical_form() {
+        assert!(validate_slug("standard-banjo").is_ok());
+        assert!(validate_slug("drop-d-guitar").is_ok());
+        assert!(validate_slug("a1").is_ok());
+    }
+
+    #[test]
+    fn validate_slug_rejects_uppercase_and_underscores_and_edges() {
+        assert!(validate_slug("Standard-Banjo").is_err());
+        assert!(validate_slug("standard_banjo").is_err());
+        assert!(validate_slug("-leading").is_err());
+        assert!(validate_slug("trailing-").is_err());
+        assert!(validate_slug("").is_err());
+    }
 }
