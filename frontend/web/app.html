@@ -1097,10 +1097,20 @@
             match_pitch_to_fret,
             serialize_recording,
             builtin_preset_entry,
+            parse_alphatex,
             WebTuner,
+            WebParsedTab,
         } from './pkg/twanga_web.js';
         import { registry as rendererRegistry } from './render/registry.js';
         import { installBuiltinRenderers } from './render/builtins/index.js';
+        import {
+            loadUserTunings,
+            saveUserTunings,
+            userTuningBySlug,
+            addUserTuningEntry,
+            deleteUserTuning,
+        } from './lib/user-tunings.js';
+        import { makeTuningController, fullName, shortName } from './controllers/tuning.js';
 
         function el(id) { return document.getElementById(id); }
 
@@ -1225,33 +1235,29 @@
             window.addEventListener('hashchange', routeFromHash);
             routeFromHash();
 
-            // Hydrate tuner state from localStorage (cross-platform: works
-            // in web browsers, Tauri webview, Tauri Mobile webview). If a
-            // future Tauri command syncs ~/.config/twanga/tunings.toml with
-            // localStorage, the CLI and GUI end up sharing one source of
-            // truth — but that's a separate item.
-            const saved = loadTunerState();
-            tunerState.capo = Number.isInteger(saved.capo) && saved.capo >= 0 && saved.capo <= 12
-                ? saved.capo
-                : 0;
-            tunerState.capoMode = saved.capoMode === 'per-string' ? 'per-string' : 'uniform';
-            // Per-string array is validated against the active tuning's
-            // string count inside `selectTuning`, so we accept whatever
-            // shape was saved and let the length check repair it.
-            tunerState.capoSpec = Array.isArray(saved.capoSpec)
-                ? saved.capoSpec
-                    .map((v) => (Number.isInteger(v) && v >= 0 && v <= MAX_CAPO ? v : 0))
-                : [];
-
-            renderTuningPicker();
-            wireCapoControl();
-            // Default to whatever was saved, falling back to chromatic for
-            // first-time visitors. Unknown slugs (e.g. from an older saved
-            // state referencing a tuning we removed, or a user tuning that
-            // was deleted since last visit) silently fall back too.
-            const savedSlug = typeof saved.tuning === 'string' ? saved.tuning : 'chromatic';
-            const initialSlug = allKnownSlugs().includes(savedSlug) ? savedSlug : 'chromatic';
-            selectTuning(initialSlug);
+            // Tuner: hydrate via the shared tuning+capo controller. The
+            // controller restores its own persisted state from localStorage
+            // under `STORAGE_KEY`; we only need to pick the initial
+            // tuning (saved slug → fall back to chromatic) and rebuild the
+            // WebTuner whenever the controller fires onChange.
+            tunerController = makeTuningController({
+                pickerId: 'tuning-picker',
+                activeNameId: null, // Tuner has its own `active-tuning-name` updated by rebuildTuner
+                capoControlId: 'capo-control',
+                capoUniformId: 'capo-uniform',
+                capoDownId: 'capo-down',
+                capoUpId: 'capo-up',
+                capoValueId: 'capo-value',
+                capoModeToggleId: 'capo-mode-toggle',
+                capoPerStringId: 'capo-per-string',
+                storageKey: STORAGE_KEY,
+                includeChromatic: true,
+                onChange: () => rebuildTuner(),
+            });
+            const savedSlug = tunerController.getMode();
+            const tunerSlugs = ['chromatic', ...allKnownSlugs()];
+            const initialSlug = tunerSlugs.includes(savedSlug) ? savedSlug : 'chromatic';
+            tunerController.select(initialSlug);
 
             el('pitch-btn').addEventListener('click', () => {
                 stopMic(); // can't run synthetic + mic at once
@@ -1305,318 +1311,55 @@
         const STORAGE_KEY = 'twanga-tuner-v1';
 
         const tunerState = {
-            mode: null,        // 'chromatic' or a tuning slug
-            capoMode: 'uniform', // 'uniform' (single 0..MAX_CAPO) or 'per-string' (array)
-            capo: 0,           // uniform integer
-            capoSpec: [],      // per-string array, length matches the active tuning's string count
-            baseLabels: [],    // no-capo string labels for the active tuning (for the per-string capo panel)
-            tuner: null,       // active WebTuner instance
+            tuner: null,            // active WebTuner instance
             rowsByLabel: new Map(), // string label → row element (string mode only)
             sampleRate: 48_000,
         };
+        // The Tuner's tuning + capo state lives in `tunerController` (an
+        // instance of `makeTuningController`). The controller owns the
+        // picker, the uniform stepper, the mode toggle, and the
+        // per-string panel; we just call `getMode()` / `capoSpecString()`
+        // / `getPresetEntry()` etc. when we need to rebuild the WebTuner.
+        let tunerController = null;
 
-        /// localStorage helpers — wrapped so private-browsing failures
-        /// (Safari throws on `setItem` in private mode, Firefox sometimes
-        /// blocks reads) never break the page. Schema:
-        /// `{ tuning, capoMode, capo, capoSpec }`. Older saves (just
-        /// `{tuning, capo}`) restore as `capoMode: 'uniform'`.
-        function loadTunerState() {
-            try {
-                const raw = localStorage.getItem(STORAGE_KEY);
-                if (!raw) return {};
-                const parsed = JSON.parse(raw);
-                return typeof parsed === 'object' && parsed !== null ? parsed : {};
-            } catch (e) {
-                console.warn('localStorage read failed; ignoring', e);
-                return {};
-            }
-        }
-        function saveTunerState() {
-            try {
-                localStorage.setItem(STORAGE_KEY, JSON.stringify({
-                    tuning: tunerState.mode,
-                    capoMode: tunerState.capoMode,
-                    capo: tunerState.capo,
-                    capoSpec: tunerState.capoSpec,
-                }));
-            } catch (e) {
-                console.warn('localStorage write failed; settings will not persist', e);
-            }
-        }
-
-        /// True if either the uniform value or any per-string entry is > 0.
-        /// Drives whether to use the `_with_capo` constructor vs the plain
-        /// one — saves a noop `Capo::parse` for the common case of no capo.
-        function capoIsActive() {
-            return tunerState.capoMode === 'per-string'
-                ? tunerState.capoSpec.some((v) => v > 0)
-                : tunerState.capo > 0;
-        }
-
-        /// Build the CLI-compatible capo spec string for the active mode.
-        /// Uniform → `"3"`; per-string → `"0,2,2,2,2,2"`. Empty when capo is
-        /// fully off in either mode (caller checks `capoIsActive` first).
-        function capoSpecString() {
-            return tunerState.capoMode === 'per-string'
-                ? tunerState.capoSpec.join(',')
-                : String(tunerState.capo);
-        }
-
-        /// Query the no-capo string labels for the active tuning. Used to
-        /// label the per-string capo panel rows so the user sees "E2"
-        /// instead of "String 6". One WebTuner construction per tuning
-        /// change is fine — the tuner is destroyed immediately after.
-        function computeBaseLabels(slug) {
-            if (slug === 'chromatic') return [];
-            try {
-                const user = userTuningBySlug(slug);
-                const t = user
-                    ? WebTuner.new_for_strings_custom(user, 48_000)
-                    : WebTuner.new_for_strings(slug, 48_000);
-                const labels = t.string_labels();
-                t.free?.();
-                return labels;
-            } catch (e) {
-                console.warn('computeBaseLabels failed for', slug, e);
-                return [];
-            }
-        }
-
-        /// Picker buttons use the trimmed display name (first segment before
-        /// any parenthetical). The full name is shown separately on the
-        /// active-tuning row so the picker stays compact on narrow screens.
-        function fullName(slug) {
-            if (slug === 'chromatic') return 'Chromatic';
-            const builtin = preset_display_name(slug);
-            if (builtin) return builtin;
-            const user = userTuningBySlug(slug);
-            return user ? user.name : slug;
-        }
-        function shortName(slug) {
-            const full = fullName(slug);
-            const head = full.split('(')[0].trim();
-            return head || full;
-        }
-
-        /// Every slug the tuner picker can render — chromatic sentinel +
-        /// built-ins (in registry order) + user-defined tunings (in the
-        /// order they were saved). The Tunings screen and saved-state
-        /// restore both consult this so user tunings are first-class.
+        /// Aggregate slug list shared by the Tunings screen and the
+        /// Recorder. The Tuner controller has its own internal copy that
+        /// includes the chromatic sentinel; this one excludes it because
+        /// the Tunings screen + Recorder don't want chromatic as a real
+        /// entry.
         function allKnownSlugs() {
             const builtinSet = new Set(builtin_tuning_slugs());
             const users = loadUserTunings()
                 .map((e) => e.slug)
-                .filter((s) => !builtinSet.has(s)); // user slug shadowing built-in: ignored
-            return ['chromatic', ...builtin_tuning_slugs(), ...users];
+                .filter((s) => !builtinSet.has(s));
+            return [...builtin_tuning_slugs(), ...users];
         }
 
-        function renderTuningPicker() {
-            const picker = el('tuning-picker');
-            picker.textContent = '';
-
-            const makeButton = (slug) => {
-                const btn = document.createElement('button');
-                btn.className = 'tuning-option';
-                btn.dataset.slug = slug;
-                btn.textContent = shortName(slug);
-                btn.title = fullName(slug); // hover surfaces the full name
-                btn.addEventListener('click', () => selectTuning(slug));
-                return btn;
-            };
-
-            for (const slug of allKnownSlugs()) {
-                picker.appendChild(makeButton(slug));
-            }
-        }
-
-        function wireCapoControl() {
-            el('capo-down').addEventListener('click', () => {
-                if (tunerState.capo > 0) {
-                    tunerState.capo -= 1;
-                    onCapoChanged();
-                }
-            });
-            el('capo-up').addEventListener('click', () => {
-                if (tunerState.capo < MAX_CAPO) {
-                    tunerState.capo += 1;
-                    onCapoChanged();
-                }
-            });
-            el('capo-mode-toggle').addEventListener('click', toggleCapoMode);
-            updateCapoDisplay();
-        }
-
-        /// Flip between uniform and per-string capo. Carries the current
-        /// uniform value into the per-string spec on the first switch so
-        /// the visual state stays continuous; the reverse direction
-        /// preserves the uniform value separately (so toggling back and
-        /// forth doesn't clobber it).
-        function toggleCapoMode() {
-            if (tunerState.mode === 'chromatic') return; // no capo in chromatic
-            if (tunerState.capoMode === 'uniform') {
-                const n = tunerState.baseLabels.length;
-                tunerState.capoMode = 'per-string';
-                // Seed the per-string array from the uniform value so the
-                // user sees the same capo state in both views the first
-                // time they switch.
-                tunerState.capoSpec = Array.from(
-                    { length: n },
-                    () => tunerState.capo,
-                );
-            } else {
-                tunerState.capoMode = 'uniform';
-            }
-            updateCapoDisplay();
-            renderPerStringCapo();
-            rebuildTuner();
-            saveTunerState();
-        }
-
-        function updateCapoDisplay() {
-            el('capo-value').textContent = tunerState.capo.toString();
-            el('capo-down').disabled = tunerState.capo <= 0;
-            el('capo-up').disabled = tunerState.capo >= MAX_CAPO;
-            // Capo applies only in string mode — chromatic readings come
-            // back with whatever-note labels, no targets to shift.
-            el('capo-control').hidden = tunerState.mode === 'chromatic';
-            // Mode toggle reflects active mode; uniform stepper hides in
-            // per-string mode so the only source of truth visible is the
-            // panel below.
-            el('capo-mode-toggle').classList.toggle(
-                'active',
-                tunerState.capoMode === 'per-string',
-            );
-            el('capo-uniform').hidden = tunerState.capoMode === 'per-string';
-            el('capo-per-string').hidden =
-                tunerState.mode === 'chromatic' ||
-                tunerState.capoMode !== 'per-string';
-        }
-
-        function onCapoChanged() {
-            updateCapoDisplay();
-            // Rebuild tuner with the new capo. Display name updates to
-            // include the "(capo N)" suffix that `Capo::apply` produces.
-            rebuildTuner();
-            saveTunerState();
-        }
-
-        /// Render the per-string capo panel — one stepper row per string
-        /// in the active tuning, labelled with the no-capo string name.
-        /// Idempotent; safe to call after tuning changes or mode toggles.
-        function renderPerStringCapo() {
-            const panel = el('capo-per-string');
-            panel.textContent = '';
-            if (tunerState.mode === 'chromatic' || tunerState.capoMode !== 'per-string') {
-                return;
-            }
-
-            const header = document.createElement('div');
-            header.className = 'ps-header';
-            header.textContent = 'Per-string capo (semitones)';
-            panel.appendChild(header);
-
-            tunerState.baseLabels.forEach((label, idx) => {
-                const row = document.createElement('div');
-                row.className = 'capo-string-row';
-
-                const lab = document.createElement('span');
-                lab.className = 'ps-label';
-                lab.textContent = `#${idx + 1} (${label})`;
-                row.appendChild(lab);
-
-                const down = document.createElement('button');
-                down.className = 'capo-btn';
-                down.textContent = '−';
-                down.setAttribute('aria-label', `Decrease capo on string ${idx + 1}`);
-
-                const value = document.createElement('span');
-                value.className = 'capo-value';
-
-                const up = document.createElement('button');
-                up.className = 'capo-btn';
-                up.textContent = '+';
-                up.setAttribute('aria-label', `Increase capo on string ${idx + 1}`);
-
-                const refresh = () => {
-                    const v = tunerState.capoSpec[idx] ?? 0;
-                    value.textContent = String(v);
-                    down.disabled = v <= 0;
-                    up.disabled = v >= MAX_CAPO;
-                };
-                down.addEventListener('click', () => {
-                    if ((tunerState.capoSpec[idx] ?? 0) > 0) {
-                        tunerState.capoSpec[idx] -= 1;
-                        refresh();
-                        rebuildTuner();
-                        saveTunerState();
-                    }
-                });
-                up.addEventListener('click', () => {
-                    if ((tunerState.capoSpec[idx] ?? 0) < MAX_CAPO) {
-                        tunerState.capoSpec[idx] = (tunerState.capoSpec[idx] ?? 0) + 1;
-                        refresh();
-                        rebuildTuner();
-                        saveTunerState();
-                    }
-                });
-                refresh();
-
-                row.appendChild(down);
-                row.appendChild(value);
-                row.appendChild(up);
-                panel.appendChild(row);
-            });
-        }
-
-        function selectTuning(slug) {
-            if (tunerState.mode === slug && tunerState.tuner !== null) return;
-            tunerState.mode = slug;
-            tunerState.baseLabels = computeBaseLabels(slug);
-            // Per-string spec must match the new string count. If we were
-            // in per-string mode and the lengths match, preserve the spec
-            // (rare — string counts vary across tunings); otherwise reset
-            // to all-zeros so the user starts from a clean slate.
-            if (tunerState.capoSpec.length !== tunerState.baseLabels.length) {
-                tunerState.capoSpec = tunerState.baseLabels.map(() => 0);
-            }
-
-            document.querySelectorAll('.tuning-option').forEach((btn) => {
-                btn.classList.toggle('active', btn.dataset.slug === slug);
-            });
-
-            updateCapoDisplay();
-            renderPerStringCapo();
-            rebuildTuner();
-            saveTunerState();
-        }
-
-        /// Construct (or replace) the underlying WebTuner. Splits out of
-        /// `selectTuning` so capo changes can rebuild without touching the
-        /// active-tuning bookkeeping. User tunings (those persisted in
-        /// `localStorage` via the Tunings screen) take the
-        /// `new_for_strings_custom*` path, passing their PresetEntry JSON
-        /// directly. Built-ins use slug-based constructors. Capo mode
-        /// (uniform vs per-string) is resolved via `capoIsActive` +
+        /// Construct (or replace) the underlying WebTuner from the
+        /// controller's current state. Called as the controller's
+        /// `onChange` callback whenever the user picks a tuning or
+        /// changes the capo. Capo mode (uniform vs per-string) is
+        /// resolved via the controller's `capoIsActive` +
         /// `capoSpecString` so the call site stays mode-agnostic.
         function rebuildTuner() {
             const sr = audioState.ctx?.sampleRate ?? 48_000;
             tunerState.sampleRate = sr;
             tunerState.tuner?.free?.();
 
-            const spec = capoSpecString();
-            const useCapo = capoIsActive();
-            const userEntry = userTuningBySlug(tunerState.mode);
-            if (tunerState.mode === 'chromatic') {
+            const mode = tunerController.getMode();
+            const userEntry = userTuningBySlug(mode);
+            const useCapo = tunerController.capoIsActive();
+            const spec = tunerController.capoSpecString();
+            if (mode === 'chromatic') {
                 tunerState.tuner = WebTuner.new_chromatic(sr);
             } else if (userEntry) {
                 tunerState.tuner = useCapo
                     ? WebTuner.new_for_strings_custom_with_capo(userEntry, spec, sr)
                     : WebTuner.new_for_strings_custom(userEntry, sr);
             } else if (useCapo) {
-                tunerState.tuner = WebTuner.new_for_strings_with_capo(
-                    tunerState.mode, spec, sr);
+                tunerState.tuner = WebTuner.new_for_strings_with_capo(mode, spec, sr);
             } else {
-                tunerState.tuner = WebTuner.new_for_strings(tunerState.mode, sr);
+                tunerState.tuner = WebTuner.new_for_strings(mode, sr);
             }
 
             el('active-tuning-name').textContent = tunerState.tuner.name();
@@ -1666,7 +1409,7 @@
                 return row;
             };
 
-            if (tunerState.mode === 'chromatic') {
+            if (tunerController.getMode() === 'chromatic') {
                 // Chromatic mode: single placeholder row, label updated
                 // dynamically as readings arrive (since we don't know
                 // which note they'll be ahead of time).
@@ -1690,7 +1433,7 @@
         function applyReadings(readings) {
             for (const r of readings) {
                 let row;
-                if (tunerState.mode === 'chromatic') {
+                if (tunerController.getMode() === 'chromatic') {
                     // Chromatic mode reuses the single row; reading.label is
                     // the detected note name (`A4`, `C#3`, …). Update head.
                     row = tunerState.rowsByLabel.get('__chromatic__');
@@ -1880,52 +1623,30 @@
             if ((location.hash.replace(/^#/, '') || 'menu') === 'menu') rollSplash();
         });
 
-        // ----------------------------------------------------------------
-        // User tunings (Tunings screen + localStorage persistence)
-        // ----------------------------------------------------------------
-        //
-        // Stored as a JSON array of `PresetEntry`-shaped objects under the
-        // `twanga-user-tunings-v1` key — same schema the CLI persists under
-        // `$CONFIG/twanga/tunings.toml`. A future Tauri command could
-        // bidirectionally sync the two surfaces; in the meantime they're
-        // independent but use the same shape.
+        // User-tunings storage now lives in `./lib/user-tunings.js` —
+        // imported at the top of this module. The Tunings screen, Tuner
+        // controller, and Recorder all consume the same imported helpers.
 
-        const USER_TUNINGS_KEY = 'twanga-user-tunings-v1';
-
-        function loadUserTunings() {
+        // Temporary shim — the Recorder still has its own pre-refactor
+        // tuning state machine (next commit in Phase 2 moves it onto the
+        // shared controller). Until then, expose the same
+        // `computeBaseLabels` the controller uses internally so the
+        // Recorder's `recSelectTuning` keeps working. Delete this when
+        // Phase 2 commit 2 lands.
+        function computeBaseLabels(slug) {
+            if (slug === 'chromatic') return [];
             try {
-                const raw = localStorage.getItem(USER_TUNINGS_KEY);
-                if (!raw) return [];
-                const parsed = JSON.parse(raw);
-                return Array.isArray(parsed) ? parsed : [];
+                const user = userTuningBySlug(slug);
+                const t = user
+                    ? WebTuner.new_for_strings_custom(user, 48_000)
+                    : WebTuner.new_for_strings(slug, 48_000);
+                const labels = t.string_labels();
+                t.free?.();
+                return labels;
             } catch (e) {
-                console.warn('localStorage read failed for user tunings; ignoring', e);
+                console.warn('computeBaseLabels failed for', slug, e);
                 return [];
             }
-        }
-        function saveUserTunings(entries) {
-            try {
-                localStorage.setItem(USER_TUNINGS_KEY, JSON.stringify(entries));
-            } catch (e) {
-                console.warn('localStorage write failed; user tuning will not persist', e);
-            }
-        }
-        function userTuningBySlug(slug) {
-            if (typeof slug !== 'string' || !slug || slug === 'chromatic') return null;
-            return loadUserTunings().find((e) => e.slug === slug) ?? null;
-        }
-        function addUserTuningEntry(entry) {
-            validate_preset_entry(entry); // throws a string on validation failure
-            const entries = loadUserTunings();
-            if (entries.some((e) => e.slug === entry.slug)) {
-                throw `a user tuning with slug '${entry.slug}' already exists`;
-            }
-            entries.push(entry);
-            saveUserTunings(entries);
-        }
-        function deleteUserTuning(slug) {
-            const entries = loadUserTunings().filter((e) => e.slug !== slug);
-            saveUserTunings(entries);
         }
 
         /// Mirror of `twanga-cli`'s `slugify`: lowercase, runs of non-alnum
@@ -2008,15 +1729,19 @@
                     del.addEventListener('click', () => {
                         if (!confirm(`Delete tuning '${r.slug}'?`)) return;
                         deleteUserTuning(r.slug);
-                        // If the deleted tuning was active in the picker,
-                        // fall back to chromatic so we don't leave the tuner
-                        // pointing at a non-existent slug.
-                        if (tunerState.mode === r.slug) selectTuning('chromatic');
+                        // Tuner controller refreshes its picker and falls
+                        // back to chromatic if the active slug just
+                        // vanished. Recorder still wires its picker
+                        // directly (refactor pending) so we call its
+                        // re-render path explicitly.
+                        tunerController?.refresh();
+                        if (typeof recRenderTuningPicker === 'function') {
+                            recRenderTuningPicker();
+                            document.querySelectorAll('#recorder-tuning-picker .tuning-option').forEach((b) => {
+                                b.classList.toggle('active', b.dataset.slug === recState.mode);
+                            });
+                        }
                         renderTuningsScreen();
-                        renderTuningPicker();
-                        document.querySelectorAll('.tuning-option').forEach((b) => {
-                            b.classList.toggle('active', b.dataset.slug === tunerState.mode);
-                        });
                     });
                     row.appendChild(del);
                 }
@@ -2171,13 +1896,17 @@
 
                 okBox.textContent = `Saved '${slug}'. It now appears in the Tuner picker.`;
                 renderTuningsScreen();
-                renderTuningPicker();
-                // Keep the just-added tuning highlighted in the picker if
-                // it's the currently-active mode (otherwise leave whatever
-                // the user had selected alone).
-                document.querySelectorAll('.tuning-option').forEach((b) => {
-                    b.classList.toggle('active', b.dataset.slug === tunerState.mode);
-                });
+                // Tuner picker via controller; Recorder picker via the
+                // (still-direct) `recRenderTuningPicker` until its own
+                // refactor lands. The controller's `refresh()` preserves
+                // the active mode and re-renders all buttons.
+                tunerController?.refresh();
+                if (typeof recRenderTuningPicker === 'function') {
+                    recRenderTuningPicker();
+                    document.querySelectorAll('#recorder-tuning-picker .tuning-option').forEach((b) => {
+                        b.classList.toggle('active', b.dataset.slug === recState.mode);
+                    });
+                }
                 resetForm();
             });
 
