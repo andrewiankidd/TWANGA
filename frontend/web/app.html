@@ -1627,28 +1627,6 @@
         // imported at the top of this module. The Tunings screen, Tuner
         // controller, and Recorder all consume the same imported helpers.
 
-        // Temporary shim — the Recorder still has its own pre-refactor
-        // tuning state machine (next commit in Phase 2 moves it onto the
-        // shared controller). Until then, expose the same
-        // `computeBaseLabels` the controller uses internally so the
-        // Recorder's `recSelectTuning` keeps working. Delete this when
-        // Phase 2 commit 2 lands.
-        function computeBaseLabels(slug) {
-            if (slug === 'chromatic') return [];
-            try {
-                const user = userTuningBySlug(slug);
-                const t = user
-                    ? WebTuner.new_for_strings_custom(user, 48_000)
-                    : WebTuner.new_for_strings(slug, 48_000);
-                const labels = t.string_labels();
-                t.free?.();
-                return labels;
-            } catch (e) {
-                console.warn('computeBaseLabels failed for', slug, e);
-                return [];
-            }
-        }
-
         /// Mirror of `twanga-cli`'s `slugify`: lowercase, runs of non-alnum
         /// collapse to single hyphens, no leading/trailing hyphen. Returns
         /// `custom-tuning` for empty / pure-punctuation input so the slug
@@ -1729,18 +1707,12 @@
                     del.addEventListener('click', () => {
                         if (!confirm(`Delete tuning '${r.slug}'?`)) return;
                         deleteUserTuning(r.slug);
-                        // Tuner controller refreshes its picker and falls
-                        // back to chromatic if the active slug just
-                        // vanished. Recorder still wires its picker
-                        // directly (refactor pending) so we call its
-                        // re-render path explicitly.
+                        // Both controllers refresh their pickers and fall
+                        // back to a still-valid slug if the active one
+                        // just vanished. The controller handles the
+                        // active-class repaint internally.
                         tunerController?.refresh();
-                        if (typeof recRenderTuningPicker === 'function') {
-                            recRenderTuningPicker();
-                            document.querySelectorAll('#recorder-tuning-picker .tuning-option').forEach((b) => {
-                                b.classList.toggle('active', b.dataset.slug === recState.mode);
-                            });
-                        }
+                        recState.tuning?.refresh();
                         renderTuningsScreen();
                     });
                     row.appendChild(del);
@@ -1896,17 +1868,10 @@
 
                 okBox.textContent = `Saved '${slug}'. It now appears in the Tuner picker.`;
                 renderTuningsScreen();
-                // Tuner picker via controller; Recorder picker via the
-                // (still-direct) `recRenderTuningPicker` until its own
-                // refactor lands. The controller's `refresh()` preserves
-                // the active mode and re-renders all buttons.
+                // Both controllers re-render their pickers and preserve
+                // the active mode if it's still valid.
                 tunerController?.refresh();
-                if (typeof recRenderTuningPicker === 'function') {
-                    recRenderTuningPicker();
-                    document.querySelectorAll('#recorder-tuning-picker .tuning-option').forEach((b) => {
-                        b.classList.toggle('active', b.dataset.slug === recState.mode);
-                    });
-                }
+                recState.tuning?.refresh();
                 resetForm();
             });
 
@@ -2078,12 +2043,12 @@
         const MAX_FRET = 20; // matches twanga-cli::main::MAX_FRET
 
         const recState = {
-            // Settings (persisted)
-            mode: null,             // tuning slug, never 'chromatic' for Recorder
-            capoMode: 'uniform',
-            capo: 0,
-            capoSpec: [],
-            baseLabels: [],
+            // Tuning + capo state lives in `tuning` (a tuning controller
+            // instance — see makeTuningController). Set up by initRecorder.
+            tuning: null,
+
+            // Recorder-specific settings (persisted under RECORDER_STORAGE_KEY,
+            // separate from the controller's own tuning storage key).
             bpm: 120,
             resolutionDenom: 8,
             blockWidth: 32,
@@ -2105,15 +2070,12 @@
             droppedCount: 0,        // pitches that couldn't reach any fret within MAX_FRET
             tickHandle: null,
             chromaticTuner: null,   // WebTuner in chromatic mode, fed by mic
-            presetEntry: null,      // PresetEntry JSON of the active tuning (cached for match calls)
 
             rendererController: null,
         };
 
         function initRecorder() {
             recHydrateFromStorage();
-            recRenderTuningPicker();
-            recWireCapoControl();
             recWireSettings();
             recWireButtons();
             recState.rendererController = wireRendererHost({
@@ -2122,14 +2084,35 @@
                 storageKey: 'twanga-recorder-renderer-v1',
                 initialScore: recEmptyScoreOrSample(),
             });
-            // Saved-state restore: select the saved tuning if it still
-            // exists in the merged registry, else fall back to the first
-            // available built-in.
+
+            // Tuning + capo controller. Owns picker / capo stepper /
+            // per-string panel / persistence. `onChange` fires on every
+            // user-driven change → we reset any in-progress score because
+            // string indices + post-capo labels both shift.
+            recState.tuning = makeTuningController({
+                pickerId: 'recorder-tuning-picker',
+                activeNameId: 'recorder-active-tuning-name',
+                capoControlId: 'recorder-capo-control',
+                capoUniformId: 'recorder-capo-uniform',
+                capoDownId: 'recorder-capo-down',
+                capoUpId: 'recorder-capo-up',
+                capoValueId: 'recorder-capo-value',
+                capoModeToggleId: 'recorder-capo-mode-toggle',
+                capoPerStringId: 'recorder-capo-per-string',
+                storageKey: 'twanga-recorder-tuning-v1',
+                includeChromatic: false,
+                onChange: () => recClear(),
+            });
+
+            // Saved-state restore: pick whatever the controller restored,
+            // falling back to the first built-in if the saved slug got
+            // deleted between sessions.
+            const savedSlug = recState.tuning.getMode();
             const builtins = builtin_tuning_slugs();
             const allUserSlugs = loadUserTunings().map((e) => e.slug);
             const allValid = [...builtins, ...allUserSlugs];
-            const initial = allValid.includes(recState.mode) ? recState.mode : builtins[0];
-            if (initial) recSelectTuning(initial);
+            const initial = allValid.includes(savedSlug) ? savedSlug : builtins[0];
+            if (initial) recState.tuning.select(initial);
         }
 
         // ---- Persistence ----------------------------------------------------
@@ -2142,13 +2125,9 @@
             } catch (e) {
                 console.warn('recorder localStorage read failed', e);
             }
-            recState.mode = typeof saved.mode === 'string' ? saved.mode : null;
-            recState.capoMode = saved.capoMode === 'per-string' ? 'per-string' : 'uniform';
-            recState.capo = Number.isInteger(saved.capo) && saved.capo >= 0 && saved.capo <= MAX_CAPO
-                ? saved.capo : 0;
-            recState.capoSpec = Array.isArray(saved.capoSpec)
-                ? saved.capoSpec.map((v) => Number.isInteger(v) && v >= 0 && v <= MAX_CAPO ? v : 0)
-                : [];
+            // Tuning + capo persistence is owned by the controller under
+            // `twanga-recorder-tuning-v1`; recorder-specific settings live
+            // here.
             recState.bpm = Number.isInteger(saved.bpm) && saved.bpm >= 20 && saved.bpm <= 400
                 ? saved.bpm : 120;
             recState.resolutionDenom = [4, 8, 16, 32].includes(saved.resolutionDenom)
@@ -2163,10 +2142,6 @@
         function recSaveToStorage() {
             try {
                 localStorage.setItem(RECORDER_STORAGE_KEY, JSON.stringify({
-                    mode: recState.mode,
-                    capoMode: recState.capoMode,
-                    capo: recState.capo,
-                    capoSpec: recState.capoSpec,
                     bpm: recState.bpm,
                     resolutionDenom: recState.resolutionDenom,
                     blockWidth: recState.blockWidth,
@@ -2176,187 +2151,6 @@
             } catch (e) {
                 console.warn('recorder localStorage write failed', e);
             }
-        }
-
-        // ---- Tuning picker --------------------------------------------------
-
-        function recAllKnownSlugs() {
-            // Same merge logic as the Tuner's `allKnownSlugs`, minus the
-            // chromatic sentinel — recording against the chromatic tuner
-            // makes no sense (there are no strings to record to).
-            const builtinSet = new Set(builtin_tuning_slugs());
-            const users = loadUserTunings()
-                .map((e) => e.slug)
-                .filter((s) => !builtinSet.has(s));
-            return [...builtin_tuning_slugs(), ...users];
-        }
-
-        function recRenderTuningPicker() {
-            const picker = el('recorder-tuning-picker');
-            picker.textContent = '';
-            for (const slug of recAllKnownSlugs()) {
-                const btn = document.createElement('button');
-                btn.className = 'tuning-option';
-                btn.dataset.slug = slug;
-                btn.textContent = shortName(slug);
-                btn.title = fullName(slug);
-                btn.addEventListener('click', () => recSelectTuning(slug));
-                picker.appendChild(btn);
-            }
-        }
-
-        function recSelectTuning(slug) {
-            if (recState.isRecording) return; // never swap mid-take
-            recState.mode = slug;
-            recState.baseLabels = computeBaseLabels(slug);
-            if (recState.capoSpec.length !== recState.baseLabels.length) {
-                recState.capoSpec = recState.baseLabels.map(() => 0);
-            }
-            // Cache the PresetEntry shape for `match_pitch_to_fret` and
-            // `serialize_recording`. User tunings are already in this shape
-            // in localStorage; built-ins go through `builtin_preset_entry`.
-            const user = userTuningBySlug(slug);
-            recState.presetEntry = user ?? builtin_preset_entry(slug);
-
-            document.querySelectorAll('#recorder-tuning-picker .tuning-option').forEach((b) => {
-                b.classList.toggle('active', b.dataset.slug === slug);
-            });
-            el('recorder-active-tuning-name').textContent = fullName(slug);
-
-            recUpdateCapoDisplay();
-            recRenderPerStringCapo();
-            // Reset any in-progress score — switching tuning invalidates
-            // string indices, so previously-recorded columns wouldn't make
-            // sense anyway.
-            recClear();
-            recSaveToStorage();
-        }
-
-        // ---- Capo (uniform + per-string) ------------------------------------
-
-        function recWireCapoControl() {
-            el('recorder-capo-down').addEventListener('click', () => {
-                if (recState.isRecording || recState.capo <= 0) return;
-                recState.capo -= 1;
-                recOnCapoChanged();
-            });
-            el('recorder-capo-up').addEventListener('click', () => {
-                if (recState.isRecording || recState.capo >= MAX_CAPO) return;
-                recState.capo += 1;
-                recOnCapoChanged();
-            });
-            el('recorder-capo-mode-toggle').addEventListener('click', () => {
-                if (recState.isRecording) return;
-                if (recState.capoMode === 'uniform') {
-                    recState.capoMode = 'per-string';
-                    recState.capoSpec = Array.from(
-                        { length: recState.baseLabels.length },
-                        () => recState.capo,
-                    );
-                } else {
-                    recState.capoMode = 'uniform';
-                }
-                recUpdateCapoDisplay();
-                recRenderPerStringCapo();
-                recClear();
-                recSaveToStorage();
-            });
-            recUpdateCapoDisplay();
-        }
-
-        function recOnCapoChanged() {
-            recUpdateCapoDisplay();
-            recClear(); // capo change → previous columns reference wrong frets
-            recSaveToStorage();
-        }
-
-        function recUpdateCapoDisplay() {
-            el('recorder-capo-value').textContent = recState.capo.toString();
-            el('recorder-capo-down').disabled = recState.capo <= 0;
-            el('recorder-capo-up').disabled = recState.capo >= MAX_CAPO;
-            el('recorder-capo-control').hidden = !recState.mode;
-            el('recorder-capo-mode-toggle').classList.toggle(
-                'active', recState.capoMode === 'per-string',
-            );
-            el('recorder-capo-uniform').hidden = recState.capoMode === 'per-string';
-            el('recorder-capo-per-string').hidden =
-                !recState.mode || recState.capoMode !== 'per-string';
-        }
-
-        function recRenderPerStringCapo() {
-            const panel = el('recorder-capo-per-string');
-            panel.textContent = '';
-            if (!recState.mode || recState.capoMode !== 'per-string') return;
-
-            const header = document.createElement('div');
-            header.className = 'ps-header';
-            header.textContent = 'Per-string capo (semitones)';
-            panel.appendChild(header);
-
-            recState.baseLabels.forEach((label, idx) => {
-                const row = document.createElement('div');
-                row.className = 'capo-string-row';
-
-                const lab = document.createElement('span');
-                lab.className = 'ps-label';
-                lab.textContent = `#${idx + 1} (${label})`;
-                row.appendChild(lab);
-
-                const down = document.createElement('button');
-                down.className = 'capo-btn';
-                down.textContent = '−';
-                const value = document.createElement('span');
-                value.className = 'capo-value';
-                const up = document.createElement('button');
-                up.className = 'capo-btn';
-                up.textContent = '+';
-
-                const refresh = () => {
-                    const v = recState.capoSpec[idx] ?? 0;
-                    value.textContent = String(v);
-                    down.disabled = v <= 0 || recState.isRecording;
-                    up.disabled = v >= MAX_CAPO || recState.isRecording;
-                };
-                down.addEventListener('click', () => {
-                    if (recState.isRecording) return;
-                    if ((recState.capoSpec[idx] ?? 0) > 0) {
-                        recState.capoSpec[idx] -= 1;
-                        refresh();
-                        recClear();
-                        recSaveToStorage();
-                    }
-                });
-                up.addEventListener('click', () => {
-                    if (recState.isRecording) return;
-                    if ((recState.capoSpec[idx] ?? 0) < MAX_CAPO) {
-                        recState.capoSpec[idx] = (recState.capoSpec[idx] ?? 0) + 1;
-                        refresh();
-                        recClear();
-                        recSaveToStorage();
-                    }
-                });
-                refresh();
-
-                row.appendChild(down);
-                row.appendChild(value);
-                row.appendChild(up);
-                panel.appendChild(row);
-            });
-        }
-
-        function recCapoIsActive() {
-            return recState.capoMode === 'per-string'
-                ? recState.capoSpec.some((v) => v > 0)
-                : recState.capo > 0;
-        }
-
-        function recCapoSpecString() {
-            // CLI capo syntax: `"3"` uniform / `"0,2,2,2,2,2"` per-string.
-            // Empty string + the `capoIsActive` gate above lets callers
-            // skip the no-op capo path entirely.
-            return recState.capoMode === 'per-string'
-                ? recState.capoSpec.join(',')
-                : String(recState.capo);
         }
 
         // ---- Settings (BPM, resolution, block-width) -----------------------
@@ -2444,14 +2238,15 @@
             // user is actually playing. The alphaTex writer (in WASM) uses
             // the base tuning + capo separately, so the saved file is
             // correctly re-tunable via `twanga play --capo`.
-            const baseStrings = recState.presetEntry?.strings ?? [];
-            const labels = recState.baseLabels;
+            const presetEntry = recState.tuning?.getPresetEntry();
+            const baseStrings = presetEntry?.strings ?? [];
+            const labels = recState.tuning?.getBaseLabels() ?? [];
             return {
                 tempo: recState.bpm,
                 resolutionDenom: recState.resolutionDenom,
                 columnsPerBar: recState.resolutionDenom,
                 tuning: {
-                    name: fullName(recState.mode),
+                    name: fullName(recState.tuning?.getMode() ?? '—'),
                     // Use post-capo labels if available; baseStrings have
                     // the underlying MIDI (which the renderer doesn't read
                     // anyway, but include for completeness).
@@ -2459,7 +2254,7 @@
                         ? labels.map((name, i) => ({ name, midi: baseStrings[i].midi }))
                         : baseStrings,
                 },
-                capoSpec: recCapoSpecString(),
+                capoSpec: recState.tuning?.capoSpecString() ?? '',
                 columns: [],
             };
         }
@@ -2467,10 +2262,10 @@
         function recEmptyScoreOrSample() {
             // Before any tuning is selected, show a small placeholder so
             // the renderer host has something to draw and the user can
-            // preview both views. Once `recSelectTuning` runs, the score
-            // is replaced with a real (empty) one matching the active
-            // tuning.
-            if (!recState.mode) return sampleScore();
+            // preview both views. Once the user picks a tuning the
+            // controller's onChange fires `recClear`, which replaces this
+            // with a real empty score matching the active tuning.
+            if (!recState.tuning?.getMode()) return sampleScore();
             return recBuildScoreModel();
         }
 
@@ -2536,13 +2331,16 @@
         }
 
         async function recStartRecording() {
-            if (!recState.mode) {
+            if (!recState.tuning?.getMode()) {
                 el('recorder-hint').textContent = 'pick a tuning first';
                 return;
             }
+            // Lock the tuning + capo controls for the duration of the
+            // take so the user can't swap mid-recording.
+            recState.tuning.setEnabled(false);
             // Fresh score for this take.
             recState.score = recBuildScoreModel();
-            recState.currentMarks = recState.baseLabels.map(() => null);
+            recState.currentMarks = recState.tuning.getBaseLabels().map(() => null);
             recState.committedColumns = 0;
             recState.droppedCount = 0;
             recState.rendererController?.setScore(recState.score);
@@ -2572,8 +2370,10 @@
                         if (!recState.isRecording) return;
                         for (const r of readings) {
                             const m = match_pitch_to_fret(
-                                recState.presetEntry,
-                                recCapoIsActive() ? recCapoSpecString() : '',
+                                recState.tuning.getPresetEntry(),
+                                recState.tuning.capoIsActive()
+                                    ? recState.tuning.capoSpecString()
+                                    : '',
                                 r.detected_hz,
                                 MAX_FRET,
                             );
@@ -2600,6 +2400,7 @@
             } catch (err) {
                 recState.chromaticTuner?.free?.();
                 recState.chromaticTuner = null;
+                recState.tuning?.setEnabled(true);
                 throw err;
             }
 
@@ -2630,6 +2431,7 @@
                     if (micSession.consumerName === 'recorder') micSession.stop();
                     recState.chromaticTuner?.free?.();
                     recState.chromaticTuner = null;
+                    recState.tuning?.setEnabled(true);
                     el('recorder-start-btn').textContent = 'Start recording';
                     el('recorder-clear-btn').disabled = false;
                     el('recorder-settings').classList.remove('is-recording');
@@ -2677,7 +2479,7 @@
                     recPlayMetronomeClick();
                 }
                 recState.score.columns.push([...recState.currentMarks]);
-                recState.currentMarks = recState.baseLabels.map(() => null);
+                recState.currentMarks = recState.tuning.getBaseLabels().map(() => null);
                 recState.committedColumns += 1;
             }
             recState.rendererController?.setScore(recState.score);
@@ -2751,7 +2553,7 @@
             // user played in the half-second before they hit Stop.
             if (recState.currentMarks.some((m) => m !== null)) {
                 recState.score.columns.push([...recState.currentMarks]);
-                recState.currentMarks = recState.baseLabels.map(() => null);
+                recState.currentMarks = recState.tuning.getBaseLabels().map(() => null);
                 recState.committedColumns += 1;
             }
             recState.rendererController?.setScore(recState.score);
@@ -2777,6 +2579,7 @@
             el('recorder-save-btn').disabled = recState.committedColumns === 0;
             el('recorder-clear-btn').disabled = false;
             el('recorder-settings').classList.remove('is-recording');
+            recState.tuning?.setEnabled(true);
             recState.isPaused = false;
             const droppedSuffix = recState.droppedCount > 0
                 ? `  ✗ ${recState.droppedCount} dropped`
@@ -2789,19 +2592,19 @@
         function recClear() {
             if (recState.isRecording) recStopRecording('Recording stopped (cleared).');
             recState.score = recBuildScoreModel();
-            recState.currentMarks = recState.baseLabels.map(() => null);
+            recState.currentMarks = recState.tuning?.getBaseLabels().map(() => null) ?? [];
             recState.committedColumns = 0;
             recState.droppedCount = 0;
             recState.rendererController?.setScore(recState.score);
             recState.rendererController?.setPlayhead(0);
             el('recorder-save-btn').disabled = true;
-            el('recorder-hint').textContent = recState.mode
+            el('recorder-hint').textContent = recState.tuning?.getMode()
                 ? 'cleared — click Start recording'
                 : 'pick a tuning, then click Start recording';
         }
 
         function recSave() {
-            if (!recState.mode || !recState.score || recState.score.columns.length === 0) {
+            if (!recState.tuning?.getMode() || !recState.score || recState.score.columns.length === 0) {
                 el('recorder-hint').textContent = 'nothing recorded yet';
                 return;
             }
@@ -2825,8 +2628,8 @@
             let alphaTex;
             try {
                 alphaTex = serialize_recording(
-                    recState.presetEntry,
-                    recCapoIsActive() ? recCapoSpecString() : '',
+                    recState.tuning.getPresetEntry(),
+                    recState.tuning.capoIsActive() ? recState.tuning.capoSpecString() : '',
                     recState.bpm,
                     recState.resolutionDenom,
                     recState.score.columns,
