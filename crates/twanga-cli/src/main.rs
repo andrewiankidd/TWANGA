@@ -339,7 +339,11 @@ fn resolve_mode(arg: Option<String>) -> Result<TunerMode> {
 
     let options = tune_menu_options();
     let refs: Vec<&str> = options.iter().map(|s| s.as_str()).collect();
-    let idx = twanga_tui::select("Choose a tuning:", &refs)?;
+    let idx = twanga_tui::select_with_hint(
+        "Choose a tuning:",
+        &refs,
+        Some("tip: define a custom tuning with `twanga tunings add`"),
+    )?;
     if idx == 0 {
         Ok(TunerMode::Chromatic)
     } else {
@@ -380,7 +384,11 @@ fn resolve_tuning(arg: Option<String>) -> Result<Tuning> {
     }
     let slugs = known_slugs();
     let refs: Vec<&str> = slugs.iter().map(|s| s.as_str()).collect();
-    let idx = twanga_tui::select("Choose a tuning to record against:", &refs)?;
+    let idx = twanga_tui::select_with_hint(
+        "Choose a tuning to record against:",
+        &refs,
+        Some("tip: define a custom tuning with `twanga tunings add`"),
+    )?;
     lookup_tuning(&slugs[idx]).ok_or_else(|| anyhow!("preset registry desync; report this bug"))
 }
 
@@ -404,7 +412,12 @@ fn resolve_play_tuning(arg: Option<String>, tab: &ParsedTab) -> Result<Option<St
     owned.push(as_recorded);
     owned.extend(slugs.iter().cloned());
     let refs: Vec<&str> = owned.iter().map(|s| s.as_str()).collect();
-    let idx = twanga_tui::select_with_default("Choose a tuning for playback:", &refs, 0)?;
+    let idx = twanga_tui::select_with_default_and_hint(
+        "Choose a tuning for playback:",
+        &refs,
+        0,
+        Some("tip: define a custom tuning with `twanga tunings add`"),
+    )?;
     if idx == 0 {
         Ok(None)
     } else {

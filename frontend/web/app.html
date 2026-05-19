@@ -199,7 +199,25 @@
             display: flex;
             flex-wrap: wrap;
             gap: 0.4rem;
-            margin-bottom: 1.5rem;
+            margin-bottom: 0.4rem;
+        }
+        /* Hint under the picker, mirrors the CLI's tuning-list footer
+           ("tip: define a custom tuning with `twanga tunings add`"). Links
+           straight to the Tunings screen via the hash route. */
+        .picker-hint {
+            color: var(--muted);
+            font-size: 0.8rem;
+            font-style: italic;
+            margin: 0 0 1.3rem 0.3rem;
+        }
+        .picker-hint a {
+            color: var(--highlight);
+            text-decoration: none;
+            font-style: normal;
+            font-weight: 700;
+        }
+        .picker-hint a:hover {
+            text-decoration: underline;
         }
         .tuning-option {
             background: var(--card);
@@ -515,6 +533,9 @@
             </p>
 
             <div class="tuning-picker" id="tuning-picker"></div>
+            <p class="picker-hint">
+                Don't see your tuning? <a href="#tunings">Define a custom one →</a>
+            </p>
 
             <div class="active-tuning-row">
                 <div class="active-tuning-name" id="active-tuning-name">Chromatic</div>

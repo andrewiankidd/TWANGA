@@ -74,6 +74,13 @@ pub fn spawn_line_reader() -> mpsc::Receiver<String> {
 
 /// Prompt the user to pick one of `options`. Returns the 0-based index.
 pub fn select(prompt: &str, options: &[&str]) -> Result<usize> {
+    select_with_hint(prompt, options, None)
+}
+
+/// Like [`select`], but renders a single-line `hint` between the option list
+/// and the input cursor. Empty / `None` hint behaves identically to plain
+/// [`select`]. Used for "add your own with …" affordances on tuning pickers.
+pub fn select_with_hint(prompt: &str, options: &[&str], hint: Option<&str>) -> Result<usize> {
     if options.is_empty() {
         return Err(anyhow!("select: no options provided"));
     }
@@ -93,6 +100,9 @@ pub fn select(prompt: &str, options: &[&str]) -> Result<usize> {
         writeln!(stderr_lock, "{prompt}")?;
         for (i, opt) in options.iter().enumerate() {
             writeln!(stderr_lock, "  {}) {opt}", i + 1)?;
+        }
+        if let Some(h) = hint.filter(|s| !s.is_empty()) {
+            writeln!(stderr_lock, "  {h}")?;
         }
         write!(stderr_lock, "> ")?;
         stderr_lock.flush()?;
@@ -119,6 +129,17 @@ pub fn select(prompt: &str, options: &[&str]) -> Result<usize> {
 /// Like [`select`], but empty input returns `default_idx`. The default is
 /// marked with a `*` in the printed menu.
 pub fn select_with_default(prompt: &str, options: &[&str], default_idx: usize) -> Result<usize> {
+    select_with_default_and_hint(prompt, options, default_idx, None)
+}
+
+/// Combines [`select_with_default`] and [`select_with_hint`] — empty input
+/// returns the default, plus the hint prints between options and cursor.
+pub fn select_with_default_and_hint(
+    prompt: &str,
+    options: &[&str],
+    default_idx: usize,
+    hint: Option<&str>,
+) -> Result<usize> {
     if options.is_empty() {
         return Err(anyhow!("select_with_default: no options provided"));
     }
@@ -144,6 +165,9 @@ pub fn select_with_default(prompt: &str, options: &[&str], default_idx: usize) -
         for (i, opt) in options.iter().enumerate() {
             let marker = if i == default_idx { "*" } else { " " };
             writeln!(stderr_lock, " {marker} {}) {opt}", i + 1)?;
+        }
+        if let Some(h) = hint.filter(|s| !s.is_empty()) {
+            writeln!(stderr_lock, "  {h}")?;
         }
         write!(stderr_lock, "> ")?;
         stderr_lock.flush()?;
