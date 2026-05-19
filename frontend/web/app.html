@@ -806,6 +806,88 @@
             pointer-events: none;
         }
 
+        /* Browser-only storage warning. Persistent amber bar at the top
+           of any screen that writes to IndexedDB (Recorder, Library,
+           Playback). Hidden when `body.is-tauri` is set (filesystem-
+           backed library has nothing to warn about). Not dismissible —
+           we want it always visible until the user navigates away. */
+        .browser-storage-banner {
+            background: rgba(245, 158, 11, 0.12);
+            border: 1px solid rgba(245, 158, 11, 0.4);
+            color: #f59e0b;
+            border-radius: var(--radius, 6px);
+            padding: 0.55rem 0.85rem;
+            margin-bottom: 1rem;
+            font-size: 0.8rem;
+            line-height: 1.45;
+        }
+        .browser-storage-banner strong { font-weight: 700; }
+        body.is-tauri .browser-storage-banner { display: none; }
+
+        /* Per-entry "Backed up: ..." tag rendered next to a tab's title
+           in the Library list. `--ok` for fresh exports, `--muted` for
+           never-exported entries (signals risk at a glance). */
+        .backup-tag {
+            font-size: 0.7rem;
+            font-family: monospace;
+            color: var(--muted);
+            padding: 0.1rem 0.45rem;
+            border: 1px solid var(--border);
+            border-radius: 999px;
+        }
+        .backup-tag.is-fresh { color: var(--ok); border-color: var(--ok); }
+        .backup-tag.is-stale { color: var(--err); border-color: var(--err); opacity: 0.85; }
+
+        /* Toast — bottom-right notification with optional action
+           buttons. Used to surface "Saved to library — back up to
+           disk?" after Recorder Save. Auto-dismisses after a long
+           delay; user can click any action button or the × to close
+           sooner. Multiple toasts stack vertically. */
+        .toast-host {
+            position: fixed;
+            bottom: 1rem;
+            right: 1rem;
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+            z-index: 9999;
+            max-width: min(360px, calc(100vw - 2rem));
+            pointer-events: none;
+        }
+        .toast {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-left: 3px solid var(--highlight);
+            border-radius: var(--radius, 6px);
+            padding: 0.7rem 0.9rem;
+            font-size: 0.85rem;
+            color: var(--text);
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+            pointer-events: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+        .toast-message { line-height: 1.4; }
+        .toast-actions { display: flex; gap: 0.4rem; flex-wrap: wrap; }
+        .toast-actions button {
+            background: transparent;
+            border: 1px solid var(--border);
+            color: var(--text);
+            border-radius: 4px;
+            padding: 0.3rem 0.7rem;
+            font-size: 0.8rem;
+            font-family: "Montserrat", sans-serif;
+            font-weight: 700;
+            cursor: pointer;
+        }
+        .toast-actions button.primary {
+            background: var(--highlight);
+            border-color: var(--highlight);
+            color: var(--background);
+        }
+        .toast-actions button:hover { filter: brightness(1.1); }
+
         .coming-soon {
             background: var(--card);
             border: 1px solid var(--border);
@@ -936,10 +1018,19 @@
                 Live tab recorder. Pick a tuning, set the tempo grid, click
                 Start recording, and play. Detected notes land in the
                 current column at the matching string and fret — same pitch
-                matching the CLI uses. Stop when done, then Save to
-                download a <code>.alphatex</code> file that round-trips
-                through <code>twanga play</code>.
+                matching the CLI uses. Saved recordings live in the browser
+                library; the toast on Save offers a one-click
+                <code>.alphatex</code> download for safekeeping.
             </p>
+
+            <div class="browser-storage-banner">
+                <strong>Browser storage warning.</strong>
+                Recordings live in your browser's local storage, which can be
+                cleared by the user or evicted by the browser. Click
+                <strong>Download .alphatex</strong> on every recording you want
+                to keep. The desktop app stores recordings on your filesystem
+                and doesn't need this warning.
+            </div>
 
             <div class="tuning-picker" id="recorder-tuning-picker"></div>
             <p class="picker-hint">
@@ -1086,6 +1177,9 @@
         </a>
     </footer>
 
+    <!-- Global toast host. Toasts are appended here by `showToast()`. -->
+    <div class="toast-host" id="toast-host" aria-live="polite"></div>
+
     <script type="module">
         import init, {
             pick_splash,
@@ -1111,6 +1205,7 @@
             deleteUserTuning,
         } from './lib/user-tunings.js';
         import { makeTuningController, fullName, shortName } from './controllers/tuning.js';
+        import * as library from './lib/library.js';
 
         function el(id) { return document.getElementById(id); }
 
@@ -1155,6 +1250,56 @@
         // external links and hand the URL to the OS's default browser via the
         // shell plugin. In a normal browser `window.__TAURI__` is undefined
         // and the default <a> behaviour applies — zero-cost no-op.
+        // Mark the body so CSS can hide browser-only warnings (storage
+        // banner, IndexedDB persistence advice) in the Tauri shell.
+        const IS_TAURI = typeof window.__TAURI__ !== 'undefined';
+        if (IS_TAURI) document.body.classList.add('is-tauri');
+
+        /// Add a toast to the bottom-right host. `actions` is an array
+        /// of `{ label, onClick, primary? }` — clicking any one dismisses
+        /// the toast. The toast also auto-dismisses after `timeoutMs`
+        /// (default 12 s — long enough to read + hit Download).
+        function showToast({ message, actions = [], timeoutMs = 12_000 }) {
+            const host = el('toast-host');
+            if (!host) return;
+            const toast = document.createElement('div');
+            toast.className = 'toast';
+            toast.setAttribute('role', 'status');
+
+            const msg = document.createElement('div');
+            msg.className = 'toast-message';
+            msg.textContent = message;
+            toast.appendChild(msg);
+
+            const dismiss = () => {
+                if (toast.parentNode) toast.parentNode.removeChild(toast);
+            };
+
+            const actionRow = document.createElement('div');
+            actionRow.className = 'toast-actions';
+            for (const a of actions) {
+                const btn = document.createElement('button');
+                if (a.primary) btn.classList.add('primary');
+                btn.type = 'button';
+                btn.textContent = a.label;
+                btn.addEventListener('click', () => {
+                    try { a.onClick?.(); } finally { dismiss(); }
+                });
+                actionRow.appendChild(btn);
+            }
+            // Always include a Dismiss button so the user can clear the
+            // toast even when all action buttons are no-ops.
+            const closeBtn = document.createElement('button');
+            closeBtn.type = 'button';
+            closeBtn.textContent = 'Dismiss';
+            closeBtn.addEventListener('click', dismiss);
+            actionRow.appendChild(closeBtn);
+            toast.appendChild(actionRow);
+
+            host.appendChild(toast);
+            setTimeout(dismiss, timeoutMs);
+        }
+
         if (typeof window.__TAURI__ !== 'undefined') {
             document.addEventListener('click', (e) => {
                 const anchor = e.target.closest('a');
@@ -2603,7 +2748,7 @@
                 : 'pick a tuning, then click Start recording';
         }
 
-        function recSave() {
+        async function recSave() {
             if (!recState.tuning?.getMode() || !recState.score || recState.score.columns.length === 0) {
                 el('recorder-hint').textContent = 'nothing recorded yet';
                 return;
@@ -2642,26 +2787,62 @@
                 return;
             }
 
-            // Filename derivation mirrors the CLI exactly:
-            //   - title provided  →  `<slug>-<ISO-timestamp>.alphatex`
-            //   - title blank     →  `twanga-recording-<ISO-timestamp>.alphatex`
-            // Timestamp is always appended so two recordings with the same
-            // title don't collide in the browser's download dir.
+            // Persist to the library (IndexedDB) as the primary store.
+            // Toast prompts the user to also download a real `.alphatex`
+            // file — important because IDB can be evicted (the banner at
+            // the top of the screen explains why). On Tauri we still
+            // persist via the same library API (currently IDB; the
+            // filesystem backend swap is a future commit) and we skip
+            // the Download nag.
             const stamp = new Date().toISOString().replace(/[:.]/g, '-');
             const filename = title.length > 0
                 ? `${slugify(title)}-${stamp}.alphatex`
                 : `twanga-recording-${stamp}.alphatex`;
 
-            const blob = new Blob([alphaTex], { type: 'text/plain;charset=utf-8' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = filename;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            setTimeout(() => URL.revokeObjectURL(url), 1000);
-            el('recorder-hint').textContent = `saved ${filename}`;
+            let savedId;
+            try {
+                savedId = await library.save({
+                    title: title.length > 0 ? title : `Recording ${stamp}`,
+                    alphatex: alphaTex,
+                    source: 'user',
+                });
+                // Opportunistic — no-op if not supported / declined.
+                library.requestPersistence().catch(() => {});
+            } catch (err) {
+                console.error('library.save failed', err);
+                el('recorder-hint').textContent =
+                    'library save failed: ' + (err?.message ?? err);
+                return;
+            }
+
+            const downloadAlphaTex = () => {
+                const blob = new Blob([alphaTex], { type: 'text/plain;charset=utf-8' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = filename;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                setTimeout(() => URL.revokeObjectURL(url), 1000);
+                // Record the export time so the library list can show a
+                // "Backed up <when>" tag and de-emphasise the warning.
+                library.markDownloaded(savedId).catch(() => {});
+            };
+
+            if (IS_TAURI) {
+                // Desktop / filesystem-backed: no nag needed.
+                el('recorder-hint').textContent = `saved to library — "${title || 'untitled'}"`;
+            } else {
+                showToast({
+                    message: `Saved "${title || 'untitled'}" to browser library. ` +
+                        `Download a copy to keep it safe from browser data clears.`,
+                    actions: [
+                        { label: 'Download .alphatex', onClick: downloadAlphaTex, primary: true },
+                    ],
+                });
+                el('recorder-hint').textContent = `saved to library — "${title || 'untitled'}"`;
+            }
         }
 
         // Stop recording cleanly if the user navigates away mid-take —
