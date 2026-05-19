@@ -1760,18 +1760,20 @@
         }
 
         /// Compact pitch list for a tuning row — e.g. `E4 B3 G3 D3 A2 E2`.
-        /// For built-ins we ask `WebTuner.strings_info()`; for users we read
-        /// the saved entry's `strings[*].name` directly so we don't have to
-        /// construct a tuner just for a label readout.
+        /// For built-ins we briefly construct a `WebTuner` and read its
+        /// `string_labels()` (cheaper + more direct than `strings_info()`,
+        /// which goes through `serde_wasm_bindgen` for fields we don't
+        /// need here); for users we read the saved entry's `strings[*].name`
+        /// directly without a WASM hop at all.
         function pitchPreview(row) {
             try {
                 if (row.origin === 'user') {
                     return row.entry.strings.map((s) => s.name).join(' ');
                 }
                 const t = WebTuner.new_for_strings(row.slug, 48_000);
-                const info = t.strings_info();
+                const labels = t.string_labels();
                 t.free?.();
-                return info.map((s) => s.label).join(' ');
+                return labels.join(' ');
             } catch (e) {
                 console.warn('pitchPreview failed for', row.slug, e);
                 return '';
