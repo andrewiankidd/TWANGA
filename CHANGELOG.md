@@ -21,6 +21,19 @@ dated section.
 
 ### Added
 
+- Pluggable renderer system in [frontend/web/render/](frontend/web/render/).
+  A `RendererRegistry` holds plugin objects (`{ id, name, version, create }`)
+  that return instances implementing `setScore` / `setPlayhead` / `destroy`.
+  Built-in `twanga.tab` (column-grid, CLI-style) and `twanga.highway`
+  (Rocksmith-style notes-toward-you) plugins register through the *same*
+  path future third-party renderers will use — no special-cased "core" lane.
+  Recorder screen now hosts a "View" dropdown that swaps renderers live,
+  with the selection persisting in `localStorage`. The renderer fully owns
+  its visual layout (canvas / DOM / SVG, sizing, colours); the host hands
+  over a container element + score data and steps out of the way.
+- Recorder menu entry enabled (no longer "soon"). Live mic capture →
+  score serialisation comes next; today the screen previews the renderer
+  system against a sample score so both views are visually verifiable.
 - Main-menu splash refreshes on every return to the menu and on a
   2-minute idle timer while the menu is visible (paused when the tab
   is backgrounded). No more page-reload-to-reroll.

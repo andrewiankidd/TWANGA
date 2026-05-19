@@ -684,6 +684,42 @@
             padding: 0.6rem 0.2rem;
         }
 
+        /* Renderer-host plumbing — used by Recorder (and Playback when it
+           lands) to mount a renderer plugin. The host owns the dropdown +
+           the container div; the renderer fully owns what goes inside the
+           container (canvas, DOM, SVG — its choice). */
+        .renderer-controls {
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+            margin-bottom: 0.8rem;
+        }
+        .renderer-label {
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: var(--muted);
+            font-weight: 700;
+        }
+        .renderer-select {
+            background: var(--background);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            color: var(--text);
+            padding: 0.4rem 0.6rem;
+            font-family: "Montserrat", sans-serif;
+            font-size: 0.85rem;
+            cursor: pointer;
+        }
+        .renderer-select:focus {
+            outline: none;
+            border-color: var(--highlight);
+        }
+        .renderer-host {
+            margin-bottom: 1rem;
+            min-height: 200px;
+        }
+
         .coming-soon {
             background: var(--card);
             border: 1px solid var(--border);
@@ -741,9 +777,9 @@
                     <span class="title">Tuner</span>
                     <span class="desc">Live pitch detection vs your chosen tuning</span>
                 </button>
-                <button class="menu-btn" disabled title="Microphone capture not wired yet">
+                <button class="menu-btn" data-screen="recorder">
                     <span class="title">Recorder</span>
-                    <span class="desc">Capture what you play to alphaTex (soon)</span>
+                    <span class="desc">Capture what you play, choose how you see it</span>
                 </button>
                 <button class="menu-btn" disabled title="Tab playback in browser comes after the recorder">
                     <span class="title">Playback</span>
@@ -802,6 +838,32 @@
                 <button class="action" id="mic-btn">Start mic</button>
                 <button class="action secondary" id="pitch-btn">Test (440 Hz sine)</button>
             </div>
+        </section>
+
+        <!-- Recorder screen -->
+        <section id="screen-recorder" class="screen">
+            <div class="back-row">
+                <button class="back-btn" data-back>← Menu</button>
+            </div>
+            <h2>Recorder</h2>
+            <p class="subtitle">
+                Live tab recorder. Pick how you want to see your playing — Tab
+                grid (CLI-style), Highway (notes coming toward you), or any
+                renderer you've added. Mic capture and save-to-alphaTex land
+                in the next iteration; for now the screen previews the
+                renderer system with a sample score.
+            </p>
+
+            <div class="renderer-controls">
+                <label class="renderer-label" for="recorder-renderer-select">View</label>
+                <select id="recorder-renderer-select" class="renderer-select"></select>
+            </div>
+
+            <div class="renderer-host" id="recorder-renderer-host"></div>
+
+            <p class="tuner-hint" id="recorder-hint">
+                renderer-only preview — mic capture coming next
+            </p>
         </section>
 
         <!-- Tunings screen -->
@@ -888,6 +950,8 @@
             validate_preset_entry,
             WebTuner,
         } from './pkg/twanga_web.js';
+        import { registry as rendererRegistry } from './render/registry.js';
+        import { installBuiltinRenderers } from './render/builtins/index.js';
 
         function el(id) { return document.getElementById(id); }
 
@@ -989,6 +1053,18 @@
             // wire the "Define a new tuning" form.
             renderTuningsScreen();
             wireAddTuningForm();
+
+            // Renderer system — register the built-in plugins and wire the
+            // Recorder host's dropdown. Built-ins use the exact same
+            // `registry.register` call path that a third-party plugin
+            // would; the host code below never branches on plugin id.
+            installBuiltinRenderers();
+            wireRendererHost({
+                selectId: 'recorder-renderer-select',
+                hostId: 'recorder-renderer-host',
+                storageKey: 'twanga-recorder-renderer-v1',
+                initialScore: sampleScore(),
+            });
 
             // Menu navigation.
             document.querySelectorAll('[data-screen]').forEach((btn) => {
@@ -1923,6 +1999,133 @@
             }
 
             renderStrings();
+        }
+
+        // ----------------------------------------------------------------
+        // Renderer host — used by Recorder (and Playback when it lands)
+        // ----------------------------------------------------------------
+        //
+        // The host owns: a <select> populated from `rendererRegistry.list()`,
+        // a container div the renderer mounts into, and the lifecycle (swap
+        // renderers on dropdown change, persist last choice to localStorage).
+        //
+        // The host knows NOTHING about which plugins exist. It iterates the
+        // registry, calls `plugin.create(container, options)`, and talks to
+        // the returned instance via the renderer contract (`setScore`,
+        // `setPlayhead`, `destroy`). Adding a third renderer in the future
+        // requires zero changes here — the new plugin just appears in the
+        // dropdown as soon as it's registered.
+
+        function wireRendererHost({ selectId, hostId, storageKey, initialScore }) {
+            const select = el(selectId);
+            const host = el(hostId);
+
+            // Populate the dropdown from the registry. If a future plugin
+            // registers AFTER this point, the host would need a re-render —
+            // we'd add a `registry.subscribe` for that. Not needed yet.
+            const plugins = rendererRegistry.list();
+            select.replaceChildren();
+            for (const p of plugins) {
+                const opt = document.createElement('option');
+                opt.value = p.id;
+                opt.textContent = p.name;
+                if (p.description) opt.title = p.description;
+                select.appendChild(opt);
+            }
+
+            // Resolve the initial selection: saved preference > first
+            // registered plugin. If the saved id refers to a plugin that's
+            // since been removed (e.g. user uninstalled a third-party
+            // renderer between sessions), silently fall back.
+            const saved = (() => {
+                try { return localStorage.getItem(storageKey); }
+                catch { return null; }
+            })();
+            const initialId = plugins.some((p) => p.id === saved)
+                ? saved
+                : plugins[0]?.id ?? null;
+            if (initialId) select.value = initialId;
+
+            let active = null;
+            let activeScore = initialScore;
+
+            const mount = (pluginId) => {
+                if (active) {
+                    try { active.destroy(); }
+                    catch (e) { console.warn('renderer destroy failed', e); }
+                    active = null;
+                }
+                host.replaceChildren();
+                const plugin = rendererRegistry.get(pluginId);
+                if (!plugin) return;
+                try {
+                    active = plugin.create(host, {});
+                    if (activeScore) active.setScore(activeScore);
+                } catch (e) {
+                    console.error(`renderer '${pluginId}' failed to mount`, e);
+                    active = null;
+                }
+            };
+
+            select.addEventListener('change', () => {
+                mount(select.value);
+                try { localStorage.setItem(storageKey, select.value); } catch {}
+            });
+
+            if (initialId) mount(initialId);
+
+            // Returned controller lets callers update the score / playhead
+            // without re-querying the DOM. The Recorder loop (next iteration)
+            // will call `setScore(updatedScore)` after every column append.
+            return {
+                setScore(score) {
+                    activeScore = score;
+                    active?.setScore(score);
+                },
+                setPlayhead(col) { active?.setPlayhead(col); },
+                destroy() {
+                    active?.destroy();
+                    active = null;
+                },
+            };
+        }
+
+        /// Throwaway sample score so the Recorder screen has something to
+        /// render before live capture lands. Standard-guitar tuning, a few
+        /// columns of an open-position riff. Will be replaced by real
+        /// recorded data once the mic loop is wired.
+        function sampleScore() {
+            return {
+                tempo: 120,
+                resolutionDenom: 8,
+                columnsPerBar: 8,
+                tuning: {
+                    name: 'Standard Guitar (EADGBE)',
+                    strings: [
+                        { name: 'E4', midi: 64 },
+                        { name: 'B3', midi: 59 },
+                        { name: 'G3', midi: 55 },
+                        { name: 'D3', midi: 50 },
+                        { name: 'A2', midi: 45 },
+                        { name: 'E2', midi: 40 },
+                    ],
+                },
+                capoSpec: '0',
+                columns: [
+                    [null, null, null, null, null, 0],
+                    [null, null, null, null, null, 3],
+                    [null, null, null, null, 0, null],
+                    [null, null, null, null, 2, null],
+                    [null, null, null, 0, null, null],
+                    [null, null, null, 2, null, null],
+                    [null, null, 0, null, null, null],
+                    [null, null, 2, null, null, null],
+                    [null, 0, null, null, null, null],
+                    [null, 1, null, null, null, null],
+                    [0, null, null, null, null, null],
+                    [3, null, null, null, null, null],
+                ],
+            };
         }
 
         main().catch((e) => {
