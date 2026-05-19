@@ -324,21 +324,23 @@
             </div>
             <h2>Tuner</h2>
             <p class="subtitle">
-                Mic capture isn't wired up in the browser yet — the next milestone
-                is a Web Audio backend (<code>getUserMedia</code> + AudioWorklet)
-                that feeds samples through the same YIN detector the CLI ships.
-                Until then, the button below runs the detector against a
-                synthetic 440 Hz sine to prove the WASM path works.
+                Web Audio capture (<code>getUserMedia</code> + AudioWorklet)
+                feeds mic samples to the same YIN detector the CLI ships, via
+                the <code>twanga-web</code> WASM bindings. Per-string tuning
+                comparison and a multi-string display arrive once the tuner
+                screen learns to consume a tuning preset; for now this is a
+                bare chromatic readout — whatever you play, in Hz.
             </p>
 
             <div class="tuner-readout">
                 <div class="label">Detected frequency</div>
                 <div class="hz" id="pitch-hz">—</div>
-                <div class="hint" id="pitch-hint">click Detect</div>
+                <div class="hint" id="pitch-hint">click Start to begin</div>
             </div>
 
             <div class="row">
-                <button class="action" id="pitch-btn">Detect (synthetic 440 Hz)</button>
+                <button class="action" id="mic-btn">Start mic</button>
+                <button class="action" id="pitch-btn">Test (440 Hz sine)</button>
             </div>
         </section>
 
@@ -493,6 +495,7 @@
 
             // Synthetic-pitch demo on the tuner screen.
             el('pitch-btn').addEventListener('click', () => {
+                stopMic(); // can't run synthetic + mic at once on a single readout
                 const sr = 48_000;
                 const N = 4096;
                 const buf = new Float32Array(N);
@@ -508,7 +511,109 @@
                     el('pitch-hint').textContent = 'expected 440.00 Hz';
                 }
             });
+
+            el('mic-btn').addEventListener('click', () => {
+                if (audioState.running) {
+                    stopMic();
+                } else {
+                    startMic().catch((err) => {
+                        console.error('startMic failed', err);
+                        el('pitch-hint').textContent = String(err.message || err);
+                        el('mic-btn').textContent = 'Start mic';
+                    });
+                }
+            });
         }
+
+        // ----------------------------------------------------------------
+        // Live microphone capture via Web Audio
+        // ----------------------------------------------------------------
+        //
+        // Held-state singleton: at most one AudioContext + one MediaStream is
+        // active at a time. Re-clicking "Start mic" while it's already running
+        // is a no-op via the running flag in the click handler.
+        const audioState = {
+            running: false,
+            ctx: null,       // AudioContext
+            stream: null,    // MediaStream from getUserMedia (kept so we can stop tracks on shutdown)
+            node: null,      // AudioWorkletNode
+            source: null,    // MediaStreamSource
+        };
+
+        async function startMic() {
+            el('pitch-hint').textContent = 'requesting microphone…';
+            // getUserMedia must be called from a user gesture (autoplay
+            // policy). The mic-btn click is that gesture; if we ever wire
+            // auto-start, we'll need a "tap to enable" first-screen for iOS.
+            const stream = await navigator.mediaDevices.getUserMedia({
+                audio: {
+                    // Disable browser preprocessing — pitch detection wants
+                    // the raw signal, not Chrome's voice-call cleanup.
+                    echoCancellation: false,
+                    noiseSuppression: false,
+                    autoGainControl: false,
+                },
+            });
+            const ctx = new (window.AudioContext || window.webkitAudioContext)();
+            // AudioWorklet module loading is async; must complete before
+            // we can `new AudioWorkletNode(ctx, 'pitch-processor')`.
+            await ctx.audioWorklet.addModule('audio-worklet.js');
+
+            const source = ctx.createMediaStreamSource(stream);
+            const node = new AudioWorkletNode(ctx, 'pitch-processor');
+
+            node.port.onmessage = (e) => {
+                // Worklet posts a Float32Array of FRAME samples; ctx.sampleRate
+                // is the rate the audio thread is running at (usually 44100
+                // or 48000 depending on the device).
+                const hz = detect_pitch(e.data, ctx.sampleRate);
+                if (hz === undefined) {
+                    el('pitch-hz').textContent = '—';
+                    el('pitch-hint').textContent = 'listening… (no pitch yet)';
+                } else {
+                    el('pitch-hz').textContent = hz.toFixed(2) + ' Hz';
+                    el('pitch-hint').textContent = 'listening… (' + Math.round(ctx.sampleRate) + ' Hz mic)';
+                }
+            };
+
+            // Connect source → worklet, but DON'T connect worklet → destination.
+            // Otherwise the mic would loop back through the speakers and the
+            // YIN detector would chase its own tail.
+            source.connect(node);
+
+            audioState.running = true;
+            audioState.ctx = ctx;
+            audioState.stream = stream;
+            audioState.node = node;
+            audioState.source = source;
+
+            el('mic-btn').textContent = 'Stop mic';
+            el('pitch-hint').textContent = 'listening…';
+        }
+
+        function stopMic() {
+            if (!audioState.running) return;
+            try {
+                audioState.source?.disconnect();
+                audioState.node?.disconnect();
+                audioState.stream?.getTracks().forEach((t) => t.stop());
+                audioState.ctx?.close();
+            } catch (e) {
+                console.warn('stopMic cleanup error (ignored)', e);
+            }
+            audioState.running = false;
+            audioState.ctx = null;
+            audioState.stream = null;
+            audioState.node = null;
+            audioState.source = null;
+            el('mic-btn').textContent = 'Start mic';
+        }
+
+        // If the user navigates away from the tuner screen, stop the mic so
+        // we're not silently holding the permission + draining battery.
+        window.addEventListener('hashchange', () => {
+            if (location.hash.replace(/^#/, '') !== 'tuner') stopMic();
+        });
 
         main().catch((e) => {
             el('splash').textContent = 'WASM load failed: ' + e;
