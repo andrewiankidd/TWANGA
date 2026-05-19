@@ -145,8 +145,23 @@ class TabRenderer {
         const { cellWidth, labelWidth } = this.options;
         const max = this.score.columns.length - 1;
         const clamped = Math.max(0, Math.min(max, this.playhead));
+        const playheadX = labelWidth + clamped * cellWidth;
         this.playheadEl.style.display = 'block';
-        this.playheadEl.style.left = `${labelWidth + clamped * cellWidth}px`;
+        this.playheadEl.style.left = `${playheadX}px`;
+
+        // Auto-scroll horizontally so the playhead stays in view during
+        // long tabs. `this.root` is the scrolling container (has
+        // `overflowX: auto`). Centre the playhead when it leaves the
+        // visible band — easier on the eyes than chasing it to an edge.
+        const visibleStart = this.root.scrollLeft;
+        const visibleEnd = visibleStart + this.root.clientWidth;
+        const margin = 60;
+        if (playheadX < visibleStart + margin || playheadX > visibleEnd - margin) {
+            this.root.scrollTo({
+                left: Math.max(0, playheadX - this.root.clientWidth / 2),
+                behavior: 'smooth',
+            });
+        }
     }
 }
 

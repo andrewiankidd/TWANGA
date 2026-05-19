@@ -3113,15 +3113,44 @@
         // pre-roll + metronome + Pause/Stop) lands in Phase 6 of the
         // batch; this commit is the scaffold.
 
+        const PLAYBACK_STORAGE_KEY = 'twanga-playback-v1';
+        // Wait-mode pitch tolerance — same ±50 cents the CLI uses for
+        // `wait_for_expected_note`. Wide enough to forgive amateur
+        // intonation, tight enough to catch clear wrong notes.
+        const WAIT_MATCH_CENTS = 50.0;
+
         const playbackState = {
             tuning: null,           // tuning controller (third consumer)
             rendererController: null,
             loadedTab: null,        // { id, title, parsed: WebParsedTab, transposed, dropped }
+
+            // Persisted UI settings
+            metronome: true,
+            preRoll: 4,
+            wait: false,
+            bpmOverride: null,      // null = use loaded tab's tempo
+
+            // Ephemeral engine state
             isPlaying: false,
             isPaused: false,
+            preRollActive: false,
+            preRollAbort: false,
+            currentCol: 0,
+            loopStart: 0,
+            loopEnd: 0,
+            repeat: false,
+            msPerColumn: 0,
+            colsPerBeat: 1,
+            playStartTime: 0,
+            pausedAtMs: 0,
+            totalPausedMs: 0,
+            tickHandle: null,
+            chromaticTuner: null,   // WebTuner for wait-mode pitch detection
+            waitingForCol: -1,      // column index whose note we're waiting for (-1 = not waiting)
         };
 
         function initPlayback() {
+            playbackHydrate();
             playbackState.rendererController = wireRendererHost({
                 selectId: 'playback-renderer-select',
                 hostId: 'playback-renderer-host',
@@ -3131,6 +3160,8 @@
 
             renderPlaybackLibrary();
             wirePlaybackDropZone();
+            wirePlaybackTransport();
+            wirePlaybackSettings();
             el('playback-back-to-library-btn').addEventListener('click', playbackUnload);
 
             // Tuning controller is instantiated lazily on first tab load —
@@ -3138,6 +3169,35 @@
             // inside `playback-tab-view` which is hidden. `makeTuningController`
             // touches its DOM during init() so deferring saves us from a
             // brittle "elements not yet visible" interaction.
+        }
+
+        function playbackHydrate() {
+            // Persists user preferences only — metronome / pre-roll /
+            // wait. The BPM override and loop spec are per-loaded-tab
+            // and reset on every load, so they aren't worth persisting.
+            let saved = {};
+            try {
+                const raw = localStorage.getItem(PLAYBACK_STORAGE_KEY);
+                if (raw) saved = JSON.parse(raw) ?? {};
+            } catch (e) {
+                console.warn('playback localStorage read failed', e);
+            }
+            playbackState.metronome = saved.metronome !== false;
+            playbackState.preRoll = Number.isInteger(saved.preRoll) && saved.preRoll >= 0 && saved.preRoll <= 16
+                ? saved.preRoll : 4;
+            playbackState.wait = saved.wait === true;
+        }
+
+        function playbackSaveToStorage() {
+            try {
+                localStorage.setItem(PLAYBACK_STORAGE_KEY, JSON.stringify({
+                    metronome: playbackState.metronome,
+                    preRoll: playbackState.preRoll,
+                    wait: playbackState.wait,
+                }));
+            } catch (e) {
+                console.warn('playback localStorage write failed', e);
+            }
         }
 
         /// Render the library list (bundled examples first, then user
@@ -3298,8 +3358,13 @@
             el('playback-pt-subtitle').textContent =
                 parsed.subtitle_display() ?? `${parsed.tuning_names().join(' ')} · ${parsed.tempo()} BPM`;
 
-            // BPM input pre-loads with the file's tempo; user can override.
+            // BPM input pre-loads with the file's tempo; user can override
+            // after that. Override + loop reset on every tab load so we
+            // don't carry settings between unrelated tabs.
+            playbackState.bpmOverride = null;
+            playbackState._loopSpecText = 'off';
             el('playback-bpm').value = String(parsed.tempo());
+            el('playback-loop').value = 'off';
 
             // Swap views
             el('playback-library-view').hidden = true;
@@ -3498,7 +3563,401 @@
                 && !playbackState.loadedTab) {
                 renderPlaybackLibrary();
             }
+            // Leaving the playback screen stops the engine — the mic
+            // (for wait mode) gets released via the existing
+            // micSession ownership rules, but the tick driver needs
+            // explicit teardown.
+            if (location.hash.replace(/^#/, '') !== 'playback' && playbackState.isPlaying) {
+                playbackStop('Playback stopped (left screen).');
+            }
         });
+
+        // ---- Settings wiring (BPM / loop / metronome / pre-roll / wait) ----
+
+        function wirePlaybackSettings() {
+            const bpmInput = el('playback-bpm');
+            const loopInput = el('playback-loop');
+            const metToggle = el('playback-metronome-toggle');
+            const prInput = el('playback-preroll-input');
+            const waitToggle = el('playback-wait-toggle');
+
+            metToggle.checked = playbackState.metronome;
+            prInput.value = String(playbackState.preRoll);
+            waitToggle.checked = playbackState.wait;
+
+            const clampInt = (raw, min, max, fallback) => {
+                const n = Number.parseInt(raw, 10);
+                if (Number.isNaN(n)) return fallback;
+                return Math.max(min, Math.min(max, n));
+            };
+
+            // BPM stepper. Locked while playing — same pattern as the
+            // Recorder's resolution/block-width inputs.
+            const setBpm = (n) => {
+                playbackState.bpmOverride = clampInt(n, 20, 400, 120);
+                bpmInput.value = String(playbackState.bpmOverride);
+                playbackSaveToStorage();
+            };
+            el('playback-bpm-down').addEventListener('click', () => {
+                if (playbackState.isPlaying) return;
+                setBpm((playbackState.bpmOverride ?? playbackState.loadedTab?.transposed?.tempo() ?? 120) - 1);
+            });
+            el('playback-bpm-up').addEventListener('click', () => {
+                if (playbackState.isPlaying) return;
+                setBpm((playbackState.bpmOverride ?? playbackState.loadedTab?.transposed?.tempo() ?? 120) + 1);
+            });
+            bpmInput.addEventListener('change', () => {
+                if (playbackState.isPlaying) {
+                    bpmInput.value = String(playbackState.bpmOverride ?? playbackState.loadedTab?.transposed?.tempo() ?? 120);
+                    return;
+                }
+                setBpm(bpmInput.value);
+            });
+            el('playback-bpm-reset').addEventListener('click', () => {
+                if (playbackState.isPlaying) return;
+                playbackState.bpmOverride = null;
+                bpmInput.value = String(playbackState.loadedTab?.transposed?.tempo() ?? 120);
+                playbackSaveToStorage();
+            });
+
+            loopInput.addEventListener('change', () => {
+                if (playbackState.isPlaying) {
+                    loopInput.value = playbackState._loopSpecText ?? 'off';
+                    return;
+                }
+                playbackState._loopSpecText = loopInput.value.trim() || 'off';
+                playbackSaveToStorage();
+            });
+
+            metToggle.addEventListener('change', () => {
+                playbackState.metronome = metToggle.checked;
+                playbackSaveToStorage();
+            });
+
+            prInput.addEventListener('change', () => {
+                if (playbackState.isPlaying) {
+                    prInput.value = String(playbackState.preRoll);
+                    return;
+                }
+                playbackState.preRoll = clampInt(prInput.value, 0, 16, 4);
+                prInput.value = String(playbackState.preRoll);
+                playbackSaveToStorage();
+            });
+
+            waitToggle.addEventListener('change', () => {
+                if (playbackState.isPlaying) {
+                    waitToggle.checked = playbackState.wait;
+                    return;
+                }
+                playbackState.wait = waitToggle.checked;
+                playbackSaveToStorage();
+            });
+        }
+
+        // ---- Transport (Play / Pause / Stop + Space shortcut) --------------
+
+        function wirePlaybackTransport() {
+            el('playback-play-btn').addEventListener('click', () => {
+                if (playbackState.preRollActive) {
+                    playbackState.preRollAbort = true;
+                } else if (!playbackState.isPlaying) {
+                    playbackStart().catch((err) => {
+                        console.error('playbackStart failed', err);
+                        el('playback-hint').textContent =
+                            `failed to start: ${err?.message ?? err}`;
+                    });
+                }
+            });
+            el('playback-pause-btn').addEventListener('click', playbackTogglePause);
+            el('playback-stop-btn').addEventListener('click', () => playbackStop('stopped'));
+
+            // Spacebar pause/resume while on the Playback screen.
+            document.addEventListener('keydown', (e) => {
+                if (e.code !== 'Space') return;
+                if (!el('screen-playback').classList.contains('active')) return;
+                const t = e.target;
+                if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT')) return;
+                if (!playbackState.isPlaying) return;
+                e.preventDefault();
+                playbackTogglePause();
+            });
+        }
+
+        /// Parse the user's loop input (`'off'` / `'full'` / `'START:END'`)
+        /// into `{ start, end, repeat }`. Throws on invalid input — same
+        /// shape as the CLI's `parse_loop_spec`.
+        function playbackParseLoopSpec(text, totalCols) {
+            const trimmed = (text ?? 'off').trim().toLowerCase();
+            if (trimmed === 'off' || trimmed === '') return { start: 0, end: totalCols, repeat: false };
+            if (trimmed === 'full') return { start: 0, end: totalCols, repeat: true };
+            const parts = trimmed.split(':');
+            if (parts.length !== 2) throw new Error(`loop expects "off", "full", or "START:END"; got "${text}"`);
+            const start = Number.parseInt(parts[0], 10);
+            const end = Number.parseInt(parts[1], 10);
+            if (!Number.isFinite(start) || !Number.isFinite(end)) {
+                throw new Error(`loop bounds must be integers: "${text}"`);
+            }
+            if (start >= end) throw new Error(`loop start (${start}) must be < end (${end})`);
+            if (end > totalCols) throw new Error(`loop end (${end}) exceeds column count (${totalCols})`);
+            return { start, end, repeat: true };
+        }
+
+        async function playbackStart() {
+            if (!playbackState.loadedTab) return;
+            const tab = playbackState.loadedTab.transposed;
+            const totalCols = tab.columns_count();
+            if (totalCols === 0) {
+                el('playback-hint').textContent = 'this tab has no notes';
+                return;
+            }
+
+            // Resolve loop spec from the input (may throw on bad text).
+            let loopBounds;
+            try {
+                loopBounds = playbackParseLoopSpec(
+                    playbackState._loopSpecText ?? el('playback-loop').value,
+                    totalCols,
+                );
+            } catch (e) {
+                el('playback-hint').textContent = e.message;
+                return;
+            }
+            playbackState.loopStart = loopBounds.start;
+            playbackState.loopEnd = loopBounds.end;
+            playbackState.repeat = loopBounds.repeat;
+
+            // Tempo + grid math — derive from the first column's
+            // duration_denom, same convention as the CLI.
+            const bpm = playbackState.bpmOverride ?? tab.tempo();
+            const firstCol = tab.column_at(0);
+            const resolutionDenom = firstCol?.duration_denom || 8;
+            playbackState.msPerColumn = 240_000 / (bpm * resolutionDenom);
+            playbackState.colsPerBeat = Math.max(1, Math.floor(resolutionDenom / 4));
+
+            playbackState.currentCol = loopBounds.start;
+            playbackState.totalPausedMs = 0;
+            playbackState.pausedAtMs = 0;
+            playbackState.waitingForCol = -1;
+
+            // Lock settings + tuning controls.
+            playbackState.tuning?.setEnabled(false);
+            el('playback-play-btn').disabled = true;
+            el('playback-pause-btn').disabled = false;
+            el('playback-pause-btn').textContent = 'Pause';
+            el('playback-stop-btn').disabled = false;
+
+            // Wait mode prep — open mic + chromatic tuner before pre-roll
+            // so the buffer is primed by the time the user needs to play.
+            if (playbackState.wait) {
+                const sr = micSession.sampleRate();
+                playbackState.chromaticTuner = WebTuner.new_chromatic(sr);
+                try {
+                    const liveSr = await micSession.start({
+                        consumerName: 'playback',
+                        onSamples: (samples) => {
+                            const t = playbackState.chromaticTuner;
+                            if (!t) return;
+                            t.feed(samples);
+                            // Readings drain whether or not we're waiting,
+                            // so the queue doesn't grow. Only act on them
+                            // when actively waiting for a column.
+                            const readings = t.take_readings();
+                            if (playbackState.waitingForCol < 0) return;
+                            for (const r of readings) {
+                                if (playbackWaitMatches(r.detected_hz, playbackState.waitingForCol)) {
+                                    playbackState.waitingForCol = -1;
+                                    break;
+                                }
+                            }
+                        },
+                    });
+                    if (Math.round(liveSr) !== sr) {
+                        playbackState.chromaticTuner.free?.();
+                        playbackState.chromaticTuner = WebTuner.new_chromatic(liveSr);
+                    }
+                } catch (err) {
+                    playbackState.chromaticTuner?.free?.();
+                    playbackState.chromaticTuner = null;
+                    playbackState.tuning?.setEnabled(true);
+                    el('playback-play-btn').disabled = false;
+                    el('playback-pause-btn').disabled = true;
+                    el('playback-stop-btn').disabled = true;
+                    throw err;
+                }
+            }
+
+            // Pre-roll: N audible clicks at one-per-beat (60 s / BPM ms).
+            if (playbackState.preRoll > 0) {
+                playbackState.preRollActive = true;
+                playbackState.preRollAbort = false;
+                el('playback-play-btn').textContent = 'Stop';
+                el('playback-play-btn').disabled = false;
+                const beatMs = 60_000 / Math.max(1, bpm);
+                for (let i = 1; i <= playbackState.preRoll; i++) {
+                    if (playbackState.preRollAbort) break;
+                    recPlayMetronomeClick();
+                    el('playback-hint').textContent = `pre-roll: ${i} / ${playbackState.preRoll}`;
+                    await new Promise((resolve) => setTimeout(resolve, beatMs));
+                }
+                playbackState.preRollActive = false;
+                el('playback-play-btn').textContent = 'Play';
+                el('playback-play-btn').disabled = true;
+                if (playbackState.preRollAbort) {
+                    playbackState.preRollAbort = false;
+                    playbackStop('pre-roll cancelled');
+                    return;
+                }
+            }
+
+            // Engine kicks off.
+            playbackState.isPlaying = true;
+            playbackState.isPaused = false;
+            playbackState.playStartTime = performance.now();
+            playbackState.tickHandle = setInterval(
+                playbackTick,
+                Math.max(15, playbackState.msPerColumn / 4),
+            );
+            playbackUpdateHint();
+        }
+
+        function playbackTogglePause() {
+            if (!playbackState.isPlaying) return;
+            if (playbackState.isPaused) {
+                const pausedDur = performance.now() - playbackState.pausedAtMs;
+                playbackState.totalPausedMs += pausedDur;
+                playbackState.isPaused = false;
+                el('playback-pause-btn').textContent = 'Pause';
+                playbackUpdateHint();
+            } else {
+                playbackState.isPaused = true;
+                playbackState.pausedAtMs = performance.now();
+                el('playback-pause-btn').textContent = 'Resume';
+                el('playback-hint').textContent =
+                    `paused — col ${playbackState.currentCol + 1}/${playbackState.loopEnd}`;
+            }
+        }
+
+        function playbackStop(hintText) {
+            if (!playbackState.isPlaying && !playbackState.preRollActive) return;
+            playbackState.isPlaying = false;
+            playbackState.isPaused = false;
+            playbackState.preRollActive = false;
+            playbackState.waitingForCol = -1;
+            if (playbackState.tickHandle) {
+                clearInterval(playbackState.tickHandle);
+                playbackState.tickHandle = null;
+            }
+            if (micSession.consumerName === 'playback') micSession.stop();
+            playbackState.chromaticTuner?.free?.();
+            playbackState.chromaticTuner = null;
+
+            playbackState.tuning?.setEnabled(true);
+            playbackState.currentCol = 0;
+            playbackState.rendererController?.setPlayhead(0);
+
+            el('playback-play-btn').disabled = false;
+            el('playback-play-btn').textContent = 'Play';
+            el('playback-pause-btn').disabled = true;
+            el('playback-pause-btn').textContent = 'Pause';
+            el('playback-stop-btn').disabled = true;
+            el('playback-hint').textContent = hintText ?? 'stopped';
+        }
+
+        function playbackTick() {
+            if (!playbackState.isPlaying || playbackState.isPaused) return;
+            if (playbackState.waitingForCol >= 0) {
+                // Wait mode: pause time advancement until the mic
+                // callback clears `waitingForCol`. Keep the hint fresh.
+                playbackUpdateHint();
+                return;
+            }
+
+            const elapsed = performance.now()
+                - playbackState.playStartTime
+                - playbackState.totalPausedMs;
+            const sinceLoopStart = elapsed / playbackState.msPerColumn;
+            const loopLen = playbackState.loopEnd - playbackState.loopStart;
+            let intoLoop;
+            if (playbackState.repeat) {
+                intoLoop = Math.floor(sinceLoopStart) % loopLen;
+            } else {
+                intoLoop = Math.floor(sinceLoopStart);
+                if (intoLoop >= loopLen) {
+                    // Reached the end. Park on the final column, stop.
+                    playbackState.currentCol = playbackState.loopEnd - 1;
+                    playbackState.rendererController?.setPlayhead(playbackState.currentCol);
+                    playbackStop('finished');
+                    return;
+                }
+            }
+            const newCol = playbackState.loopStart + intoLoop;
+
+            // If we've advanced one or more columns, fire metronome clicks
+            // on each beat boundary we crossed, then enter wait mode for
+            // the new column if applicable.
+            if (newCol !== playbackState.currentCol) {
+                // Click on every beat boundary we crossed. This is rare —
+                // usually `newCol = currentCol + 1` at JS-timer rates —
+                // but a tab paused for a long time and then resumed
+                // could jump multiple columns; we shouldn't drop clicks.
+                if (playbackState.metronome) {
+                    const startCol = playbackState.currentCol + 1;
+                    for (let c = startCol; c <= newCol; c++) {
+                        if (c % playbackState.colsPerBeat === 0) recPlayMetronomeClick();
+                    }
+                }
+                playbackState.currentCol = newCol;
+                playbackState.rendererController?.setPlayhead(newCol);
+
+                // Wait mode: if the new column has hits, hold the playhead
+                // until the mic detects a matching pitch. Rests advance
+                // through normally so the metronome stays musical.
+                if (playbackState.wait) {
+                    const col = playbackState.loadedTab.transposed.column_at(newCol);
+                    if (col && Array.isArray(col.hits) && col.hits.length > 0) {
+                        playbackState.waitingForCol = newCol;
+                    }
+                }
+            }
+            playbackUpdateHint();
+        }
+
+        function playbackUpdateHint() {
+            const total = playbackState.loopEnd - playbackState.loopStart;
+            const into = playbackState.currentCol - playbackState.loopStart;
+            const elapsed = playbackState.isPaused
+                ? playbackState.pausedAtMs - playbackState.playStartTime - playbackState.totalPausedMs
+                : performance.now() - playbackState.playStartTime - playbackState.totalPausedMs;
+            const elapsedSecs = Math.max(0, Math.floor(elapsed / 1000));
+            const totalSecs = Math.floor(total * playbackState.msPerColumn / 1000);
+            const fmt = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+            const waitTag = playbackState.waitingForCol >= 0 ? '  ⏸ waiting for next note' : '';
+            el('playback-hint').textContent =
+                `playing — col ${into + 1}/${total}  ${fmt(elapsedSecs)} / ${fmt(totalSecs)}${waitTag}`;
+        }
+
+        /// Does the detected pitch match any expected `(string, fret)` in
+        /// the column? Mirrors the CLI's `wait_for_expected_note` shape:
+        /// for each expected hit, compute the target MIDI from the
+        /// (post-capo) tuning + fret and check cents distance.
+        function playbackWaitMatches(detectedHz, colIdx) {
+            const tab = playbackState.loadedTab?.transposed;
+            if (!tab || !(detectedHz > 0)) return false;
+            const col = tab.column_at(colIdx);
+            if (!col || !Array.isArray(col.hits) || col.hits.length === 0) return false;
+            const tuningNames = tab.tuning_names();
+            for (const [stringNum, fret] of col.hits) {
+                const idx = stringNum - 1;
+                if (idx < 0 || idx >= tuningNames.length) continue;
+                const openMidi = midi_from_name(tuningNames[idx]);
+                if (openMidi == null) continue;
+                const expectedMidi = openMidi + fret;
+                const expectedHz = 440 * Math.pow(2, (expectedMidi - 69) / 12);
+                const cents = 1200 * Math.log2(detectedHz / expectedHz);
+                if (Math.abs(cents) < WAIT_MATCH_CENTS) return true;
+            }
+            return false;
+        }
 
         main().catch((e) => {
             el('splash').textContent = 'WASM load failed: ' + e;
