@@ -293,6 +293,126 @@ pub struct FretMatch {
     pub cents_off: f32,
 }
 
+/// Per-string semitone offset applied on top of a `Tuning`. Modelled per-string
+/// rather than as a single scalar so partial capos (drop-D capo on guitar) and
+/// the banjo 5th-string spike work through the same code path as a plain
+/// "capo on fret 3" — `apply` to the base tuning to get the effective tuning
+/// the rest of the system sees.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Capo {
+    /// One offset per string, in the same order as `Tuning::strings`. Zero
+    /// means "no capo on this string."
+    pub offsets: Vec<i32>,
+}
+
+impl Capo {
+    /// No-op capo of the given length.
+    pub fn none(string_count: usize) -> Self {
+        Self {
+            offsets: vec![0; string_count],
+        }
+    }
+
+    /// Uniform capo — the same offset on every string.
+    pub fn uniform(string_count: usize, semitones: i32) -> Self {
+        Self {
+            offsets: vec![semitones; string_count],
+        }
+    }
+
+    /// True if no string is offset (canonical "no capo" state).
+    pub fn is_none(&self) -> bool {
+        self.offsets.iter().all(|&n| n == 0)
+    }
+
+    /// If every string has the same offset, return it; otherwise `None`.
+    /// Used by display code to print "capo 3" instead of "capo 3,3,3,3,3,3".
+    pub fn is_uniform(&self) -> Option<i32> {
+        let first = *self.offsets.first()?;
+        self.offsets.iter().all(|&n| n == first).then_some(first)
+    }
+
+    /// Apply to `tuning`, producing a new tuning whose open pitches are the
+    /// per-string sum of the original opens and the capo offsets. Errors if
+    /// the capo's string count doesn't match the tuning, or if any string's
+    /// effective open pitch falls outside `0..=127`.
+    pub fn apply(&self, tuning: &Tuning) -> Result<Tuning, String> {
+        if self.offsets.len() != tuning.strings.len() {
+            return Err(format!(
+                "capo has {} offsets but tuning '{}' has {} strings",
+                self.offsets.len(),
+                tuning.name,
+                tuning.strings.len()
+            ));
+        }
+        let strings = tuning
+            .strings
+            .iter()
+            .zip(&self.offsets)
+            .enumerate()
+            .map(|(idx, (s, &offset))| {
+                let new_midi = s.open.0 as i32 + offset;
+                if !(0..=127).contains(&new_midi) {
+                    return Err(format!(
+                        "capo offset {offset} on string {} pushes MIDI to {new_midi} (out of 0..=127)",
+                        idx + 1
+                    ));
+                }
+                let new_note = MidiNote(new_midi as u8);
+                // When unchanged on this string, preserve the original label
+                // (e.g. "g4 (reentrant)") instead of bare "G4" — otherwise
+                // display loses the reentrant annotation under a uniform capo.
+                let name = if offset == 0 {
+                    s.name.clone()
+                } else {
+                    new_note.name()
+                };
+                Ok(TunedString {
+                    name,
+                    open: new_note,
+                })
+            })
+            .collect::<Result<Vec<_>, String>>()?;
+        let name = if self.is_none() {
+            tuning.name.clone()
+        } else if let Some(n) = self.is_uniform() {
+            format!("{} (capo {n})", tuning.name)
+        } else {
+            format!("{} (partial capo)", tuning.name)
+        };
+        Ok(Tuning { name, strings })
+    }
+
+    /// Parse a CLI-supplied capo spec for a tuning with `string_count` strings.
+    /// Accepts a single integer (uniform capo on every string) or a comma-
+    /// separated list with exactly `string_count` integers (per-string).
+    /// `"0"` / `""` produce a no-op capo.
+    pub fn parse(s: &str, string_count: usize) -> Result<Capo, String> {
+        let trimmed = s.trim();
+        if trimmed.is_empty() {
+            return Ok(Self::none(string_count));
+        }
+        if trimmed.contains(',') {
+            let offsets = trimmed
+                .split(',')
+                .map(|p| p.trim().parse::<i32>())
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|e| format!("invalid capo offsets: {e}"))?;
+            if offsets.len() != string_count {
+                return Err(format!(
+                    "capo has {} values but tuning has {} strings",
+                    offsets.len(),
+                    string_count
+                ));
+            }
+            Ok(Capo { offsets })
+        } else {
+            let n: i32 = trimmed.parse().map_err(|e| format!("invalid capo: {e}"))?;
+            Ok(Self::uniform(string_count, n))
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -550,6 +670,125 @@ mod tests {
         let tuning = entry.to_tuning();
         let recovered = PresetEntry::from_tuning(&entry.slug, &tuning);
         assert_eq!(recovered, entry);
+    }
+
+    #[test]
+    fn capo_none_is_a_no_op_on_any_tuning() {
+        let uke = Tuning::standard_ukulele();
+        let capo = Capo::none(uke.strings.len());
+        let effective = capo.apply(&uke).expect("apply");
+        assert_eq!(effective.strings.len(), uke.strings.len());
+        for (a, b) in effective.strings.iter().zip(&uke.strings) {
+            assert_eq!(a.open, b.open);
+        }
+        // No-op capo preserves the original tuning name (no "(capo N)" suffix).
+        assert_eq!(effective.name, uke.name);
+    }
+
+    #[test]
+    fn capo_uniform_shifts_every_string_by_n_semitones() {
+        let g = Tuning::standard_guitar();
+        let capo = Capo::uniform(g.strings.len(), 3);
+        let effective = capo.apply(&g).expect("apply");
+        for (a, b) in effective.strings.iter().zip(&g.strings) {
+            assert_eq!(a.open.0 as i32, b.open.0 as i32 + 3);
+        }
+        // Uniform capo gets a compact display suffix.
+        assert!(
+            effective.name.contains("capo 3"),
+            "expected 'capo 3' in name, got '{}'",
+            effective.name
+        );
+    }
+
+    #[test]
+    fn capo_per_string_models_drop_d_style_partial_capo() {
+        // Standard guitar with a partial capo on fret 2 covering strings 2-6,
+        // leaving the high-E open. Each shifted string gets +2 semitones.
+        let g = Tuning::standard_guitar();
+        let capo = Capo {
+            offsets: vec![0, 2, 2, 2, 2, 2],
+        };
+        let effective = capo.apply(&g).expect("apply");
+        assert_eq!(effective.strings[0].open, g.strings[0].open); // E4 unchanged
+        assert_eq!(effective.strings[1].open.0, g.strings[1].open.0 + 2);
+        assert_eq!(effective.strings[5].open.0, g.strings[5].open.0 + 2);
+        assert!(
+            effective.name.contains("partial capo"),
+            "expected 'partial capo' in name, got '{}'",
+            effective.name
+        );
+    }
+
+    #[test]
+    fn capo_preserves_reentrant_string_label_when_offset_is_zero() {
+        // Uke with a uniform capo would normally rewrite "g4 (reentrant)" to
+        // a bare MIDI name. Only relabel when the offset on that string is
+        // non-zero so a 5th-string-drone partial capo keeps the (drone) tag.
+        let banjo = Tuning::standard_banjo();
+        let capo = Capo {
+            offsets: vec![3, 3, 3, 3, 0], // body capo, 5th-string spike at 0
+        };
+        let effective = capo.apply(&banjo).expect("apply");
+        assert_eq!(effective.strings[4].name, "g4 (drone)");
+        // Body strings DO get relabelled (their pitch genuinely changed).
+        assert_eq!(effective.strings[0].open.0, banjo.strings[0].open.0 + 3);
+    }
+
+    #[test]
+    fn capo_rejects_string_count_mismatch() {
+        let uke = Tuning::standard_ukulele(); // 4 strings
+        let capo = Capo {
+            offsets: vec![3; 6],
+        };
+        let err = capo.apply(&uke).expect_err("should mismatch");
+        assert!(err.contains("4 strings"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn capo_rejects_offset_that_overflows_midi_range() {
+        let uke = Tuning::standard_ukulele();
+        let capo = Capo::uniform(uke.strings.len(), 80); // pushes A4 past 127
+        let err = capo.apply(&uke).expect_err("should overflow");
+        assert!(err.contains("out of 0..=127"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn capo_parse_accepts_uniform_or_per_string() {
+        let uniform = Capo::parse("3", 6).expect("parse uniform");
+        assert_eq!(uniform, Capo::uniform(6, 3));
+
+        let partial = Capo::parse("0,2,2,2,2,2", 6).expect("parse per-string");
+        assert_eq!(partial.offsets, vec![0, 2, 2, 2, 2, 2]);
+
+        // Whitespace tolerated.
+        let spaced = Capo::parse(" 0 , 2 , 2 , 2 , 2 , 2 ", 6).expect("parse spaced");
+        assert_eq!(spaced.offsets, vec![0, 2, 2, 2, 2, 2]);
+
+        // Empty / zero / explicit "0" all collapse to no-op.
+        let none = Capo::parse("0", 6).expect("parse zero");
+        assert!(none.is_none());
+        let blank = Capo::parse("", 6).expect("parse blank");
+        assert!(blank.is_none());
+    }
+
+    #[test]
+    fn capo_parse_rejects_wrong_value_count_in_per_string() {
+        let err = Capo::parse("0,2,2", 6).expect_err("should fail");
+        assert!(err.contains("3 values"), "unexpected error: {err}");
+        assert!(err.contains("6 strings"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn capo_is_uniform_returns_none_for_partial_capo() {
+        let partial = Capo {
+            offsets: vec![0, 2, 2, 2, 2, 2],
+        };
+        assert!(partial.is_uniform().is_none());
+        let uniform = Capo::uniform(6, 3);
+        assert_eq!(uniform.is_uniform(), Some(3));
+        // Vacuous case: empty capo on zero-string tuning.
+        assert!(Capo { offsets: vec![] }.is_uniform().is_none());
     }
 
     #[test]

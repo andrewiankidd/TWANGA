@@ -7,7 +7,7 @@ use std::io::BufWriter;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 use twanga_audio::{InputStream, OutputStream};
-use twanga_core::{Frequency, MidiNote, PresetEntry, PresetString, TunedString, Tuning};
+use twanga_core::{Capo, Frequency, MidiNote, PresetEntry, PresetString, TunedString, Tuning};
 use twanga_dsp::{Tuner, TunerMode, TunerReading};
 use twanga_synth::{exp_decay, sine};
 use twanga_tabs::{
@@ -39,6 +39,11 @@ enum Command {
         /// Tuning preset. If omitted, the CLI prompts interactively.
         #[arg(long)]
         tuning: Option<String>,
+        /// Capo, in semitones. `--capo 3` raises every string by 3 semitones;
+        /// `--capo "0,2,2,2,2,2"` is a per-string partial capo for drop-D-style
+        /// setups. Omit to be prompted (default 0 = no capo).
+        #[arg(long, allow_hyphen_values = true)]
+        capo: Option<String>,
     },
     /// Play back a `.alphatex` recording. Scrolling cursor view, optional
     /// metronome click on each beat, optional "wait" mode that pauses until
@@ -71,6 +76,11 @@ enum Command {
             value_name = "START:END",
         )]
         loop_spec: Option<String>,
+        /// Capo position applied to the tab's tuning before pitch comparison.
+        /// `--capo 3` lifts every expected pitch by 3 semitones (your physical
+        /// capo). Omit to be prompted; default 0 = no capo.
+        #[arg(long, allow_hyphen_values = true)]
+        capo: Option<String>,
     },
     /// Live tab recorder — capture played notes as horizontal ASCII tab notation.
     /// Any argument left unset triggers an interactive prompt (with the default
@@ -88,6 +98,10 @@ enum Command {
         /// Number of columns per scrolling block.
         #[arg(long)]
         block_width: Option<usize>,
+        /// Capo position. `--capo 3` records as if every string is 3 semitones
+        /// higher; logged frets are capo-relative. Omit to be prompted.
+        #[arg(long, allow_hyphen_values = true)]
+        capo: Option<String>,
     },
     /// List available audio input devices.
     Devices,
@@ -316,6 +330,25 @@ fn resolve_mode(arg: Option<String>) -> Result<TunerMode> {
             .ok_or_else(|| anyhow!("preset registry desync; report this bug"))?;
         Ok(TunerMode::Strings(tuning))
     }
+}
+
+/// Resolve a capo. If `arg` is provided, parse it against `tuning`'s string
+/// count. Otherwise, prompt for a uniform integer capo (default 0). Returns
+/// a no-op capo if not running on a terminal. The interactive prompt only
+/// supports uniform capos; partial capos must come from the `--capo` flag.
+fn resolve_capo(arg: Option<String>, tuning: &Tuning) -> Result<Capo> {
+    let n_strings = tuning.strings.len();
+    if let Some(spec) = arg {
+        return Capo::parse(&spec, n_strings).map_err(|e| anyhow!("{e}"));
+    }
+    use std::io::IsTerminal;
+    if !std::io::stdin().is_terminal() || !std::io::stderr().is_terminal() {
+        return Ok(Capo::none(n_strings));
+    }
+    let n: i32 = twanga_tui::prompt_parsed("Capo position (semitones)", 0_i32, |s| {
+        s.trim().parse::<i32>().map_err(|e| e.to_string())
+    })?;
+    Ok(Capo::uniform(n_strings, n))
 }
 
 fn resolve_tuning(arg: Option<String>) -> Result<Tuning> {
@@ -762,9 +795,17 @@ fn main() -> Result<()> {
     twanga_tui::install_ctrl_c_handler()?;
     let cli = Cli::parse();
     match cli.command {
-        Command::Tune { tuning } => {
+        Command::Tune { tuning, capo } => {
             twanga_tui::motd::print_banner()?;
             let mode = resolve_mode(tuning)?;
+            let mode = match mode {
+                TunerMode::Chromatic => TunerMode::Chromatic,
+                TunerMode::Strings(t) => {
+                    let c = resolve_capo(capo, &t)?;
+                    let effective = c.apply(&t).map_err(|e| anyhow!("{e}"))?;
+                    TunerMode::Strings(effective)
+                }
+            };
             run_tuner(mode)?;
         }
         Command::Record {
@@ -772,13 +813,16 @@ fn main() -> Result<()> {
             bpm,
             resolution,
             block_width,
+            capo,
         } => {
             twanga_tui::motd::print_banner()?;
             let t = resolve_tuning(tuning)?;
+            let c = resolve_capo(capo, &t)?;
+            let effective = c.apply(&t).map_err(|e| anyhow!("{e}"))?;
             let bpm = resolve_bpm(bpm)?;
             let denom = resolve_resolution(resolution)?;
             let bw = resolve_block_width(block_width)?;
-            run_recorder(t, bpm, denom, bw)?;
+            run_recorder(effective, bpm, denom, bw)?;
         }
         Command::Play {
             path,
@@ -787,6 +831,7 @@ fn main() -> Result<()> {
             no_metronome,
             wait,
             loop_spec,
+            capo,
         } => {
             twanga_tui::motd::print_banner()?;
             // Parse first so the tuning prompt can show what's in the file.
@@ -798,7 +843,16 @@ fn main() -> Result<()> {
                 return Err(anyhow!("'{}' has no notes to play", path.display()));
             }
             let tuning = resolve_play_tuning(tuning, &parsed)?;
-            run_playback(path, parsed, tuning, bpm, !no_metronome, wait, loop_spec)?;
+            run_playback(
+                path,
+                parsed,
+                tuning,
+                bpm,
+                !no_metronome,
+                wait,
+                loop_spec,
+                capo,
+            )?;
         }
         Command::Devices => {
             for name in twanga_audio::list_input_devices()? {
@@ -834,6 +888,7 @@ fn run_playback(
     metronome: bool,
     wait: bool,
     loop_spec: Option<String>,
+    capo_spec: Option<String>,
 ) -> Result<()> {
     // Transpose if --tuning was provided (either explicitly via flag or via
     // the prompt). The transposed tab carries the target tuning's names in
@@ -858,11 +913,26 @@ fn run_playback(
     let ms_per_col = 240_000 / (bpm * resolution_denom);
     let cols_per_beat = (resolution_denom as usize / 4).max(1);
 
+    // Effective tuning for wait-mode pitch comparison: tab's tuning + user's
+    // physical capo. Frets in the tab are interpreted relative to this capo
+    // — fret 0 means "the open string above the capo." Only resolved when we
+    // actually need it (wait mode); transposed display is unaffected.
     let tuning_for_wait: Option<Tuning> = if wait {
-        Some(
-            tab.tuning()
-                .ok_or_else(|| anyhow!("'\\tuning' header is missing or unparseable"))?,
-        )
+        let base = tab
+            .tuning()
+            .ok_or_else(|| anyhow!("'\\tuning' header is missing or unparseable"))?;
+        let capo = resolve_capo(capo_spec.clone(), &base)?;
+        Some(capo.apply(&base).map_err(|e| anyhow!("{e}"))?)
+    } else {
+        None
+    };
+    // Effective capo for the header line, separately tracked because non-wait
+    // playback can still want a header note like "Capo: 3".
+    let header_capo: Option<Capo> = if let Some(spec) = capo_spec.as_deref() {
+        let base = tab
+            .tuning()
+            .ok_or_else(|| anyhow!("'\\tuning' header is missing or unparseable"))?;
+        Some(Capo::parse(spec, base.strings.len()).map_err(|e| anyhow!("{e}"))?)
     } else {
         None
     };
@@ -895,6 +965,16 @@ fn run_playback(
         eprintln!("Transposed: {name} ({})", tab.tuning_names.join(" "));
     } else {
         eprintln!("Tuning:     {} (from file)", tab.tuning_names.join(" "));
+    }
+    if let Some(c) = &header_capo
+        && !c.is_none()
+    {
+        if let Some(n) = c.is_uniform() {
+            eprintln!("Capo:       {n} (uniform)");
+        } else {
+            let pretty: Vec<String> = c.offsets.iter().map(|n| n.to_string()).collect();
+            eprintln!("Capo:       [{}] (partial)", pretty.join(","));
+        }
     }
     eprintln!("Tempo:      {bpm} BPM, 1/{resolution_denom} notes ({ms_per_col} ms/col)");
     eprintln!("Metronome:  {}", if metronome { "on" } else { "off" });
