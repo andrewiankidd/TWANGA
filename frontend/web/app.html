@@ -222,6 +222,70 @@
             color: var(--background);
         }
 
+        /* Active-tuning header — shows the full display name of the
+           currently-selected tuning and the capo control side-by-side. The
+           capo control is hidden for chromatic mode (no string targets to
+           shift). */
+        .active-tuning-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 1rem;
+            margin-bottom: 1rem;
+            padding: 0.6rem 0.2rem;
+        }
+        .active-tuning-name {
+            font-size: 1rem;
+            font-weight: 700;
+            color: var(--primary);
+        }
+        .capo-control {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.6rem;
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 0.3rem 0.7rem;
+        }
+        .capo-control[hidden] { display: none; }
+        .capo-label {
+            color: var(--muted);
+            text-transform: uppercase;
+            font-size: 0.7rem;
+            letter-spacing: 1px;
+            font-weight: 700;
+        }
+        .capo-btn {
+            width: 26px;
+            height: 26px;
+            border-radius: 4px;
+            border: 1px solid var(--border);
+            background: var(--background);
+            color: var(--text);
+            cursor: pointer;
+            font-size: 1.1rem;
+            line-height: 1;
+            padding: 0;
+            font-family: monospace;
+            transition: border-color 0.15s, color 0.15s;
+        }
+        .capo-btn:hover:not(:disabled) {
+            border-color: var(--highlight);
+            color: var(--highlight);
+        }
+        .capo-btn:disabled {
+            opacity: 0.35;
+            cursor: not-allowed;
+        }
+        .capo-value {
+            min-width: 1.4em;
+            text-align: center;
+            font-family: monospace;
+            font-weight: 700;
+            font-size: 1rem;
+        }
+
         /* String rows — one per tuning string, plus a special "Chromatic"
            variant that uses just one row showing the current nearest note. */
         .strings {
@@ -452,6 +516,16 @@
 
             <div class="tuning-picker" id="tuning-picker"></div>
 
+            <div class="active-tuning-row">
+                <div class="active-tuning-name" id="active-tuning-name">Chromatic</div>
+                <div class="capo-control" id="capo-control" hidden>
+                    <span class="capo-label">Capo</span>
+                    <button class="capo-btn" id="capo-down" aria-label="Decrease capo">−</button>
+                    <span class="capo-value" id="capo-value">0</span>
+                    <button class="capo-btn" id="capo-up" aria-label="Increase capo">+</button>
+                </div>
+            </div>
+
             <div class="strings" id="strings"></div>
 
             <p class="tuner-hint" id="tuner-hint">click Start mic to begin</p>
@@ -510,6 +584,7 @@
         import init, {
             pick_splash,
             builtin_tuning_slugs,
+            preset_display_name,
             WebTuner,
         } from './pkg/twanga_web.js';
 
@@ -611,11 +686,26 @@
             window.addEventListener('hashchange', routeFromHash);
             routeFromHash();
 
+            // Hydrate tuner state from localStorage (cross-platform: works
+            // in web browsers, Tauri webview, Tauri Mobile webview). If a
+            // future Tauri command syncs ~/.config/twanga/tunings.toml with
+            // localStorage, the CLI and GUI end up sharing one source of
+            // truth — but that's a separate item.
+            const saved = loadTunerState();
+            tunerState.capo = Number.isInteger(saved.capo) && saved.capo >= 0 && saved.capo <= 12
+                ? saved.capo
+                : 0;
+
             renderTuningPicker();
-            // Default to chromatic — works for any instrument without making
-            // the user pick first. They can swap to a per-string tuning once
-            // they know what they're playing.
-            selectTuning('chromatic');
+            wireCapoControl();
+            // Default to whatever was saved, falling back to chromatic for
+            // first-time visitors. Unknown slugs (e.g. from an older saved
+            // state referencing a tuning we removed) silently fall back too.
+            const savedSlug = typeof saved.tuning === 'string' ? saved.tuning : 'chromatic';
+            const initialSlug = savedSlug === 'chromatic' || builtin_tuning_slugs().includes(savedSlug)
+                ? savedSlug
+                : 'chromatic';
+            selectTuning(initialSlug);
 
             el('pitch-btn').addEventListener('click', () => {
                 stopMic(); // can't run synthetic + mic at once
@@ -665,52 +755,142 @@
         // ±50 cents (a quartertone in either direction) maps to the full
         // width of the cents bar. Anything beyond clamps to the edge.
         const CENTS_FULL_SCALE = 50.0;
+        const MAX_CAPO = 12;
+        const STORAGE_KEY = 'twanga-tuner-v1';
 
         const tunerState = {
             mode: null,        // 'chromatic' or a tuning slug
+            capo: 0,           // uniform integer; partial capos available via WebTuner directly
             tuner: null,       // active WebTuner instance
             rowsByLabel: new Map(), // string label → row element (string mode only)
             sampleRate: 48_000,
         };
 
+        /// localStorage helpers — wrapped so private-browsing failures
+        /// (Safari throws on `setItem` in private mode, Firefox sometimes
+        /// blocks reads) never break the page. Schema is intentionally
+        /// minimal: `{ tuning: slug-or-'chromatic', capo: 0..12 }`.
+        function loadTunerState() {
+            try {
+                const raw = localStorage.getItem(STORAGE_KEY);
+                if (!raw) return {};
+                const parsed = JSON.parse(raw);
+                return typeof parsed === 'object' && parsed !== null ? parsed : {};
+            } catch (e) {
+                console.warn('localStorage read failed; ignoring', e);
+                return {};
+            }
+        }
+        function saveTunerState() {
+            try {
+                localStorage.setItem(STORAGE_KEY, JSON.stringify({
+                    tuning: tunerState.mode,
+                    capo: tunerState.capo,
+                }));
+            } catch (e) {
+                console.warn('localStorage write failed; settings will not persist', e);
+            }
+        }
+
+        /// Picker buttons use the trimmed display name (first segment before
+        /// any parenthetical). The full name is shown separately on the
+        /// active-tuning row so the picker stays compact on narrow screens.
+        function shortName(slug) {
+            if (slug === 'chromatic') return 'Chromatic';
+            const full = preset_display_name(slug);
+            if (!full) return slug;
+            const head = full.split('(')[0].trim();
+            return head || full;
+        }
+        function fullName(slug) {
+            if (slug === 'chromatic') return 'Chromatic';
+            return preset_display_name(slug) ?? slug;
+        }
+
         function renderTuningPicker() {
             const picker = el('tuning-picker');
             picker.textContent = '';
 
-            const makeButton = (slug, label) => {
+            const makeButton = (slug) => {
                 const btn = document.createElement('button');
                 btn.className = 'tuning-option';
                 btn.dataset.slug = slug;
-                btn.textContent = label;
+                btn.textContent = shortName(slug);
+                btn.title = fullName(slug); // hover surfaces the full name
                 btn.addEventListener('click', () => selectTuning(slug));
                 return btn;
             };
 
-            picker.appendChild(makeButton('chromatic', 'Chromatic'));
+            picker.appendChild(makeButton('chromatic'));
             for (const slug of builtin_tuning_slugs()) {
-                picker.appendChild(makeButton(slug, slug));
+                picker.appendChild(makeButton(slug));
             }
         }
 
+        function wireCapoControl() {
+            el('capo-down').addEventListener('click', () => {
+                if (tunerState.capo > 0) {
+                    tunerState.capo -= 1;
+                    onCapoChanged();
+                }
+            });
+            el('capo-up').addEventListener('click', () => {
+                if (tunerState.capo < MAX_CAPO) {
+                    tunerState.capo += 1;
+                    onCapoChanged();
+                }
+            });
+            updateCapoDisplay();
+        }
+
+        function updateCapoDisplay() {
+            el('capo-value').textContent = tunerState.capo.toString();
+            el('capo-down').disabled = tunerState.capo <= 0;
+            el('capo-up').disabled = tunerState.capo >= MAX_CAPO;
+            // Capo applies only in string mode — chromatic readings come
+            // back with whatever-note labels, no targets to shift.
+            el('capo-control').hidden = tunerState.mode === 'chromatic';
+        }
+
+        function onCapoChanged() {
+            updateCapoDisplay();
+            // Rebuild tuner with the new capo. Display name updates to
+            // include the "(capo N)" suffix that `Capo::apply` produces.
+            rebuildTuner();
+            saveTunerState();
+        }
+
         function selectTuning(slug) {
-            if (tunerState.mode === slug) return;
+            if (tunerState.mode === slug && tunerState.tuner !== null) return;
             tunerState.mode = slug;
 
-            // Highlight the active picker button.
             document.querySelectorAll('.tuning-option').forEach((btn) => {
                 btn.classList.toggle('active', btn.dataset.slug === slug);
             });
 
-            // Rebuild the tuner instance. Pick sample rate from the live
-            // AudioContext if running; otherwise default to 48k. The tuner
-            // is rebuilt below as part of the mic restart anyway.
+            updateCapoDisplay();
+            rebuildTuner();
+            saveTunerState();
+        }
+
+        /// Construct (or replace) the underlying WebTuner. Splits out of
+        /// `selectTuning` so capo changes can rebuild without touching the
+        /// active-tuning bookkeeping.
+        function rebuildTuner() {
             const sr = audioState.ctx?.sampleRate ?? 48_000;
             tunerState.sampleRate = sr;
             tunerState.tuner?.free?.();
-            tunerState.tuner = slug === 'chromatic'
-                ? WebTuner.new_chromatic(sr)
-                : WebTuner.new_for_strings(slug, sr);
 
+            if (tunerState.mode === 'chromatic') {
+                tunerState.tuner = WebTuner.new_chromatic(sr);
+            } else if (tunerState.capo > 0) {
+                tunerState.tuner = WebTuner.new_for_strings_with_capo(
+                    tunerState.mode, String(tunerState.capo), sr);
+            } else {
+                tunerState.tuner = WebTuner.new_for_strings(tunerState.mode, sr);
+            }
+
+            el('active-tuning-name').textContent = tunerState.tuner.name();
             renderStringRows();
         }
 
@@ -862,16 +1042,14 @@
             const ctx = new (window.AudioContext || window.webkitAudioContext)();
             await ctx.audioWorklet.addModule('audio-worklet.js');
 
-            // Rebuild the WebTuner against the context's actual sample rate
+            // Hand the live AudioContext to audioState BEFORE rebuilding the
+            // tuner so `rebuildTuner` picks up the actual sample rate
             // (44.1k or 48k depending on hardware). YIN's frequency math
             // depends on the sample rate so this matters — feeding a 48k
             // tuner with 44.1k samples would show every note ~80 cents flat.
+            audioState.ctx = ctx;
+            rebuildTuner();
             const sr = ctx.sampleRate;
-            tunerState.sampleRate = sr;
-            tunerState.tuner?.free?.();
-            tunerState.tuner = tunerState.mode === 'chromatic'
-                ? WebTuner.new_chromatic(sr)
-                : WebTuner.new_for_strings(tunerState.mode, sr);
 
             const source = ctx.createMediaStreamSource(stream);
             const node = new AudioWorkletNode(ctx, 'pitch-processor');
@@ -889,7 +1067,7 @@
             source.connect(node);
 
             audioState.running = true;
-            audioState.ctx = ctx;
+            // audioState.ctx already set above (so rebuildTuner could read the SR).
             audioState.stream = stream;
             audioState.node = node;
             audioState.source = source;
