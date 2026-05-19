@@ -303,6 +303,68 @@
             font-weight: 700;
             font-size: 1rem;
         }
+        /* "Per-string" toggle sits beside the uniform stepper. When active,
+           hides the uniform stepper and shows the per-string panel below. */
+        .capo-mode-toggle {
+            background: transparent;
+            border: 1px solid var(--border);
+            color: var(--muted);
+            border-radius: 4px;
+            padding: 0.2rem 0.55rem;
+            font-size: 0.7rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            cursor: pointer;
+            font-family: "Montserrat", sans-serif;
+            transition: border-color 0.15s, color 0.15s;
+        }
+        .capo-mode-toggle:hover {
+            border-color: var(--highlight);
+            color: var(--highlight);
+        }
+        .capo-mode-toggle.active {
+            background: var(--highlight);
+            border-color: var(--highlight);
+            color: var(--background);
+        }
+        .capo-uniform[hidden] { display: none; }
+
+        /* Per-string capo panel: one stepper row per string in the active
+           tuning. Mirrors the CLI's `--capo "0,2,2,2,2,2"` notation, except
+           the user manipulates values via UI instead of typing the comma
+           string. Sits below the active-tuning row, between picker and
+           string-rows display. */
+        .capo-per-string {
+            display: flex;
+            flex-direction: column;
+            gap: 0.35rem;
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 0.6rem 0.8rem;
+            margin-bottom: 1rem;
+        }
+        .capo-per-string[hidden] { display: none; }
+        .capo-per-string .ps-header {
+            color: var(--muted);
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            font-weight: 700;
+            margin-bottom: 0.2rem;
+        }
+        .capo-string-row {
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+        }
+        .capo-string-row .ps-label {
+            font-family: monospace;
+            font-size: 0.85rem;
+            color: var(--primary);
+            min-width: 7em;
+        }
 
         /* String rows — one per tuning string, plus a special "Chromatic"
            variant that uses just one row showing the current nearest note. */
@@ -718,11 +780,19 @@
                 <div class="active-tuning-name" id="active-tuning-name">Chromatic</div>
                 <div class="capo-control" id="capo-control" hidden>
                     <span class="capo-label">Capo</span>
-                    <button class="capo-btn" id="capo-down" aria-label="Decrease capo">−</button>
-                    <span class="capo-value" id="capo-value">0</span>
-                    <button class="capo-btn" id="capo-up" aria-label="Increase capo">+</button>
+                    <div class="capo-uniform" id="capo-uniform">
+                        <button class="capo-btn" id="capo-down" aria-label="Decrease capo">−</button>
+                        <span class="capo-value" id="capo-value">0</span>
+                        <button class="capo-btn" id="capo-up" aria-label="Increase capo">+</button>
+                    </div>
+                    <button class="capo-mode-toggle" id="capo-mode-toggle"
+                            title="Toggle per-string capo (drop-D / banjo 5th-string / partial capos)">
+                        Per-string
+                    </button>
                 </div>
             </div>
+
+            <div class="capo-per-string" id="capo-per-string" hidden></div>
 
             <div class="strings" id="strings"></div>
 
@@ -890,12 +960,30 @@
             });
         }
 
+        // Roll a fresh splash line into the menu hero. Cheap (a `Math.random`
+        // + one WASM call), so we re-run it on every menu entry and on a
+        // 2-minute idle timer while the menu screen stays open. Skips when
+        // the tab is backgrounded so we're not churning random state behind
+        // the user's back.
+        function rollSplash() {
+            const seed = Math.floor(Math.random() * 1_000_000);
+            el('splash').textContent = pick_splash(seed);
+        }
+
+        const SPLASH_REFRESH_MS = 120_000;
+
         async function main() {
             await init();
 
-            // Splash on the main menu — picks fresh on every reload.
-            const seed = Math.floor(Math.random() * 1_000_000);
-            el('splash').textContent = pick_splash(seed);
+            // Initial splash, plus a periodic re-roll while the menu is
+            // visible. The hashchange listener below also re-rolls on every
+            // return to the menu, so the splash feels alive without needing
+            // the user to reload.
+            rollSplash();
+            setInterval(() => {
+                if (document.hidden) return;
+                if (el('screen-menu').classList.contains('active')) rollSplash();
+            }, SPLASH_REFRESH_MS);
 
             // Tunings screen — render merged built-in + user list, and
             // wire the "Define a new tuning" form.
@@ -921,6 +1009,14 @@
             tunerState.capo = Number.isInteger(saved.capo) && saved.capo >= 0 && saved.capo <= 12
                 ? saved.capo
                 : 0;
+            tunerState.capoMode = saved.capoMode === 'per-string' ? 'per-string' : 'uniform';
+            // Per-string array is validated against the active tuning's
+            // string count inside `selectTuning`, so we accept whatever
+            // shape was saved and let the length check repair it.
+            tunerState.capoSpec = Array.isArray(saved.capoSpec)
+                ? saved.capoSpec
+                    .map((v) => (Number.isInteger(v) && v >= 0 && v <= MAX_CAPO ? v : 0))
+                : [];
 
             renderTuningPicker();
             wireCapoControl();
@@ -985,7 +1081,10 @@
 
         const tunerState = {
             mode: null,        // 'chromatic' or a tuning slug
-            capo: 0,           // uniform integer; partial capos available via WebTuner directly
+            capoMode: 'uniform', // 'uniform' (single 0..MAX_CAPO) or 'per-string' (array)
+            capo: 0,           // uniform integer
+            capoSpec: [],      // per-string array, length matches the active tuning's string count
+            baseLabels: [],    // no-capo string labels for the active tuning (for the per-string capo panel)
             tuner: null,       // active WebTuner instance
             rowsByLabel: new Map(), // string label → row element (string mode only)
             sampleRate: 48_000,
@@ -993,8 +1092,9 @@
 
         /// localStorage helpers — wrapped so private-browsing failures
         /// (Safari throws on `setItem` in private mode, Firefox sometimes
-        /// blocks reads) never break the page. Schema is intentionally
-        /// minimal: `{ tuning: slug-or-'chromatic', capo: 0..12 }`.
+        /// blocks reads) never break the page. Schema:
+        /// `{ tuning, capoMode, capo, capoSpec }`. Older saves (just
+        /// `{tuning, capo}`) restore as `capoMode: 'uniform'`.
         function loadTunerState() {
             try {
                 const raw = localStorage.getItem(STORAGE_KEY);
@@ -1010,10 +1110,50 @@
             try {
                 localStorage.setItem(STORAGE_KEY, JSON.stringify({
                     tuning: tunerState.mode,
+                    capoMode: tunerState.capoMode,
                     capo: tunerState.capo,
+                    capoSpec: tunerState.capoSpec,
                 }));
             } catch (e) {
                 console.warn('localStorage write failed; settings will not persist', e);
+            }
+        }
+
+        /// True if either the uniform value or any per-string entry is > 0.
+        /// Drives whether to use the `_with_capo` constructor vs the plain
+        /// one — saves a noop `Capo::parse` for the common case of no capo.
+        function capoIsActive() {
+            return tunerState.capoMode === 'per-string'
+                ? tunerState.capoSpec.some((v) => v > 0)
+                : tunerState.capo > 0;
+        }
+
+        /// Build the CLI-compatible capo spec string for the active mode.
+        /// Uniform → `"3"`; per-string → `"0,2,2,2,2,2"`. Empty when capo is
+        /// fully off in either mode (caller checks `capoIsActive` first).
+        function capoSpecString() {
+            return tunerState.capoMode === 'per-string'
+                ? tunerState.capoSpec.join(',')
+                : String(tunerState.capo);
+        }
+
+        /// Query the no-capo string labels for the active tuning. Used to
+        /// label the per-string capo panel rows so the user sees "E2"
+        /// instead of "String 6". One WebTuner construction per tuning
+        /// change is fine — the tuner is destroyed immediately after.
+        function computeBaseLabels(slug) {
+            if (slug === 'chromatic') return [];
+            try {
+                const user = userTuningBySlug(slug);
+                const t = user
+                    ? WebTuner.new_for_strings_custom(user, 48_000)
+                    : WebTuner.new_for_strings(slug, 48_000);
+                const labels = t.string_labels();
+                t.free?.();
+                return labels;
+            } catch (e) {
+                console.warn('computeBaseLabels failed for', slug, e);
+                return [];
             }
         }
 
@@ -1077,7 +1217,34 @@
                     onCapoChanged();
                 }
             });
+            el('capo-mode-toggle').addEventListener('click', toggleCapoMode);
             updateCapoDisplay();
+        }
+
+        /// Flip between uniform and per-string capo. Carries the current
+        /// uniform value into the per-string spec on the first switch so
+        /// the visual state stays continuous; the reverse direction
+        /// preserves the uniform value separately (so toggling back and
+        /// forth doesn't clobber it).
+        function toggleCapoMode() {
+            if (tunerState.mode === 'chromatic') return; // no capo in chromatic
+            if (tunerState.capoMode === 'uniform') {
+                const n = tunerState.baseLabels.length;
+                tunerState.capoMode = 'per-string';
+                // Seed the per-string array from the uniform value so the
+                // user sees the same capo state in both views the first
+                // time they switch.
+                tunerState.capoSpec = Array.from(
+                    { length: n },
+                    () => tunerState.capo,
+                );
+            } else {
+                tunerState.capoMode = 'uniform';
+            }
+            updateCapoDisplay();
+            renderPerStringCapo();
+            rebuildTuner();
+            saveTunerState();
         }
 
         function updateCapoDisplay() {
@@ -1087,6 +1254,17 @@
             // Capo applies only in string mode — chromatic readings come
             // back with whatever-note labels, no targets to shift.
             el('capo-control').hidden = tunerState.mode === 'chromatic';
+            // Mode toggle reflects active mode; uniform stepper hides in
+            // per-string mode so the only source of truth visible is the
+            // panel below.
+            el('capo-mode-toggle').classList.toggle(
+                'active',
+                tunerState.capoMode === 'per-string',
+            );
+            el('capo-uniform').hidden = tunerState.capoMode === 'per-string';
+            el('capo-per-string').hidden =
+                tunerState.mode === 'chromatic' ||
+                tunerState.capoMode !== 'per-string';
         }
 
         function onCapoChanged() {
@@ -1097,15 +1275,92 @@
             saveTunerState();
         }
 
+        /// Render the per-string capo panel — one stepper row per string
+        /// in the active tuning, labelled with the no-capo string name.
+        /// Idempotent; safe to call after tuning changes or mode toggles.
+        function renderPerStringCapo() {
+            const panel = el('capo-per-string');
+            panel.textContent = '';
+            if (tunerState.mode === 'chromatic' || tunerState.capoMode !== 'per-string') {
+                return;
+            }
+
+            const header = document.createElement('div');
+            header.className = 'ps-header';
+            header.textContent = 'Per-string capo (semitones)';
+            panel.appendChild(header);
+
+            tunerState.baseLabels.forEach((label, idx) => {
+                const row = document.createElement('div');
+                row.className = 'capo-string-row';
+
+                const lab = document.createElement('span');
+                lab.className = 'ps-label';
+                lab.textContent = `#${idx + 1} (${label})`;
+                row.appendChild(lab);
+
+                const down = document.createElement('button');
+                down.className = 'capo-btn';
+                down.textContent = '−';
+                down.setAttribute('aria-label', `Decrease capo on string ${idx + 1}`);
+
+                const value = document.createElement('span');
+                value.className = 'capo-value';
+
+                const up = document.createElement('button');
+                up.className = 'capo-btn';
+                up.textContent = '+';
+                up.setAttribute('aria-label', `Increase capo on string ${idx + 1}`);
+
+                const refresh = () => {
+                    const v = tunerState.capoSpec[idx] ?? 0;
+                    value.textContent = String(v);
+                    down.disabled = v <= 0;
+                    up.disabled = v >= MAX_CAPO;
+                };
+                down.addEventListener('click', () => {
+                    if ((tunerState.capoSpec[idx] ?? 0) > 0) {
+                        tunerState.capoSpec[idx] -= 1;
+                        refresh();
+                        rebuildTuner();
+                        saveTunerState();
+                    }
+                });
+                up.addEventListener('click', () => {
+                    if ((tunerState.capoSpec[idx] ?? 0) < MAX_CAPO) {
+                        tunerState.capoSpec[idx] = (tunerState.capoSpec[idx] ?? 0) + 1;
+                        refresh();
+                        rebuildTuner();
+                        saveTunerState();
+                    }
+                });
+                refresh();
+
+                row.appendChild(down);
+                row.appendChild(value);
+                row.appendChild(up);
+                panel.appendChild(row);
+            });
+        }
+
         function selectTuning(slug) {
             if (tunerState.mode === slug && tunerState.tuner !== null) return;
             tunerState.mode = slug;
+            tunerState.baseLabels = computeBaseLabels(slug);
+            // Per-string spec must match the new string count. If we were
+            // in per-string mode and the lengths match, preserve the spec
+            // (rare — string counts vary across tunings); otherwise reset
+            // to all-zeros so the user starts from a clean slate.
+            if (tunerState.capoSpec.length !== tunerState.baseLabels.length) {
+                tunerState.capoSpec = tunerState.baseLabels.map(() => 0);
+            }
 
             document.querySelectorAll('.tuning-option').forEach((btn) => {
                 btn.classList.toggle('active', btn.dataset.slug === slug);
             });
 
             updateCapoDisplay();
+            renderPerStringCapo();
             rebuildTuner();
             saveTunerState();
         }
@@ -1115,23 +1370,26 @@
         /// active-tuning bookkeeping. User tunings (those persisted in
         /// `localStorage` via the Tunings screen) take the
         /// `new_for_strings_custom*` path, passing their PresetEntry JSON
-        /// directly. Built-ins use slug-based constructors.
+        /// directly. Built-ins use slug-based constructors. Capo mode
+        /// (uniform vs per-string) is resolved via `capoIsActive` +
+        /// `capoSpecString` so the call site stays mode-agnostic.
         function rebuildTuner() {
             const sr = audioState.ctx?.sampleRate ?? 48_000;
             tunerState.sampleRate = sr;
             tunerState.tuner?.free?.();
 
-            const capoSpec = String(tunerState.capo);
+            const spec = capoSpecString();
+            const useCapo = capoIsActive();
             const userEntry = userTuningBySlug(tunerState.mode);
             if (tunerState.mode === 'chromatic') {
                 tunerState.tuner = WebTuner.new_chromatic(sr);
             } else if (userEntry) {
-                tunerState.tuner = tunerState.capo > 0
-                    ? WebTuner.new_for_strings_custom_with_capo(userEntry, capoSpec, sr)
+                tunerState.tuner = useCapo
+                    ? WebTuner.new_for_strings_custom_with_capo(userEntry, spec, sr)
                     : WebTuner.new_for_strings_custom(userEntry, sr);
-            } else if (tunerState.capo > 0) {
+            } else if (useCapo) {
                 tunerState.tuner = WebTuner.new_for_strings_with_capo(
-                    tunerState.mode, capoSpec, sr);
+                    tunerState.mode, spec, sr);
             } else {
                 tunerState.tuner = WebTuner.new_for_strings(tunerState.mode, sr);
             }
@@ -1345,6 +1603,13 @@
         // we're not silently holding the permission + draining battery.
         window.addEventListener('hashchange', () => {
             if (location.hash.replace(/^#/, '') !== 'tuner') stopMic();
+        });
+
+        // Whenever the user lands back on the menu, re-roll the splash. The
+        // 2-minute interval covers "user left the menu open"; this covers
+        // "user navigated home from another screen".
+        window.addEventListener('hashchange', () => {
+            if ((location.hash.replace(/^#/, '') || 'menu') === 'menu') rollSplash();
         });
 
         // ----------------------------------------------------------------

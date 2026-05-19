@@ -8,8 +8,28 @@ dated section.
 
 ## [Unreleased]
 
+### Fixed
+
+- Browser tuner crashed on entry with `tunerState.tuner.name is not a
+  function`. Cause: the `#[wasm_bindgen] impl WebTuner` block was
+  accidentally split when the custom-tuning constructors landed,
+  silently dropping `name()` / `string_labels()` / `strings_info()` /
+  `feed()` / `take_readings()` from the exported JS class. Cargo tests
+  didn't catch it because `#[wasm_bindgen]` is a no-op on native
+  targets. Moved the helper into the bindgen impl so all instance
+  methods stay exported.
+
 ### Added
 
+- Main-menu splash refreshes on every return to the menu and on a
+  2-minute idle timer while the menu is visible (paused when the tab
+  is backgrounded). No more page-reload-to-reroll.
+- Per-string capo on the Tuner screen. A "Per-string" toggle next to
+  the uniform stepper expands a panel of one stepper per string in
+  the active tuning, mirroring `twanga tune --capo "0,2,2,2,2,2"` on
+  the CLI. Useful for drop-D-style partial capos, banjo 5th-string
+  spike, etc. Mode + per-string spec persist to localStorage; older
+  saves migrate as uniform.
 - Custom user-defined tunings in the browser Tunings screen. Define a
   tuning by name + per-string pitches (`A4` / `C#3` notation, live MIDI
   preview), saved to `localStorage` under `twanga-user-tunings-v1` —
