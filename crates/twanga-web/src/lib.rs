@@ -133,10 +133,7 @@ mod tests {
             .map(|i| (2.0 * std::f32::consts::PI * 440.0 * i as f32 / sr as f32).sin())
             .collect();
         let hz = detect_pitch(&buf, sr).expect("should detect a pitch");
-        assert!(
-            (hz - 440.0).abs() < 1.0,
-            "expected ~440 Hz, got {hz:.2}"
-        );
+        assert!((hz - 440.0).abs() < 1.0, "expected ~440 Hz, got {hz:.2}");
     }
 
     #[test]
