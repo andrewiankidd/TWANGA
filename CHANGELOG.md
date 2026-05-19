@@ -10,6 +10,16 @@ dated section.
 
 ### Added
 
+- Custom user-defined tunings in the browser Tunings screen. Define a
+  tuning by name + per-string pitches (`A4` / `C#3` notation, live MIDI
+  preview), saved to `localStorage` under `twanga-user-tunings-v1` —
+  same `PresetEntry` shape the CLI writes to
+  `$CONFIG/twanga/tunings.toml`. The Tuner picker reads from the merged
+  built-in + user list; capo support works for user tunings too. New
+  WASM bindings `validate_preset_entry`,
+  `WebTuner.new_for_strings_custom`, and
+  `WebTuner.new_for_strings_custom_with_capo` enforce the same slug /
+  range / name rules the CLI's `twanga tunings add` flow does.
 - `twanga-web` crate exposing a small slice of `twanga-core` / `twanga-dsp`
   through `wasm-bindgen`: `pick_splash`, `builtin_tuning_slugs`,
   `midi_from_name` / `midi_to_name`, and `detect_pitch` (real YIN at the

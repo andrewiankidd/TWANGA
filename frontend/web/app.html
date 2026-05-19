@@ -435,14 +435,191 @@
             color: var(--highlight);
         }
 
-        .tuning-list { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.5rem; }
-        .tuning-list .pill {
+        /* Tunings screen — merged list of built-in + user-defined tunings,
+           each row showing the display name, slug, origin badge, and (for
+           user tunings only) a delete button. Mirrors the CLI's merged
+           registry shape. */
+        .tuning-list {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+            margin-top: 0.5rem;
+            margin-bottom: 1.5rem;
+        }
+        .tuning-row {
+            display: flex;
+            align-items: center;
+            gap: 0.7rem;
             background: var(--card);
             border: 1px solid var(--border);
             border-radius: var(--radius);
-            padding: 0.4rem 0.8rem;
-            font-size: 0.85rem;
+            padding: 0.6rem 0.9rem;
+        }
+        .tuning-row .name {
+            font-weight: 700;
+            color: var(--primary);
+            font-size: 0.95rem;
+        }
+        .tuning-row .slug {
+            color: var(--muted);
             font-family: monospace;
+            font-size: 0.8rem;
+        }
+        .tuning-row .pitches {
+            margin-left: auto;
+            color: var(--muted);
+            font-family: monospace;
+            font-size: 0.8rem;
+        }
+        .origin-badge {
+            font-size: 0.65rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            padding: 0.15rem 0.5rem;
+            border-radius: 999px;
+            border: 1px solid var(--border);
+        }
+        .origin-builtin {
+            color: var(--muted);
+        }
+        .origin-user {
+            color: var(--highlight);
+            border-color: var(--highlight);
+        }
+        .delete-btn {
+            background: transparent;
+            border: 1px solid var(--border);
+            color: var(--err);
+            border-radius: 4px;
+            cursor: pointer;
+            padding: 0.25rem 0.6rem;
+            font-size: 0.75rem;
+            font-family: "Montserrat", sans-serif;
+        }
+        .delete-btn:hover {
+            border-color: var(--err);
+        }
+
+        /* "Define a new tuning" inline form. Same shape as the CLI's
+           `twanga tunings add` flow: name → strings (one per row, A4-style
+           pitch names) → save. Slug is auto-derived from the name. */
+        .add-tuning-form {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 1rem 1.2rem;
+            display: flex;
+            flex-direction: column;
+            gap: 0.7rem;
+        }
+        .add-tuning-form h3 {
+            margin: 0;
+            font-size: 1rem;
+            color: var(--primary);
+        }
+        .form-field {
+            display: flex;
+            flex-direction: column;
+            gap: 0.25rem;
+        }
+        .form-field label {
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: var(--muted);
+            font-weight: 700;
+        }
+        .form-field input,
+        .form-field textarea {
+            background: var(--background);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            padding: 0.45rem 0.6rem;
+            color: var(--text);
+            font-family: "Montserrat", sans-serif;
+            font-size: 0.9rem;
+        }
+        .form-field input:focus {
+            outline: none;
+            border-color: var(--highlight);
+        }
+        .slug-preview {
+            font-family: monospace;
+            color: var(--muted);
+            font-size: 0.8rem;
+        }
+        .string-inputs {
+            display: flex;
+            flex-direction: column;
+            gap: 0.4rem;
+        }
+        .string-input-row {
+            display: flex;
+            gap: 0.5rem;
+            align-items: center;
+        }
+        .string-input-row .index {
+            font-family: monospace;
+            color: var(--muted);
+            font-size: 0.8rem;
+            width: 2.2em;
+        }
+        .string-input-row input {
+            flex: 1;
+            background: var(--background);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            padding: 0.4rem 0.55rem;
+            color: var(--text);
+            font-family: monospace;
+            font-size: 0.9rem;
+            text-transform: uppercase;
+        }
+        .string-input-row input:focus {
+            outline: none;
+            border-color: var(--highlight);
+        }
+        .string-input-row .pitch-preview {
+            font-family: monospace;
+            color: var(--muted);
+            font-size: 0.75rem;
+            min-width: 7em;
+        }
+        .string-input-row .remove-string {
+            background: transparent;
+            border: 1px solid var(--border);
+            color: var(--muted);
+            border-radius: 4px;
+            cursor: pointer;
+            padding: 0.25rem 0.5rem;
+            font-size: 0.85rem;
+            line-height: 1;
+        }
+        .string-input-row .remove-string:hover {
+            color: var(--err);
+            border-color: var(--err);
+        }
+        .form-row {
+            display: flex;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+            margin-top: 0.3rem;
+        }
+        .form-error {
+            color: var(--err);
+            font-size: 0.85rem;
+            min-height: 1.2em;
+        }
+        .form-ok {
+            color: var(--ok);
+            font-size: 0.85rem;
+            min-height: 1.2em;
+        }
+        .empty-state {
+            color: var(--muted);
+            font-style: italic;
+            padding: 0.6rem 0.2rem;
         }
 
         .coming-soon {
@@ -564,12 +741,42 @@
             </div>
             <h2>Tunings</h2>
             <p class="subtitle">
-                Built-in tuning presets shipped with TWANGA. Custom user-defined
-                tunings will appear here too once we wire up persistence in the
-                browser (likely via <code>localStorage</code>, mirroring the
-                CLI's <code>$CONFIG/twanga/tunings.toml</code>).
+                Built-in presets ship with TWANGA. Your own custom tunings are
+                stored locally in <code>localStorage</code>, mirroring the
+                CLI's <code>$CONFIG/twanga/tunings.toml</code>. The Tuner
+                picker draws from this same merged list, so anything you
+                define here is immediately playable there.
             </p>
             <div class="tuning-list" id="tuning-list"></div>
+
+            <div class="add-tuning-form" id="add-tuning-form">
+                <h3>Define a new tuning</h3>
+                <div class="form-field">
+                    <label for="new-tuning-name">Display name</label>
+                    <input
+                        id="new-tuning-name"
+                        type="text"
+                        placeholder="e.g. Open G Guitar"
+                        autocomplete="off"
+                        spellcheck="false">
+                    <div class="slug-preview" id="new-tuning-slug-preview">
+                        slug: <span data-slug>custom-tuning</span>
+                    </div>
+                </div>
+                <div class="form-field">
+                    <label>Strings (string 1 first — e.g. <code>A4</code>, <code>C#3</code>)</label>
+                    <div class="string-inputs" id="new-tuning-strings"></div>
+                    <div class="form-row">
+                        <button type="button" class="action secondary" id="add-string-btn">+ Add string</button>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <button type="button" class="action" id="save-tuning-btn">Save tuning</button>
+                    <button type="button" class="action secondary" id="reset-tuning-btn">Reset form</button>
+                </div>
+                <div class="form-error" id="new-tuning-error"></div>
+                <div class="form-ok" id="new-tuning-ok"></div>
+            </div>
         </section>
     </main>
 
@@ -606,6 +813,9 @@
             pick_splash,
             builtin_tuning_slugs,
             preset_display_name,
+            midi_from_name,
+            midi_to_name,
+            validate_preset_entry,
             WebTuner,
         } from './pkg/twanga_web.js';
 
@@ -687,15 +897,10 @@
             const seed = Math.floor(Math.random() * 1_000_000);
             el('splash').textContent = pick_splash(seed);
 
-            // Tunings screen — render the built-in slug list.
-            const slugs = builtin_tuning_slugs();
-            const list = el('tuning-list');
-            for (const slug of slugs) {
-                const pill = document.createElement('span');
-                pill.className = 'pill';
-                pill.textContent = slug;
-                list.appendChild(pill);
-            }
+            // Tunings screen — render merged built-in + user list, and
+            // wire the "Define a new tuning" form.
+            renderTuningsScreen();
+            wireAddTuningForm();
 
             // Menu navigation.
             document.querySelectorAll('[data-screen]').forEach((btn) => {
@@ -721,11 +926,10 @@
             wireCapoControl();
             // Default to whatever was saved, falling back to chromatic for
             // first-time visitors. Unknown slugs (e.g. from an older saved
-            // state referencing a tuning we removed) silently fall back too.
+            // state referencing a tuning we removed, or a user tuning that
+            // was deleted since last visit) silently fall back too.
             const savedSlug = typeof saved.tuning === 'string' ? saved.tuning : 'chromatic';
-            const initialSlug = savedSlug === 'chromatic' || builtin_tuning_slugs().includes(savedSlug)
-                ? savedSlug
-                : 'chromatic';
+            const initialSlug = allKnownSlugs().includes(savedSlug) ? savedSlug : 'chromatic';
             selectTuning(initialSlug);
 
             el('pitch-btn').addEventListener('click', () => {
@@ -816,16 +1020,29 @@
         /// Picker buttons use the trimmed display name (first segment before
         /// any parenthetical). The full name is shown separately on the
         /// active-tuning row so the picker stays compact on narrow screens.
-        function shortName(slug) {
+        function fullName(slug) {
             if (slug === 'chromatic') return 'Chromatic';
-            const full = preset_display_name(slug);
-            if (!full) return slug;
+            const builtin = preset_display_name(slug);
+            if (builtin) return builtin;
+            const user = userTuningBySlug(slug);
+            return user ? user.name : slug;
+        }
+        function shortName(slug) {
+            const full = fullName(slug);
             const head = full.split('(')[0].trim();
             return head || full;
         }
-        function fullName(slug) {
-            if (slug === 'chromatic') return 'Chromatic';
-            return preset_display_name(slug) ?? slug;
+
+        /// Every slug the tuner picker can render — chromatic sentinel +
+        /// built-ins (in registry order) + user-defined tunings (in the
+        /// order they were saved). The Tunings screen and saved-state
+        /// restore both consult this so user tunings are first-class.
+        function allKnownSlugs() {
+            const builtinSet = new Set(builtin_tuning_slugs());
+            const users = loadUserTunings()
+                .map((e) => e.slug)
+                .filter((s) => !builtinSet.has(s)); // user slug shadowing built-in: ignored
+            return ['chromatic', ...builtin_tuning_slugs(), ...users];
         }
 
         function renderTuningPicker() {
@@ -842,8 +1059,7 @@
                 return btn;
             };
 
-            picker.appendChild(makeButton('chromatic'));
-            for (const slug of builtin_tuning_slugs()) {
+            for (const slug of allKnownSlugs()) {
                 picker.appendChild(makeButton(slug));
             }
         }
@@ -896,17 +1112,26 @@
 
         /// Construct (or replace) the underlying WebTuner. Splits out of
         /// `selectTuning` so capo changes can rebuild without touching the
-        /// active-tuning bookkeeping.
+        /// active-tuning bookkeeping. User tunings (those persisted in
+        /// `localStorage` via the Tunings screen) take the
+        /// `new_for_strings_custom*` path, passing their PresetEntry JSON
+        /// directly. Built-ins use slug-based constructors.
         function rebuildTuner() {
             const sr = audioState.ctx?.sampleRate ?? 48_000;
             tunerState.sampleRate = sr;
             tunerState.tuner?.free?.();
 
+            const capoSpec = String(tunerState.capo);
+            const userEntry = userTuningBySlug(tunerState.mode);
             if (tunerState.mode === 'chromatic') {
                 tunerState.tuner = WebTuner.new_chromatic(sr);
+            } else if (userEntry) {
+                tunerState.tuner = tunerState.capo > 0
+                    ? WebTuner.new_for_strings_custom_with_capo(userEntry, capoSpec, sr)
+                    : WebTuner.new_for_strings_custom(userEntry, sr);
             } else if (tunerState.capo > 0) {
                 tunerState.tuner = WebTuner.new_for_strings_with_capo(
-                    tunerState.mode, String(tunerState.capo), sr);
+                    tunerState.mode, capoSpec, sr);
             } else {
                 tunerState.tuner = WebTuner.new_for_strings(tunerState.mode, sr);
             }
@@ -1121,6 +1346,317 @@
         window.addEventListener('hashchange', () => {
             if (location.hash.replace(/^#/, '') !== 'tuner') stopMic();
         });
+
+        // ----------------------------------------------------------------
+        // User tunings (Tunings screen + localStorage persistence)
+        // ----------------------------------------------------------------
+        //
+        // Stored as a JSON array of `PresetEntry`-shaped objects under the
+        // `twanga-user-tunings-v1` key — same schema the CLI persists under
+        // `$CONFIG/twanga/tunings.toml`. A future Tauri command could
+        // bidirectionally sync the two surfaces; in the meantime they're
+        // independent but use the same shape.
+
+        const USER_TUNINGS_KEY = 'twanga-user-tunings-v1';
+
+        function loadUserTunings() {
+            try {
+                const raw = localStorage.getItem(USER_TUNINGS_KEY);
+                if (!raw) return [];
+                const parsed = JSON.parse(raw);
+                return Array.isArray(parsed) ? parsed : [];
+            } catch (e) {
+                console.warn('localStorage read failed for user tunings; ignoring', e);
+                return [];
+            }
+        }
+        function saveUserTunings(entries) {
+            try {
+                localStorage.setItem(USER_TUNINGS_KEY, JSON.stringify(entries));
+            } catch (e) {
+                console.warn('localStorage write failed; user tuning will not persist', e);
+            }
+        }
+        function userTuningBySlug(slug) {
+            if (typeof slug !== 'string' || !slug || slug === 'chromatic') return null;
+            return loadUserTunings().find((e) => e.slug === slug) ?? null;
+        }
+        function addUserTuningEntry(entry) {
+            validate_preset_entry(entry); // throws a string on validation failure
+            const entries = loadUserTunings();
+            if (entries.some((e) => e.slug === entry.slug)) {
+                throw `a user tuning with slug '${entry.slug}' already exists`;
+            }
+            entries.push(entry);
+            saveUserTunings(entries);
+        }
+        function deleteUserTuning(slug) {
+            const entries = loadUserTunings().filter((e) => e.slug !== slug);
+            saveUserTunings(entries);
+        }
+
+        /// Mirror of `twanga-cli`'s `slugify`: lowercase, runs of non-alnum
+        /// collapse to single hyphens, no leading/trailing hyphen. Returns
+        /// `custom-tuning` for empty / pure-punctuation input so the slug
+        /// preview field never reads blank.
+        function slugify(name) {
+            let out = '';
+            let lastWasHyphen = true;
+            for (const c of name) {
+                const cl = c.toLowerCase();
+                if (/[a-z0-9]/.test(cl)) {
+                    out += cl;
+                    lastWasHyphen = false;
+                } else if (!lastWasHyphen) {
+                    out += '-';
+                    lastWasHyphen = true;
+                }
+            }
+            if (out.endsWith('-')) out = out.slice(0, -1);
+            return out || 'custom-tuning';
+        }
+
+        /// Render the merged tuning list (built-ins first, then user
+        /// tunings). Built-ins are read-only; user tunings get a delete
+        /// button. Origin badges match the CLI menu's `[builtin]` / `[user]`
+        /// annotations.
+        function renderTuningsScreen() {
+            const list = el('tuning-list');
+            list.textContent = '';
+
+            const builtinSet = new Set(builtin_tuning_slugs());
+            const userTunings = loadUserTunings();
+            const rows = [
+                ...builtin_tuning_slugs().map((slug) => ({ slug, origin: 'builtin' })),
+                ...userTunings
+                    .filter((e) => !builtinSet.has(e.slug)) // never let a user shadow a builtin in the UI
+                    .map((e) => ({ slug: e.slug, origin: 'user', entry: e })),
+            ];
+
+            for (const r of rows) {
+                const row = document.createElement('div');
+                row.className = 'tuning-row';
+
+                const name = document.createElement('span');
+                name.className = 'name';
+                name.textContent = fullName(r.slug);
+                row.appendChild(name);
+
+                const slug = document.createElement('span');
+                slug.className = 'slug';
+                slug.textContent = r.slug;
+                row.appendChild(slug);
+
+                const badge = document.createElement('span');
+                badge.className = 'origin-badge ' +
+                    (r.origin === 'user' ? 'origin-user' : 'origin-builtin');
+                badge.textContent = r.origin;
+                row.appendChild(badge);
+
+                // Open-string preview — same shape as the CLI's tuning list.
+                // For user tunings we read pitches directly from the stored
+                // entry; for built-ins we construct a tuner just to query
+                // its string labels via the existing WASM surface.
+                const pitches = document.createElement('span');
+                pitches.className = 'pitches';
+                pitches.textContent = pitchPreview(r);
+                row.appendChild(pitches);
+
+                if (r.origin === 'user') {
+                    const del = document.createElement('button');
+                    del.className = 'delete-btn';
+                    del.type = 'button';
+                    del.textContent = 'Delete';
+                    del.addEventListener('click', () => {
+                        if (!confirm(`Delete tuning '${r.slug}'?`)) return;
+                        deleteUserTuning(r.slug);
+                        // If the deleted tuning was active in the picker,
+                        // fall back to chromatic so we don't leave the tuner
+                        // pointing at a non-existent slug.
+                        if (tunerState.mode === r.slug) selectTuning('chromatic');
+                        renderTuningsScreen();
+                        renderTuningPicker();
+                        document.querySelectorAll('.tuning-option').forEach((b) => {
+                            b.classList.toggle('active', b.dataset.slug === tunerState.mode);
+                        });
+                    });
+                    row.appendChild(del);
+                }
+
+                list.appendChild(row);
+            }
+
+            if (rows.length === 0) {
+                const empty = document.createElement('div');
+                empty.className = 'empty-state';
+                empty.textContent = 'No tunings yet.';
+                list.appendChild(empty);
+            }
+        }
+
+        /// Compact pitch list for a tuning row — e.g. `E4 B3 G3 D3 A2 E2`.
+        /// For built-ins we ask `WebTuner.strings_info()`; for users we read
+        /// the saved entry's `strings[*].name` directly so we don't have to
+        /// construct a tuner just for a label readout.
+        function pitchPreview(row) {
+            try {
+                if (row.origin === 'user') {
+                    return row.entry.strings.map((s) => s.name).join(' ');
+                }
+                const t = WebTuner.new_for_strings(row.slug, 48_000);
+                const info = t.strings_info();
+                t.free?.();
+                return info.map((s) => s.label).join(' ');
+            } catch (e) {
+                console.warn('pitchPreview failed for', row.slug, e);
+                return '';
+            }
+        }
+
+        /// Wire the "Define a new tuning" form. Holds an in-memory draft of
+        /// the strings list (one row per string), with note-name validation
+        /// happening live (red text under the form) and on save.
+        function wireAddTuningForm() {
+            // Default 6-string draft — matches what most users will want to
+            // tweak. They can add/remove rows to suit their instrument.
+            const draftStrings = ['E4', 'B3', 'G3', 'D3', 'A2', 'E2'];
+
+            const nameInput = el('new-tuning-name');
+            const slugSpan = el('new-tuning-slug-preview').querySelector('[data-slug]');
+            const stringsContainer = el('new-tuning-strings');
+            const addStringBtn = el('add-string-btn');
+            const saveBtn = el('save-tuning-btn');
+            const resetBtn = el('reset-tuning-btn');
+            const errBox = el('new-tuning-error');
+            const okBox = el('new-tuning-ok');
+
+            function renderStrings() {
+                stringsContainer.textContent = '';
+                draftStrings.forEach((value, idx) => {
+                    const row = document.createElement('div');
+                    row.className = 'string-input-row';
+
+                    const index = document.createElement('span');
+                    index.className = 'index';
+                    index.textContent = `#${idx + 1}`;
+                    row.appendChild(index);
+
+                    const input = document.createElement('input');
+                    input.type = 'text';
+                    input.value = value;
+                    input.placeholder = 'A4';
+                    input.spellcheck = false;
+                    input.autocomplete = 'off';
+                    input.addEventListener('input', () => {
+                        // Normalise letter to uppercase + strip whitespace
+                        // for the parser; live MIDI preview reflects the
+                        // canonical form.
+                        const canon = input.value.trim().toUpperCase();
+                        draftStrings[idx] = canon;
+                        preview.textContent = midiPreview(canon);
+                    });
+                    row.appendChild(input);
+
+                    const preview = document.createElement('span');
+                    preview.className = 'pitch-preview';
+                    preview.textContent = midiPreview(value);
+                    row.appendChild(preview);
+
+                    const remove = document.createElement('button');
+                    remove.type = 'button';
+                    remove.className = 'remove-string';
+                    remove.textContent = '×';
+                    remove.title = 'Remove this string';
+                    remove.disabled = draftStrings.length <= 1;
+                    remove.addEventListener('click', () => {
+                        draftStrings.splice(idx, 1);
+                        renderStrings();
+                    });
+                    row.appendChild(remove);
+
+                    stringsContainer.appendChild(row);
+                });
+            }
+
+            function midiPreview(noteName) {
+                if (!noteName) return '';
+                const m = midi_from_name(noteName);
+                if (m === undefined || m === null) return '(invalid)';
+                return `MIDI ${m} — ${midi_to_name(m)}`;
+            }
+
+            nameInput.addEventListener('input', () => {
+                slugSpan.textContent = slugify(nameInput.value);
+                errBox.textContent = '';
+                okBox.textContent = '';
+            });
+
+            addStringBtn.addEventListener('click', () => {
+                draftStrings.push('A4');
+                renderStrings();
+            });
+
+            saveBtn.addEventListener('click', () => {
+                errBox.textContent = '';
+                okBox.textContent = '';
+
+                const displayName = nameInput.value.trim();
+                if (!displayName) {
+                    errBox.textContent = 'display name cannot be empty';
+                    return;
+                }
+                const slug = slugify(displayName);
+                const strings = [];
+                for (let i = 0; i < draftStrings.length; i++) {
+                    const raw = draftStrings[i].trim();
+                    if (!raw) {
+                        errBox.textContent = `string ${i + 1} is empty`;
+                        return;
+                    }
+                    const midi = midi_from_name(raw);
+                    if (midi === undefined || midi === null) {
+                        errBox.textContent = `string ${i + 1}: '${raw}' isn't a valid note name (try A4, C#3, etc.)`;
+                        return;
+                    }
+                    strings.push({ name: midi_to_name(midi), midi });
+                }
+
+                const entry = { slug, name: displayName, strings };
+                try {
+                    addUserTuningEntry(entry);
+                } catch (e) {
+                    errBox.textContent = typeof e === 'string' ? e : String(e?.message ?? e);
+                    return;
+                }
+
+                okBox.textContent = `Saved '${slug}'. It now appears in the Tuner picker.`;
+                renderTuningsScreen();
+                renderTuningPicker();
+                // Keep the just-added tuning highlighted in the picker if
+                // it's the currently-active mode (otherwise leave whatever
+                // the user had selected alone).
+                document.querySelectorAll('.tuning-option').forEach((b) => {
+                    b.classList.toggle('active', b.dataset.slug === tunerState.mode);
+                });
+                resetForm();
+            });
+
+            resetBtn.addEventListener('click', () => {
+                resetForm();
+                errBox.textContent = '';
+                okBox.textContent = '';
+            });
+
+            function resetForm() {
+                nameInput.value = '';
+                slugSpan.textContent = 'custom-tuning';
+                draftStrings.length = 0;
+                draftStrings.push('E4', 'B3', 'G3', 'D3', 'A2', 'E2');
+                renderStrings();
+            }
+
+            renderStrings();
+        }
 
         main().catch((e) => {
             el('splash').textContent = 'WASM load failed: ' + e;
