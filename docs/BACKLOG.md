@@ -32,19 +32,38 @@ Future delivery mechanisms (none yet built, but the contract is stable enough th
 - **"Load from URL"** in the web build, with explicit user consent + content-hash check.
 - **Decentralised plugin directory** — a list of plugin-manifest URLs the user adds (like git remotes or APT sources). Anyone can host a registry; we ship a default one. Aligns with the local-first / no-walled-garden ethos. Steam Workshop is explicitly *not* the model.
 
-## Recorder QoL (post-v1)
+## Recorder + Playback QoL
 
-The Recorder is at CLI parity. These are quality-of-life additions that don't exist on the CLI side either, but the browser is a natural place for them:
+Cross-cutting improvements to live capture and tab playback. Each item flags whether it lands on the CLI, the GUI, or both. CLI flags follow the standard three-form pattern documented in [twanga-cli/README.md](../crates/twanga-cli/README.md): `--flag value` direct, `--flag` bare → prompt, omitted → default.
 
-- **Mic-level meter** while recording. Simple RMS bar so silence vs "mic not detecting your pitch" don't look the same.
-- **Tempo metronome click during recording.** Single web-audio oscillator gated to the column-tick driver. The CLI's recorder has no metronome (only `play` does); the GUI is a natural place to add one.
-- **Pre-roll / count-in** (e.g. 4 ticks before recording starts) so the user has time to react.
-- **"Undo last column"** button. One-step rollback for fumbles. Today the only recourse is Clear-and-restart.
-- **Recording duration display** ("0:42 / 24 columns") next to the status hint.
-- **Save modal with naming** — type a title that becomes both `\title` in the alphaTex and the filename.
-- **Cap recording length** with a sensible default (e.g. 10 minutes) so accidentally-left-running tabs don't bloat indefinitely. With an "extend" option.
-- **Visual hint when a string can't be reached** (pitch detected but no fret on the active tuning + capo fits within `MAX_FRET`). Today these are silently discarded — same as the CLI, but the browser has room to surface a "couldn't fit on fretboard" indicator.
-- **Shared "tuning + capo" widget** factored out of Tuner and Recorder. ~250 lines of duplication today; worth doing once Playback adds a third consumer.
+- **Metronome on `record` (CLI + GUI).** Playback already has it; recording doesn't. Add `--metronome` to `twanga record` (default on, `--no-metronome` to disable) — same three-form pattern as the existing playback flag. GUI Recorder gets a live toggle that's also default-on. Implementation reuses the column-tick driver as the click source so it can't drift from the recorded grid.
+
+- **Pre-roll / count-in on `record` and `play` (CLI + GUI).** N ticks of metronome before the playhead actually starts, so the user has time to react. Add `--pre-roll <N>` to both subcommands (default 4 ticks, bare-form prompt, configurable default). GUI gets a toggle (on/off) and an `N` input. Useful even when the metronome flag is off — pre-roll always ticks audibly during the count, even if the main run is silent.
+
+- **Pause / resume on `record` and `play` (CLI + GUI).** Spacebar (or `p + Enter`) toggles. On record, pause freezes the column-tick driver and stops accepting new pitch events; resume picks up at the same column. On play, pause freezes the playhead; resume continues. Both surfaces get this. Prerequisite for the "undo last column" GUI affordance below — pause + undo + resume becomes a real workflow.
+
+- **Duration display on `record` and `play` (CLI + GUI).** Status line shows `0:42 / 24 cols` while recording, `0:18 / 1:24` while playing back. Cheap to add — both flows already track sample count / column index.
+
+- **Title prompt on `record` (CLI + GUI).** CLI prompts for a title at recording start (default = `untitled-<timestamp>`); writes it to `\title` in the alphaTex header AND uses it for the filename. GUI surfaces a Save modal with a title input that does the same. The current behaviour (no `\title`, filename is the timestamp) is the fallback when the user accepts the default.
+
+- **"Couldn't fit on fretboard" indicator (CLI + GUI).** When a detected pitch can't be reached within `MAX_FRET` on the active tuning + capo, it's silently dropped today. Surface it:
+  - CLI `record`: print a small running counter ("3 notes dropped — pitch out of fretboard range"). Per-frame logging is too noisy; aggregate is enough.
+  - CLI `play --tuning <other>` (transpose): pre-scan the file and print the list of un-transposable notes up front, before the cursor starts. User decides whether to proceed.
+  - GUI Recorder: small "✗" indicator next to the status hint, tooltip lists the unreachable pitches.
+
+- **Mic-level meter (GUI only, with caveat).** RMS bar so silence vs "mic not detecting your pitch" don't look the same. Doable on the CLI too in principle, but the scrolling tab output would overwrite it — a fixed bottom-line meter would need a multi-region terminal layout that's more work than it's worth. GUI-only is the pragmatic call, even though the CLI gap is a known asymmetry.
+
+- **Live editing / undo last column (GUI only, prerequisite: pause/resume + tab editor).** Once pause/resume is in (above), the GUI can offer "Undo last column" while paused — pop the last committed column, rewind the playhead one step, resume from there. The CLI doesn't get this because mid-recording terminal editing is unwieldy; we'd need a dedicated tab-editor screen for it (see below) which exists at a different stage of the workflow.
+
+## Tab editor (eventual, GUI-first)
+
+A dedicated screen for hand-editing the column-grid score after recording (or from scratch). Distinct from the Recorder: the recorder captures live input; the editor lets you fix up what got captured (or didn't). Same column-grid + alphaTex round-trip the rest of the stack uses, so saved files round-trip through `twanga play`.
+
+- **Cell-level edit.** Click a (string, column) cell, type a fret. Backspace deletes. Arrow keys move the cursor. Same keyboard model as a spreadsheet.
+- **Insert / delete columns.** Shift-right inserts a blank column, shift-delete removes one. Bar lines auto-recompute from `columnsPerBar`.
+- **Per-bar annotations.** "Watch the slide here," "this is the hard part" — see the existing [Annotated tabs] backlog item; the editor is its natural home.
+- **CLI equivalent: probably never.** A terminal tab editor would re-implement what TuxGuitar already does well. The CLI's role stays "capture + play," the editor's role is "fix up post-capture." This is one of the few intentional asymmetries between the surfaces.
+- **Hook into Recorder's pause/resume.** While paused mid-recording, the user can jump into the editor for the captured-so-far score, make corrections, and return to the Recorder to keep going. Same data model on both sides.
 
 ## Tauri desktop polish
 
@@ -195,6 +214,7 @@ Tuner-driven passive sample collection. The chore (tuning) becomes the data sour
 - **`twanga-import` crate?** Once OCR / Demucs / transcription pipelines arrive, isolating them in a single crate keeps the optional heavy dependencies out of the core build.
 - **Single internal arrangement format (TwangaTab).** Near-superset of MusicXML with instrument-agnostic extensions (tuning per string, fingering hints, folk-specific technique tags). All importers funnel into this; all renderers/players consume it.
 - **Three serialisation formats:** TwangaTab (internal) ↔ alphaTex (human-friendly paste/edit) ↔ MusicXML (interop). One model, three faces.
+- **Factor out shared "tuning + capo" widget in the web frontend.** Tuner and Recorder each carry their own ~250 lines of tuning-picker + capo (uniform + per-string) DOM wiring. Same logic, different element IDs. Refactor into a vanilla-JS factory function (`makeTuningController({ pickerEl, capoControlEl, perStringPanelEl, ... }) → controller`) — *no React*, *no framework*, just an ES module that hands back a controller object. Worth doing once the Playback screen lands and there's a third consumer.
 
 ## Explicit non-goals (do not build)
 
