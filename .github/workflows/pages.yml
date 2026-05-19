@@ -1,0 +1,83 @@
+name: Deploy web → GitHub Pages
+
+# Builds the WASM bridge + uploads the static frontend (frontend/web/) to
+# GitHub Pages on every push to main. Pages is configured in `workflow`
+# build mode (set once via `gh api repos/.../pages -X POST -f build_type=workflow`),
+# so no `gh-pages` branch exists — the artifact is consumed directly by
+# actions/deploy-pages. Cleaner than tinnedspaghetti's gh-pages-branch
+# approach because we're not also pushing release binaries through the
+# same workflow (those go through `release.yml` and the GitHub Releases
+# API instead).
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Only one Pages deploy runs at a time. If a new push comes in mid-deploy,
+# cancel the in-flight one — we want main to always end up matching the
+# deployed site, not race against itself.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build WASM + frontend bundle
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust + wasm32 target
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: pages
+
+      # Prebuilt wasm-bindgen-cli — cargo install takes 3-5 min from source.
+      # Version must match the wasm-bindgen crate version in twanga-web's
+      # Cargo.toml or the generated JS glue won't link against the binary.
+      - name: Install wasm-bindgen-cli (prebuilt)
+        run: |
+          VERSION=0.2.121
+          curl -sL "https://github.com/rustwasm/wasm-bindgen/releases/download/${VERSION}/wasm-bindgen-${VERSION}-x86_64-unknown-linux-musl.tar.gz" \
+            | tar xz
+          sudo mv "wasm-bindgen-${VERSION}-x86_64-unknown-linux-musl/wasm-bindgen" /usr/local/bin/
+          wasm-bindgen --version
+
+      - name: Build twanga-web (release)
+        run: cargo build --target wasm32-unknown-unknown -p twanga-web --release
+
+      - name: Generate JS glue + post-process wasm
+        run: |
+          mkdir -p frontend/web/pkg
+          wasm-bindgen --target web \
+            --out-dir frontend/web/pkg \
+            target/wasm32-unknown-unknown/release/twanga_web.wasm
+          ls -lh frontend/web/pkg/
+
+      - uses: actions/configure-pages@v5
+
+      - name: Upload site artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: frontend/web
+
+  deploy:
+    name: Deploy to GitHub Pages
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
