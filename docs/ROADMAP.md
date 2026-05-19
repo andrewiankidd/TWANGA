@@ -18,6 +18,7 @@
 | Pluggable renderer system (registry + Tab + Highway built-in plugins, same path for future third-party renderers) | done |
 | Web tab recorder — mic → fret detection → alphaTex download (full parity with `twanga record`) | done |
 | **Web tab playback** — load `.alphatex` (drop-zone or bundled examples), scroll a playhead via the renderer host, wait / loop / metronome layered on top | next |
+| Recorder + Playback QoL pass across CLI + GUI: metronome on `record`, pre-roll / count-in, pause/resume, duration display, title prompt on `record`, "couldn't fit on fretboard" indicator on `record` + transpose. Each lands on both surfaces in the same commit batch so parity stays maintained ([BACKLOG.md](BACKLOG.md#recorder--playback-qol)). | follows |
 | Custom CLI subcommand `twanga tunings remove` for parity with the GUI's delete button | follows |
 | Bidirectional sync of `$CONFIG/twanga/tunings.toml` ↔ `localStorage` via a Tauri command | follows |
 | Chord trainer with polyphonic *verification* (not transcription) | follows |

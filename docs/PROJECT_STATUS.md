@@ -86,7 +86,27 @@ stays compact.
 
 ## What's next
 
-Playback in the browser — load an alphaTex file (drop-zone or bundled
-examples), scroll a playhead through it via the renderer host, layer
-wait / loop / metronome controls on top. That closes the last whole-screen
-parity gap.
+**Web Playback.** Load an alphaTex file (drop-zone or bundled examples),
+scroll a playhead through it via the renderer host, layer wait / loop /
+metronome controls on top. Closes the last whole-screen parity gap.
+
+**After Playback — Recorder + Playback QoL pass (CLI + GUI).** The Recorder
+work surfaced a set of items both surfaces are missing in equal measure,
+detailed in [BACKLOG.md](BACKLOG.md#recorder--playback-qol):
+
+- Metronome on `record` (play already has it; record doesn't).
+- Pre-roll / count-in on `record` and `play`.
+- Pause / resume on `record` and `play`.
+- Recording duration display on `record` and `play`.
+- Title prompt on `record` — writes `\title` to alphaTex + uses for filename.
+- "Couldn't fit on fretboard" indicator on `record` and on `play --tuning`
+  transposes (silently dropped today).
+
+Each lands on both surfaces in the same commit batch so parity stays
+maintained.
+
+**Smaller CLI follow-ons** ([ROADMAP.md](ROADMAP.md)):
+
+- `twanga tunings remove` subcommand (GUI has the delete button; CLI doesn't).
+- Tauri command to bidirectionally sync `$CONFIG/twanga/tunings.toml` ↔
+  browser `localStorage` so custom tunings cross the CLI ↔ desktop-app boundary.
