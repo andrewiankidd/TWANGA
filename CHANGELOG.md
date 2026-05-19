@@ -8,6 +8,14 @@ dated section.
 
 ## [Unreleased]
 
+### Changed
+
+- Tunings list rows now stack the display name on top and the slug on
+  a second line underneath, rather than running both inline. The
+  per-row "BUILTIN" / "USER" origin badge has been removed — built-in
+  vs user is signalled implicitly by the presence/absence of a Delete
+  button on user-origin rows.
+
 ### Fixed
 
 - Browser tuner crashed on entry with `tunerState.tuner.name is not a
@@ -44,9 +52,6 @@ dated section.
   with the selection persisting in `localStorage`. The renderer fully owns
   its visual layout (canvas / DOM / SVG, sizing, colours); the host hands
   over a container element + score data and steps out of the way.
-- Recorder menu entry enabled (no longer "soon"). Live mic capture →
-  score serialisation comes next; today the screen previews the renderer
-  system against a sample score so both views are visually verifiable.
 - Main-menu splash refreshes on every return to the menu and on a
   2-minute idle timer while the menu is visible (paused when the tab
   is backgrounded). No more page-reload-to-reroll.
