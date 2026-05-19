@@ -1433,7 +1433,6 @@
         import { installBuiltinRenderers } from './render/builtins/index.js';
         import {
             loadUserTunings,
-            saveUserTunings,
             userTuningBySlug,
             addUserTuningEntry,
             deleteUserTuning,
@@ -2419,10 +2418,10 @@
         //
         // State is kept separate from `tunerState` so the two screens have
         // independent settings (matches CLI invocation semantics — `tune`
-        // and `record` don't share args). Most DOM-wiring helpers parallel
-        // the Tuner's; a future refactor could factor out a shared
-        // tuning-picker widget, but for now the duplication is contained
-        // and obvious.
+        // and `record` don't share args). Tuning + capo state lives in a
+        // shared `makeTuningController` instance (`recState.tuning`) —
+        // same factory the Tuner + Playback screens consume, so picker /
+        // capo wiring isn't duplicated across the three surfaces.
 
         const RECORDER_STORAGE_KEY = 'twanga-recorder-v1';
         const MAX_FRET = 20; // matches twanga-cli::main::MAX_FRET
@@ -3450,7 +3449,16 @@
                 columnsPerBar: firstDenom,
                 tuning: {
                     name: tab.tuning_names().join(' '),
-                    strings: tab.tuning_names().map((n) => ({ name: n, midi: 0 })),
+                    // Parse MIDI from each note name so a future renderer
+                    // that reads `midi` (e.g. for pitch-coloured notes)
+                    // gets real values. `midi_from_name` returns `undefined`
+                    // for unparseable names — fall back to 0 in that case;
+                    // the Tab + Highway renderers don't read `midi` today
+                    // so the fallback only matters for forward-compat.
+                    strings: tab.tuning_names().map((n) => ({
+                        name: n,
+                        midi: midi_from_name(n) ?? 0,
+                    })),
                 },
                 capoSpec: tab.capo_spec(),
                 columns,
