@@ -54,6 +54,90 @@ pub fn preset_display_name(slug: &str) -> Option<String> {
     twanga_core::Tuning::from_preset(slug).map(|t| t.name)
 }
 
+/// Validate a `PresetEntry`-shaped JS object before persisting it. The browser
+/// frontend builds custom tunings into the same `PresetEntry` shape the CLI
+/// hand-edits in TOML — slug + display name + array of `{name, midi}` strings.
+/// This function performs the same checks the CLI runs at add-time:
+///
+/// - Slug is non-empty, lowercase ASCII + digits + hyphens, no leading/trailing `-`.
+/// - Slug doesn't collide with a built-in preset.
+/// - Display name is non-empty.
+/// - At least one string is defined.
+/// - Every string's `name` is non-empty and `midi` is in `0..=127`.
+///
+/// Returns `Ok(())` on success, or a human-readable `String` error on failure
+/// (same shape as the CLI's prompt validators). The frontend uses this to
+/// surface red text under the offending form field rather than waiting until
+/// the tuner constructor fails.
+#[wasm_bindgen]
+pub fn validate_preset_entry(preset_json: JsValue) -> Result<(), String> {
+    let entry: twanga_core::PresetEntry = serde_wasm_bindgen::from_value(preset_json)
+        .map_err(|e| format!("malformed tuning shape: {e}"))?;
+    validate_entry(&entry)
+}
+
+/// Slug rules shared between [`validate_preset_entry`] and the tuner
+/// constructors. Matches `validate_slug` in `twanga-cli`'s prompts so the
+/// CLI and browser refuse the same inputs for the same reasons.
+fn validate_slug(s: &str) -> Result<(), String> {
+    if s.is_empty() {
+        return Err("slug cannot be empty".into());
+    }
+    if !s
+        .chars()
+        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+    {
+        return Err("slug must be lowercase ASCII letters, digits, and hyphens".into());
+    }
+    if s.starts_with('-') || s.ends_with('-') {
+        return Err("slug cannot start or end with a hyphen".into());
+    }
+    Ok(())
+}
+
+/// Full validation of a `PresetEntry`. Factored out so both the validate
+/// helper and the custom-tuning constructor can reuse it without going
+/// through `serde_wasm_bindgen` twice.
+fn validate_entry(entry: &twanga_core::PresetEntry) -> Result<(), String> {
+    validate_slug(&entry.slug)?;
+    if twanga_core::Tuning::builtin_slugs().contains(&entry.slug.as_str()) {
+        return Err(format!(
+            "'{}' is a built-in preset slug — pick a different slug for your custom tuning",
+            entry.slug
+        ));
+    }
+    if entry.name.trim().is_empty() {
+        return Err("display name cannot be empty".into());
+    }
+    if entry.strings.is_empty() {
+        return Err("a tuning needs at least one string".into());
+    }
+    for (i, s) in entry.strings.iter().enumerate() {
+        let n = i + 1;
+        if s.name.trim().is_empty() {
+            return Err(format!("string {n} has an empty label"));
+        }
+        // PresetString.midi is a u8 so the upper bound is structural; the
+        // lower bound is also free. We still bail above 127 if serde gave us
+        // one (impossible today, but cheap insurance) — and we treat 0 / 1
+        // as "below E0" which isn't a useful tuning. Pick A0 (21) as the
+        // practical floor; lower than any real string on any real instrument.
+        if s.midi < 21 {
+            return Err(format!(
+                "string {n} pitch is below A0 (MIDI {}) — too low to be a real string",
+                s.midi
+            ));
+        }
+        if s.midi > 108 {
+            return Err(format!(
+                "string {n} pitch is above C8 (MIDI {}) — too high to be a real string",
+                s.midi
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// Run YIN pitch detection over a buffer of mono f32 samples at `sample_rate`.
 /// Returns the detected frequency in Hz, or `None` if the buffer is too quiet
 /// or doesn't contain a confident pitch. This is the actual pitch engine the
@@ -153,6 +237,57 @@ impl WebTuner {
     ) -> Result<WebTuner, String> {
         let tuning = twanga_core::Tuning::from_preset(slug)
             .ok_or_else(|| format!("unknown tuning slug: {slug}"))?;
+        let capo = twanga_core::Capo::parse(capo_spec, tuning.strings.len())?;
+        let effective = capo.apply(&tuning)?;
+        let labels = effective.strings.iter().map(|s| s.name.clone()).collect();
+        let name = effective.name.clone();
+        Ok(WebTuner {
+            inner: twanga_dsp::Tuner::new(twanga_dsp::TunerMode::Strings(effective), sample_rate),
+            string_labels: labels,
+            name,
+        })
+    }
+
+    /// Build a per-string tuner from a user-defined `PresetEntry`-shaped JS
+    /// object (same schema the CLI persists under `$CONFIG/twanga/tunings.toml`).
+    /// The frontend stores these in `localStorage` under
+    /// `twanga-user-tunings-v1` so the tuner picker can include them without
+    /// a server round-trip. Validation is run before construction; errors
+    /// flow back to JS as a `String` exception, mirroring
+    /// [`Self::new_for_strings`].
+    pub fn new_for_strings_custom(
+        preset_json: JsValue,
+        sample_rate: u32,
+    ) -> Result<WebTuner, String> {
+        Self::new_for_strings_custom_with_capo(preset_json, "", sample_rate)
+    }
+
+    /// Capo'd variant of [`Self::new_for_strings_custom`]. Same `capo_spec`
+    /// rules as [`Self::new_for_strings_with_capo`]: uniform integer or
+    /// per-string comma list, empty / `"0"` is a no-op.
+    pub fn new_for_strings_custom_with_capo(
+        preset_json: JsValue,
+        capo_spec: &str,
+        sample_rate: u32,
+    ) -> Result<WebTuner, String> {
+        let entry: twanga_core::PresetEntry = serde_wasm_bindgen::from_value(preset_json)
+            .map_err(|e| format!("malformed tuning shape: {e}"))?;
+        Self::build_from_entry(entry, capo_spec, sample_rate)
+    }
+}
+
+impl WebTuner {
+    /// Native-Rust path used by both the wasm-exported `new_for_strings_custom*`
+    /// constructors and the `cargo test` suite (where building a `JsValue`
+    /// outside wasm isn't possible). Same validation + capo application as the
+    /// JS-facing wrappers.
+    fn build_from_entry(
+        entry: twanga_core::PresetEntry,
+        capo_spec: &str,
+        sample_rate: u32,
+    ) -> Result<WebTuner, String> {
+        validate_entry(&entry)?;
+        let tuning = entry.to_tuning();
         let capo = twanga_core::Capo::parse(capo_spec, tuning.strings.len())?;
         let effective = capo.apply(&tuning)?;
         let labels = effective.strings.iter().map(|s| s.name.clone()).collect();
@@ -455,5 +590,135 @@ mod tests {
         // Capo spec with wrong length should propagate the Capo::parse
         // error message up to the JS side, not panic.
         assert!(WebTuner::new_for_strings_with_capo("standard-ukulele", "1,2", 48_000).is_err());
+    }
+
+    // ------------------------------------------------------------------
+    // Custom (user-defined) tuning tests
+    // ------------------------------------------------------------------
+    //
+    // `WebTuner::new_for_strings_custom*` ultimately deserialises a JsValue
+    // into `PresetEntry`, but `JsValue` can't be constructed off-wasm. The
+    // wasm path is covered by manual smoke-testing in the browser; here we
+    // exercise the shared `build_from_entry` helper which carries the same
+    // validation + capo logic.
+
+    use twanga_core::{PresetEntry, PresetString};
+
+    fn sample_custom_entry() -> PresetEntry {
+        // Open D guitar — deliberately not in the built-in registry.
+        PresetEntry {
+            slug: "open-d-test".into(),
+            name: "Open D Test Tuning".into(),
+            strings: vec![
+                PresetString {
+                    name: "D4".into(),
+                    midi: 62,
+                },
+                PresetString {
+                    name: "A3".into(),
+                    midi: 57,
+                },
+                PresetString {
+                    name: "F#3".into(),
+                    midi: 54,
+                },
+                PresetString {
+                    name: "D3".into(),
+                    midi: 50,
+                },
+                PresetString {
+                    name: "A2".into(),
+                    midi: 45,
+                },
+                PresetString {
+                    name: "D2".into(),
+                    midi: 38,
+                },
+            ],
+        }
+    }
+
+    #[test]
+    fn build_from_entry_constructs_tuner_with_preset_labels() {
+        let t = WebTuner::build_from_entry(sample_custom_entry(), "", 48_000).expect("build");
+        assert_eq!(t.string_labels(), vec!["D4", "A3", "F#3", "D3", "A2", "D2"]);
+        assert_eq!(t.name(), "Open D Test Tuning");
+    }
+
+    #[test]
+    fn build_from_entry_applies_capo() {
+        let t = WebTuner::build_from_entry(sample_custom_entry(), "2", 48_000).expect("build");
+        // +2 semitones on every string. D4 → E4, A3 → B3, F#3 → G#3, etc.
+        assert_eq!(t.string_labels(), vec!["E4", "B3", "G#3", "E3", "B2", "E2"]);
+        assert!(t.name().contains("capo 2"));
+    }
+
+    #[test]
+    fn validate_entry_accepts_well_formed_entry() {
+        assert!(validate_entry(&sample_custom_entry()).is_ok());
+    }
+
+    #[test]
+    fn validate_entry_rejects_builtin_slug() {
+        let mut e = sample_custom_entry();
+        e.slug = "standard-ukulele".into();
+        let err = validate_entry(&e).expect_err("must refuse to shadow built-in");
+        assert!(err.contains("built-in"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn validate_entry_rejects_bad_slug_characters() {
+        let mut e = sample_custom_entry();
+        e.slug = "Open D".into(); // uppercase + space — invalid
+        assert!(validate_entry(&e).is_err());
+
+        e.slug = "-leading-hyphen".into();
+        assert!(validate_entry(&e).is_err());
+
+        e.slug = "trailing-hyphen-".into();
+        assert!(validate_entry(&e).is_err());
+
+        e.slug = String::new();
+        assert!(validate_entry(&e).is_err());
+    }
+
+    #[test]
+    fn validate_entry_rejects_empty_name() {
+        let mut e = sample_custom_entry();
+        e.name = "   ".into();
+        let err = validate_entry(&e).expect_err("blank name should fail");
+        assert!(err.contains("display name"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn validate_entry_rejects_empty_string_list() {
+        let mut e = sample_custom_entry();
+        e.strings.clear();
+        let err = validate_entry(&e).expect_err("zero-string tuning should fail");
+        assert!(
+            err.contains("at least one string"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn validate_entry_rejects_blank_string_label() {
+        let mut e = sample_custom_entry();
+        e.strings[2].name = String::new();
+        let err = validate_entry(&e).expect_err("blank string label should fail");
+        assert!(err.contains("string 3"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn validate_entry_rejects_out_of_range_midi() {
+        // Below A0: too low for a real string.
+        let mut low = sample_custom_entry();
+        low.strings[0].midi = 5;
+        assert!(validate_entry(&low).is_err());
+
+        // Above C8: too high for a real string.
+        let mut high = sample_custom_entry();
+        high.strings[0].midi = 120;
+        assert!(validate_entry(&high).is_err());
     }
 }
