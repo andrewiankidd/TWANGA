@@ -1,26 +1,36 @@
 # twanga-cli
 
-The `twanga` command-line binary. Mostly UX glue — the analysis logic lives in `twanga-dsp` (`Tuner`), `twanga-tabs` (`TabRecorder`, alphaTex serialiser/parser), and `twanga-audio` (`InputStream`, `OutputStream`); this crate opens streams, feeds samples through the right pipeline, and renders via `twanga-tui`.
+The `twanga` command-line binary. Mostly UX glue — the analysis logic lives in `twanga-dsp` (`Tuner`), `twanga-tabs` (`TabRecorder`, alphaTex serialiser/parser), and `twanga-audio` (`InputStream`, `OutputStream`); this crate opens streams, feeds samples through the right pipeline, renders via `twanga-tui`, and merges the built-in tuning registry with `$CONFIG/twanga/tunings.toml` for the menus.
 
-Any argument left unset triggers an interactive prompt with the default pre-filled (press enter to accept). Non-TTY contexts (pipes, scripts, CI) need every argument passed via flag — the prompts error cleanly when stdin/stderr isn't a terminal. Ctrl-C and `q + Enter` both produce a clean exit.
+**Flag convention.** Every value-bearing flag takes one of three forms, consistently:
+
+- `--flag value` — use the value directly. Same as the legacy "pass it in" style. Script-friendly.
+- `--flag` (no value) — explicitly ask to be prompted (or, for `--bpm` on `play`, explicitly defer to the file's tempo).
+- `(omitted)` — same as bare `--flag` when run in a terminal; falls back to a sensible default (or just doesn't apply) when stdin isn't a TTY.
+
+Ctrl-C and `q + Enter` both produce a clean exit.
 
 ## Subcommands
 
 ### `tune` — live tuner
 
-Capture audio, show detected pitch vs nearest target. Prompts for tuning if `--tuning` is omitted; the prompt includes "(no instrument — chromatic tuner)" to disable per-string targets and just show the nearest 12-TET note.
+Capture audio, show detected pitch vs nearest target. Prompts for tuning if `--tuning` is omitted; the prompt includes "(no instrument — chromatic tuner)" to disable per-string targets and just show the nearest 12-TET note. When a tuning is selected, prompts again for a capo position (default 0).
 
 | Flag | Description |
 |------|-------------|
-| `--tuning <preset>` | `standard-guitar` / `standard-banjo` / `standard-ukulele`. Omit to be prompted. |
+| `--tuning <slug>` | Any built-in slug (see `twanga tunings list`) or a user-defined one. Omit to be prompted. |
+| `--capo <spec>` | Uniform integer (`--capo 3`) or per-string list (`--capo "0,2,2,2,2,2"`). Omit to be prompted (uniform only via prompt). |
 
 ### `record` — live tab recorder
 
-Capture played notes as alphaTex, saved to `recordings/recording-<unix-secs>.alphatex`. Each detected pitch is mapped to the smallest non-negative fret position on the given tuning (so a played D5 on uke registers as fret 5 on the A string, not fret 14 on the C string). The display shows a refreshing multi-string view of the in-progress block.
+Capture played notes as alphaTex, saved to `recordings/recording-<unix-secs>.alphatex`. Each detected pitch is mapped to the smallest non-negative fret position on the (capo'd) tuning, so a played D5 on uke registers as fret 5 on the A string, not fret 14 on the C string. The display shows a refreshing multi-string view of the in-progress block.
+
+When a capo is set, logged frets are **capo-relative** (the musical convention) and the file's `\subtitle` field carries the capo via a `; capo=<spec>` suffix so the recording round-trips through playback without the user having to remember and re-pass the same value.
 
 | Flag | Description |
 |------|-------------|
-| `--tuning <preset>` | As above. |
+| `--tuning <slug>` | As above. |
+| `--capo <spec>` | As above. |
 | `--bpm <N>` | Tempo (20–400). Prompted if omitted; default 120. |
 | `--resolution <1/N>` | Note value per column: `1/4`, `1/8`, `1/16`, `1/32`. Prompted if omitted; default `1/8`. |
 | `--block-width <N>` | Columns per scrolling block (4–200). Prompted if omitted; default 32. |
@@ -32,7 +42,8 @@ Load an `.alphatex` file, scroll a cursor through it at the file's (or overridde
 | Flag | Description |
 |------|-------------|
 | `path` (positional) | Path to a `.alphatex` file. |
-| `--tuning <preset>` | Re-tune the tab to a different instrument. Notes are transposed by absolute pitch — e.g. play `twinkle-twinkle-uke.alphatex` on a banjo with `--tuning standard-banjo`. Pitches the target instrument can't reach (within fret 0–20) are silently dropped. |
+| `--tuning <slug>` | Re-tune the tab to a different instrument. Notes are transposed by absolute pitch — e.g. play `twinkle-twinkle-uke.alphatex` on a banjo with `--tuning standard-banjo`. Pitches the target can't reach (within fret 0–20) are silently dropped. |
+| `--capo <spec>` | Capo applied to the tab's tuning for wait-mode pitch comparison. Precedence: `--capo` wins; otherwise falls back to whatever the file embedded in its `\subtitle` field. |
 | `--bpm <N>` | Override the tempo from the file. |
 | `--no-metronome` | Silence the click (default is on). |
 | `--wait` | Practice mode — cursor pauses at each note until you play it (within ±50 cents on any expected string/fret). Rests still advance with time so the metronome stays musical. |
@@ -48,7 +59,20 @@ cargo run -p twanga-cli -- play assets/examples/twinkle-twinkle-uke.alphatex --b
 # Transpose it to banjo, loop the first phrase
 cargo run -p twanga-cli -- play assets/examples/twinkle-twinkle-uke.alphatex \
     --tuning standard-banjo --bpm 70 --loop 0:16
+
+# Same arrangement, but with a capo on fret 3
+cargo run -p twanga-cli -- play assets/examples/twinkle-twinkle-uke.alphatex --capo 3
 ```
+
+### `tunings` — manage user-defined tunings
+
+User-defined tunings live at the platform config dir (`$CONFIG/twanga/tunings.toml` via the `directories` crate) and share the same TOML schema as the built-in `presets.toml`. Built-in slugs shadow user-defined ones to prevent silent overrides.
+
+| Action | Description |
+|--------|-------------|
+| `twanga tunings list` | Print built-in + user-defined tunings with origin tags. |
+| `twanga tunings path` | Print the absolute path to the user file (whether it exists yet or not). |
+| `twanga tunings add` | Interactive flow: number of strings → per-string open pitch → display name → auto-slug. Saves to the user file, rejects slugs that collide with built-ins. |
 
 ### `devices` — list audio input devices
 
@@ -56,13 +80,13 @@ No arguments. Useful for sanity-checking before `tune` / `record` / `play --wait
 
 ### `convert <input> <output>` — tab format conversion (stub)
 
-Placeholder. Will eventually round-trip GP5/MusicXML/alphaTex once those parsers land in `twanga-tabs`.
+Placeholder. Will eventually round-trip alphaTex ↔ MusicXML once the MusicXML parser lands in `twanga-tabs`. Proprietary formats (`.gp5`/`.gpx`) are explicit non-goals.
 
 ## Local development
 
 - **Check**: `cargo check -p twanga-cli`
 - **Test**: `cargo test -p twanga-cli`
 - **Run**: `cargo run -p twanga-cli -- <subcommand>` (each subcommand also responds to `--help`)
-- **Depends on**: `twanga-core`, `twanga-audio`, `twanga-dsp`, `twanga-synth`, `twanga-tabs`, `twanga-tui`, `clap`, `anyhow`
+- **Depends on**: `twanga-core`, `twanga-audio`, `twanga-dsp`, `twanga-synth`, `twanga-tabs`, `twanga-tui`, `clap`, `anyhow`, `serde`, `toml`, `directories`
 
 See [the workspace README](../../README.md) for project context.

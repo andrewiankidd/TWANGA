@@ -8,7 +8,7 @@ TWANGA is an open-source learning tool for fretted/strung instruments. Bring-you
 
 Most instrument-trainer software is locked: subscription pricing, walled song libraries, single-instrument tunnel vision (almost always 6-string guitar + 4-string bass), and tunings hard-coded into the data model. TWANGA inverts the trade-off — you own the inputs:
 
-- **Tabs** — `.gp5`, `.gpx`, `.xml`, alphaTex. Imported from your own files, not hosted or aggregated.
+- **Tabs** — record what you play, play back tabs, transpose across instruments, capo per-string. Native format is alphaTex (the open text format from the alphaTab project); MusicXML interop is a future open-standard target. Proprietary formats (Guitar Pro `.gp5`/`.gpx`) are explicit non-goals.
 - **Instrument** — `Tuning` is just `Vec<TunedString>`, so drop-D, the banjo's high-pitched 5th-string drone, the ukulele's reentrant G, baritone configurations, and 7-string layouts all fall out of the same data model.
 - **Audio device** — any CPAL-supported input. ASIO behind a feature flag on Windows for lower-latency USB instrument cables.
 
@@ -24,9 +24,9 @@ Multi-crate Cargo workspace. Each crate has a narrow, deliberately-enforced resp
 | **[twanga-dsp](crates/twanga-dsp/)** | Pure pitch detection (`Yin`) + the streaming `Tuner` that wraps it. No allocations after first call. Pinned to `opt-level = 3` in dev so `cargo run` is usable without `--release`. |
 | **[twanga-synth](crates/twanga-synth/)** | Deterministic audio synthesis (sines, harmonic stacks, envelopes, noise) used as a `dev-dependency` by `twanga-dsp` tests and at runtime for the metronome click. |
 | **[twanga-audio](crates/twanga-audio/)** | Realtime audio capture (`InputStream`) and playback (`OutputStream`), wrapping CPAL. ASIO behind the `asio` cargo feature on Windows. |
-| **[twanga-tabs](crates/twanga-tabs/)** | Tab data: live `TabRecorder`, alphaTex serialiser + parser, stubs for `gp5` and `musicxml`. |
+| **[twanga-tabs](crates/twanga-tabs/)** | Tab data: live `TabRecorder`, alphaTex serialiser + parser. MusicXML is a future open-standard interop target; proprietary formats (`.gp5`/`.gpx`) are explicit non-goals. |
 | **[twanga-tui](crates/twanga-tui/)** | Terminal UX primitives shared across TWANGA's CLIs — selection menus, refreshing displays, Ctrl-C handling, ANSI colours. |
-| **[twanga-cli](crates/twanga-cli/)** | CLI binary `twanga` — `tune`, `record`, `play`, `devices`, `convert` subcommands. |
+| **[twanga-cli](crates/twanga-cli/)** | CLI binary `twanga` — `tune`, `record`, `play`, `tunings`, `devices`, `convert` subcommands. |
 | **[twanga-bench](crates/twanga-bench/)** | Latency + pitch-detection accuracy benchmarks (placeholder). |
 | **[twanga-app](crates/twanga-app/)** | Tauri shell (placeholder). Frontend in [frontend/](frontend/) (framework TBD), tab rendering via [alphaTab](https://github.com/CoderLine/alphaTab) in the webview. |
 
@@ -58,6 +58,13 @@ cargo run -p twanga-cli -- play assets/examples/twinkle-twinkle-uke.alphatex --b
 
 # Transpose a uke tab onto banjo so you can play it on a different instrument
 cargo run -p twanga-cli -- play assets/examples/twinkle-twinkle-uke.alphatex --tuning standard-banjo
+
+# Play with a capo on fret 3 (uniform). Pass `0,2,2,2,2,2` for a partial capo.
+cargo run -p twanga-cli -- play assets/examples/twinkle-twinkle-uke.alphatex --capo 3
+
+# Manage the tuning registry — list built-ins + user tunings, or define your own
+cargo run -p twanga-cli -- tunings list
+cargo run -p twanga-cli -- tunings add
 ```
 
 See [crates/twanga-cli/README.md](crates/twanga-cli/README.md) for a full subcommand + flag reference. Each subcommand also responds to `--help`.

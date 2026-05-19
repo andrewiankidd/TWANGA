@@ -9,9 +9,8 @@ See [ROADMAP.md](ROADMAP.md) for what's actually committed next; this file is ev
 The CLI flows are the wireframe. Translate them directly to GUI rather than redesigning.
 
 - Device picker (mirrors `twanga devices`)
-- Tuning picker (chromatic / standard-guitar / banjo / uke menu)
-- **Custom tunings.** User defines a tuning once (name, string count, per-string open pitch) and it appears in every tuning picker thereafter — tuner, recorder, playback, transpose. Persisted to user config alongside the built-in presets. Lets people support arbitrary instruments (14-string whatevers, open tunings, alternate banjo gCGCD-style retunes) without code changes.
-- **Capo as a second prompt.** After instrument/tuning selection, optional follow-up: "capo position?" (default 0 / none). Composes with any tuning, built-in or custom. So a 3rd-fret-capo standard banjo and a 21st-fret-capo 14-string custom tuning are the same code path. Model as **per-string offset**, not scalar — the banjo 5th string has its own dedicated capo (physical reality), and partial capos / drop-D capos also need the same shape.
+- Tuning picker (chromatic + built-in presets + user-defined tunings; data model already shipped, GUI just needs to consume `twanga_core::Tuning::builtin_presets()` plus the user file)
+- Capo picker (data model already shipped; GUI just needs an integer slider for uniform capo + an "advanced" per-string mode for partial capos)
 - Tuner screen — per-string live cents-deviation, large readable display
 - Tab library — folder picker for `.alphatex` files, list view
 - Playback screen — alphaTab renderer + cursor + BPM slider + wait-mode toggle + transpose dropdown
@@ -55,7 +54,7 @@ Explicit user-selectable practice intent that changes what the app verifies and 
 ## Audience-specific (folk/amateur, non-guitar)
 
 - **Strum/pick rhythm-only mode.** Detect *that* you're playing on the beat, not *what*. Lets uke beginners feel like they're playing along before precise verification is possible.
-- **Capo as first-class concept.** UI for "capo on fret 3" that shifts displayed tab relative to capo, not absolute pitches.
+- **Visual tab rendering relative to capo.** Backend is shipped (the `Capo` type + `--capo` flag + alphaTex subtitle round-trip); a future GUI tab renderer should display fret numbers relative to the capo position rather than absolute frets, including a visual indicator of the capo bar across the fretboard.
 - **Strumming pattern trainer.** "D D-U U-D-U" visualisation + rhythm-only verification.
 - **Roll trainer for banjo.** Forward roll, backward roll, alternating thumb. Right-hand finger visualisation. Banjo learners need this more than they need songs.
 - **Clawhammer rhythm trainer.** Specifically the "bum-di-tee" forearm motion — entirely a right-hand motor skill.
@@ -93,20 +92,21 @@ Runtime stays deterministic. AI is import-time only, like OCR.
 - **"Mute this part, play it yourself" mode.** Inverse of solo-the-banjo — silence the banjo in the mix, user plays along as the missing part.
 - **Monophonic transcription on isolated stems.** Isolated banjo line → pitch contour → tab notation. Output flagged as low-confidence, user-editable.
 - **Polyphonic transcription via Basic Pitch.** Bolt-on for chord-heavy passages. Mark output as draft. Starting point for tab editor, not end product.
-- **Latency calibration wizard.** First-run flow measures end-to-end audio latency and offsets timing accordingly. Without this, accuracy feedback is wrong.
+- **Latency calibration wizard.** First-run flow measures end-to-end output-to-input latency (cable + buffer + reaction) and offsets `wait` mode's pitch-comparison timing. Cheap USB cables + Bluetooth headphones can push round-trip to 100ms+; without calibration the cursor sits waiting because detection arrives late. **Implementation note:** acoustic loopback (click out speakers → captured by mic) is the easy version but dies the moment the user puts headphones on, which is most of them. The fallback that works regardless is tap-along calibration: play 8 clicks, ask the user to tap their instrument on each beat, take the median offset between expected-beat and detected-impulse. Captures output + reaction + input as one number, which is what `wait` mode actually needs. Deferred to post-GUI — a first-run setup wizard has a nicer home in the GUI shell.
 - **Smart tuner input mode.** Detect noisy mic vs clean direct-in, adjust filter strategy.
 
 ## Tab ingestion (the import pipeline)
 
-Multiple sources funnel into one internal arrangement format with per-note confidence scores.
+Multiple sources funnel into one internal arrangement format with per-note confidence scores. Proprietary formats (Guitar Pro `.gp5`/`.gpx`) are explicit non-goals — see [SCOPE.md](SCOPE.md).
 
-- **Phase 1 (done-ish):** structured file import — `.gp5`, `.gpx`, MusicXML, alphaTex.
-- **Phase 2:** ASCII tab parser — paste from Ultimate Guitar etc., or text file.
-- **Phase 3:** OCR for image tabs — Tesseract via Rust bindings, feed images of ASCII tabs or printed tablature.
-- **Phase 4 (stretch):** Audiveris-backed staff-to-tab — sheet music PDFs → MusicXML → fingering algorithm → tab on target instrument.
-- **Phase 5 (probably never):** audio-to-tab — Klang.io-style polyphonic transcription. Open-source quality not there yet.
+- **Phase 1 (shipped):** alphaTex parser + writer (`twanga-tabs::alphatex`).
+- **Phase 2:** MusicXML import — open W3C schema; Guitar Pro / MuseScore / Sibelius all export to it, so this is the realistic interop path for the existing Guitar Pro library most users have.
+- **Phase 3:** ASCII tab parser — paste from Ultimate Guitar etc., or text file. Lossier than MusicXML (have to guess timing) but covers the "I have a text file" workflow.
+- **Phase 4:** OCR for image tabs — Tesseract via Rust bindings, feed images of ASCII tabs or printed tablature.
+- **Phase 5 (stretch):** Audiveris-backed staff-to-tab — sheet music PDFs → MusicXML → fingering algorithm → tab on target instrument.
+- **Phase 6 (probably never):** audio-to-tab — Klang.io-style polyphonic transcription. Open-source quality not there yet.
 - **Bulk import workflow.** Drop a folder, app processes everything in background, library shows status badges (green/yellow/red) by confidence. Play the high-confidence stuff immediately; review the rest as you reach it.
-- **Source badges in library.** Icon per arrangement showing where it came from (.gp5, ASCII, OCR, audio).
+- **Source badges in library.** Icon per arrangement showing where it came from (alphaTex, MusicXML, ASCII, OCR, audio).
 - **Confidence rendering.** Low-confidence notes shown with subtle visual cue (dotted underline, paler). Naturally caught while playing.
 - **Diff and merge.** Multiple imports of the same song → offer to merge, keep user edits across versions.
 
@@ -151,8 +151,8 @@ Tuner-driven passive sample collection. The chore (tuning) becomes the data sour
 
 ## Architecture / infrastructure
 
-- **CI matrix builds.** GitHub Actions, free for public repos. Windows / macOS Apple Silicon / macOS Intel / Linux x64 glibc. Mobile later via Tauri Mobile.
-- **ASIO-enabled Windows build variant.** Two Windows binaries — without ASIO (works for everyone) and with (lower latency, needs ASIO driver).
+- **CI mobile targets.** GitHub Actions on push/PR + tagged-release pipeline shipping Windows / macOS Intel / macOS Apple Silicon / Linux x64 already ship. Mobile (iOS / Android via Tauri Mobile) is the next platform tier to add.
+- **ASIO-enabled Windows build variant.** Two Windows binaries — without ASIO (works for everyone) and with (lower latency, needs ASIO driver). Deferred on the redistribution-license question (Steinberg SDK).
 - **Dependabot for Cargo.** Weekly dependency updates, free security scanning.
 - **`twanga-trace` crate.** Continuous pitch contour comparison (DTW + pitch distance). For the Audiosurf-mode work.
 - **`twanga-import` crate?** Once OCR / Demucs / transcription pipelines arrive, isolating them in a single crate keeps the optional heavy dependencies out of the core build.
@@ -172,6 +172,7 @@ Restating so they don't sneak back in (see also [SCOPE.md](SCOPE.md)):
 - Bundled non-public-domain content
 - Anti-cheat or DRM of any kind
 - Closed-source forks for app-store distribution
+- Proprietary tab formats (Guitar Pro `.gp5`/`.gpx`) — same legal posture as ASIO; users with Guitar Pro libraries get the MusicXML export path
 
 ## Distribution (future, not now)
 

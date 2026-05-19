@@ -2,17 +2,17 @@
 //!
 //! - [`TabRecorder`] turns a stream of `(string_idx, fret, time)` events into
 //!   horizontal ASCII tab notation, emitting one [`TabEvent`] per column tick.
-//! - The `gp5` / `musicxml` / `alphatex` modules are placeholders for the
-//!   on-disk tab formats Twanga will eventually import from.
+//! - [`alphatex`] is the format TWANGA ships against today (W3C-style open
+//!   text format from the alphaTab project). [`musicxml`] is a placeholder
+//!   for future open-standard interop with MuseScore / Sibelius / Guitar Pro
+//!   exports. Proprietary binary formats (Guitar Pro `.gp5`/`.gpx`) are an
+//!   explicit non-goal — see `docs/SCOPE.md`.
 
 use twanga_core::Tuning;
 
-pub mod gp5 {
-    // Guitar Pro 5 binary parser.
-}
-
 pub mod musicxml {
-    // MusicXML parser.
+    // MusicXML parser — placeholder. Open W3C-style XML schema; the natural
+    // open-standard interop point with sheet-music editors.
 }
 
 pub mod alphatex {
