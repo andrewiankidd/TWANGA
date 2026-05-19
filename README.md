@@ -28,7 +28,7 @@ Multi-crate Cargo workspace. Each crate has a narrow, deliberately-enforced resp
 | **[twanga-tui](crates/twanga-tui/)** | Terminal UX primitives shared across TWANGA's CLIs — selection menus, refreshing displays, Ctrl-C handling, ANSI colours. |
 | **[twanga-cli](crates/twanga-cli/)** | CLI binary `twanga` — `tune`, `record`, `play`, `tunings`, `devices`, `convert` subcommands. |
 | **[twanga-bench](crates/twanga-bench/)** | Latency + pitch-detection accuracy benchmarks (placeholder). |
-| **[twanga-app](crates/twanga-app/)** | Tauri 2 desktop shell — hosts the shared [frontend/web/](frontend/web/) bundle (HTML + WASM bindings) in a native window. Same UI as the web build, just wrapped in a Tauri webview. Tab rendering will use [alphaTab](https://github.com/CoderLine/alphaTab) once the playback screen lands. |
+| **[twanga-app](crates/twanga-app/)** | Tauri 2 desktop shell — hosts the shared [frontend/web/](frontend/web/) bundle (HTML + WASM bindings) in a native window. Same UI as the web build, just wrapped in a Tauri webview. |
 
 ## Quick start
 
@@ -236,7 +236,7 @@ G4 | --00--0-----[-]---00------
 ## Acknowledgements
 
 - **[slopsmith](https://github.com/byrongamatos/slopsmith)** — found while scoping TWANGA; I haven't used it. Different audience and a different problem, but excellent prior art on plugin architecture, A-B loop UX, and JUCE-based desktop wrappers around web UIs. Worth studying carefully before TWANGA ever ships a plugin system.
-- **[alphaTab](https://github.com/CoderLine/alphaTab)** — the open-source tab renderer TWANGA drops into its Tauri webview, and the source of the alphaTex format the recorder writes to.
+- **[alphaTab](https://github.com/CoderLine/alphaTab)** — the open-source tab project whose `alphaTex` text format the recorder writes to. We render tabs ourselves via a small pluggable renderer system in `frontend/web/render/` (column-grid and Rocksmith-style highway built in, custom renderers welcome) so user-extensible visual paradigms aren't locked behind alphaTab's engraving choices, but alphaTab remains the natural choice for engraved-staff tab rendering if and when we add it as a renderer plugin.
 - **[CPAL](https://github.com/RustAudio/cpal)** and the wider [RustAudio](https://github.com/RustAudio) ecosystem — the realtime cross-platform audio stack that made Rust a viable choice over Godot, Flutter, or JUCE.
 - **[TuxGuitar](https://sourceforge.net/projects/tuxguitar/)** — long-standing open-source tab editor; reference for tab-editing UX even if not embeddable (GPL).
 - **de Cheveigné & Kawahara, _YIN, a fundamental frequency estimator for speech and music_ (2002)** — the pitch-detection algorithm TWANGA leans on for short-sustain plucked-string detection on banjo and ukulele.

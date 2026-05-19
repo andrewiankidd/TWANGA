@@ -13,9 +13,13 @@
 | Web frontend scaffold (landing + app) deployed to GitHub Pages | done |
 | Web tuner: mic capture via Web Audio + AudioWorklet → YIN via WASM | done |
 | Tauri 2 desktop shell hosting the shared `frontend/web/` bundle | done |
-| **Per-string tuner display in the web build** — tuning picker + cents indicator (replaces the bare chromatic Hz readout) | next |
-| Tab rendering via [alphaTab](https://github.com/CoderLine/alphaTab) (works in both the web build + the Tauri webview) | after the per-string tuner |
-| Web tab recorder — mic → alphaTex download (browser equivalent of `twanga record`) | follows |
+| Web tuner per-string display + tuning picker (full parity with `twanga tune`) | done |
+| Web Tunings screen: built-in + user-defined merged list, inline editor, capo round-trip | done |
+| Pluggable renderer system (registry + Tab + Highway built-in plugins, same path for future third-party renderers) | done |
+| Web tab recorder — mic → fret detection → alphaTex download (full parity with `twanga record`) | done |
+| **Web tab playback** — load `.alphatex` (drop-zone or bundled examples), scroll a playhead via the renderer host, wait / loop / metronome layered on top | next |
+| Custom CLI subcommand `twanga tunings remove` for parity with the GUI's delete button | follows |
+| Bidirectional sync of `$CONFIG/twanga/tunings.toml` ↔ `localStorage` via a Tauri command | follows |
 | Chord trainer with polyphonic *verification* (not transcription) | follows |
 | Slow-down practice (time-stretch via `rubato` or signalsmith-stretch) | follows |
 | Section looper / adaptive difficulty / tab fade-out | follows |

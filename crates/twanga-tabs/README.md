@@ -20,6 +20,8 @@ Bundled demo files live in [`assets/examples/`](../../assets/examples/) at the w
 - **Check**: `cargo check -p twanga-tabs`
 - **Test**: `cargo test -p twanga-tabs`
 - **Depends on**: `twanga-core`
-- **Used by**: `twanga-cli`
+- **Used by**: `twanga-cli`, `twanga-web` (the browser Recorder's
+  `serialize_recording` WASM binding runs the same `AlphaTexWriter`
+  the CLI uses, so browser-saved recordings are byte-compatible)
 
 See [the workspace README](../../README.md) for project context.

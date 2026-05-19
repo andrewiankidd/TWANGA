@@ -1,9 +1,9 @@
 # twanga-app
 
 TWANGA's Tauri desktop shell. Wraps the shared `frontend/web/` bundle
-(alphaTab renderer, Web Audio capture, twanga-web WASM bindings) in a
-native window on Windows / macOS / Linux. iOS / Android arrive via Tauri
-Mobile once Tauri Mobile lands as stable.
+(pluggable renderer system, Web Audio capture, twanga-web WASM
+bindings) in a native window on Windows / macOS / Linux. iOS / Android
+arrive via Tauri Mobile once Tauri Mobile lands as stable.
 
 The desktop story is "one frontend, shipped two ways": the exact same
 HTML/JS/WASM bundle that loads in a browser at the deployed URL also

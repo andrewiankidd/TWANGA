@@ -6,15 +6,45 @@ See [ROADMAP.md](ROADMAP.md) for what's actually committed next; this file is ev
 
 ## Web build feature parity with CLI
 
-The web frontend (`frontend/web/`) is shipped via GitHub Pages and wrapped by the Tauri 2 desktop shell. Same HTML/JS/WASM bundle, two delivery paths. Today the web tuner is a chromatic Hz readout — these items close the gap with `twanga-cli`:
+The web frontend (`frontend/web/`) is shipped via GitHub Pages and wrapped by the Tauri 2 desktop shell. Same HTML/JS/WASM bundle, two delivery paths. The Tuner, Tunings, and Recorder screens are now at 1:1 parity with their CLI counterparts; Playback is the remaining gap.
 
-- **Per-string tuner display.** Tuning picker (built-in presets + future user tunings) → per-string targets with cents-deviation indicator. Mirrors `format_string_row` from the CLI. Same `Tuning::nearest_string` math lives in WASM via `twanga-web` already.
-- **Capo picker on the tuner screen.** Integer slider for uniform; "advanced" mode collapses to per-string offsets for partial capos / banjo 5th-string. Backend data model already ships.
-- **Tab playback** — alphaTab.js loads in the webview, scrolls a cursor through bundled / user-uploaded `.alphatex` files. BPM slider, wait-mode toggle, transpose dropdown.
-- **Tab recorder in browser** — equivalent of `twanga record`: mic → fret detection → alphaTex string the user can download or copy to clipboard. The native CLI writes to disk; the web build will write to a Blob → save-as.
+### Shipped
+
+- **Per-string tuner display.** Tuning picker (built-in + user tunings), per-target cents indicator, mic capture via Web Audio + AudioWorklet → YIN via WASM. Persists last-used tuning to `localStorage`.
+- **Capo on the tuner.** Uniform 0–12 stepper plus a "Per-string" toggle that expands into one stepper per string for partial / drone-style capos.
+- **Custom tunings in the browser.** Merged built-in + user list, inline "Define a new tuning" form (display name, per-string note inputs with live MIDI preview, auto-derived slug, full validation via the same Rust rules `twanga tunings add` enforces). Stored in `localStorage` under the same `PresetEntry` schema the CLI writes to TOML.
+- **Tab recorder in browser.** Full `twanga record` parity (tuning, capo, BPM, resolution, block-width). Mic → chromatic `WebTuner` → `match_pitch_to_fret` → column tracker at tempo → renderer host. Save downloads a `.alphatex` written by the same Rust `AlphaTexWriter` the CLI uses, so files round-trip through `twanga play --capo`.
+
+### Still owed
+
+- **Tab playback** — load `.alphatex` (drop-zone or bundled examples), scroll a playhead via the renderer host, wait / loop / metronome layered on top. Equivalent of `twanga play`.
 - **Tab library.** Drop-zone for local `.alphatex` files (no upload; processed entirely in the browser). Persist the list across sessions.
-- **Custom tunings in the browser.** `twanga tunings add` equivalent, persisting to `localStorage` instead of `$CONFIG/twanga/tunings.toml`. Same `PresetEntry` schema either way.
 - **Persist "last session" state** — last opened tab + position + selected tuning + capo. One-click resume.
+- **`twanga tunings remove` CLI subcommand.** GUI has a per-row delete button; the CLI has no equivalent (users edit the TOML by hand). Adding `tunings remove <slug>` would close the only direction-reversed parity gap.
+
+### Renderer plugin system (shipped)
+
+The Recorder (and the future Playback screen) consume any registered renderer through a uniform plugin contract: `{ id, name, version, create(container, options) }` registered with the module-singleton `RendererRegistry`. Built-in `twanga.tab` (column-grid) and `twanga.highway` (notes-toward-you) ship via the *same* `register()` path future third-party plugins will use — no special lane for built-ins, no host-side branching on plugin id. See [`frontend/web/render/`](../frontend/web/render/).
+
+Future delivery mechanisms (none yet built, but the contract is stable enough that they're additive):
+
+- **Tauri desktop** — filesystem load from `$CONFIG/twanga/renderers/*.js`. User drops files in, registry picks them up on startup.
+- **"Load from URL"** in the web build, with explicit user consent + content-hash check.
+- **Decentralised plugin directory** — a list of plugin-manifest URLs the user adds (like git remotes or APT sources). Anyone can host a registry; we ship a default one. Aligns with the local-first / no-walled-garden ethos. Steam Workshop is explicitly *not* the model.
+
+## Recorder QoL (post-v1)
+
+The Recorder is at CLI parity. These are quality-of-life additions that don't exist on the CLI side either, but the browser is a natural place for them:
+
+- **Mic-level meter** while recording. Simple RMS bar so silence vs "mic not detecting your pitch" don't look the same.
+- **Tempo metronome click during recording.** Single web-audio oscillator gated to the column-tick driver. The CLI's recorder has no metronome (only `play` does); the GUI is a natural place to add one.
+- **Pre-roll / count-in** (e.g. 4 ticks before recording starts) so the user has time to react.
+- **"Undo last column"** button. One-step rollback for fumbles. Today the only recourse is Clear-and-restart.
+- **Recording duration display** ("0:42 / 24 columns") next to the status hint.
+- **Save modal with naming** — type a title that becomes both `\title` in the alphaTex and the filename.
+- **Cap recording length** with a sensible default (e.g. 10 minutes) so accidentally-left-running tabs don't bloat indefinitely. With an "extend" option.
+- **Visual hint when a string can't be reached** (pitch detected but no fret on the active tuning + capo fits within `MAX_FRET`). Today these are silently discarded — same as the CLI, but the browser has room to surface a "couldn't fit on fretboard" indicator.
+- **Shared "tuning + capo" widget** factored out of Tuner and Recorder. ~250 lines of duplication today; worth doing once Playback adds a third consumer.
 
 ## Tauri desktop polish
 
