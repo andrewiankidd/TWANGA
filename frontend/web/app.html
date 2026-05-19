@@ -2753,7 +2753,7 @@
             el('recorder-save-btn').disabled = true;
             el('recorder-clear-btn').disabled = true;
             el('recorder-settings').classList.add('is-recording');
-            el('recorder-hint').textContent = `recording at ${recState.bpm} BPM, 1/${recState.resolutionDenom}`;
+            recUpdateDurationHint();
         }
 
         function recTick() {
@@ -2767,6 +2767,20 @@
             }
             recState.rendererController?.setScore(recState.score);
             recState.rendererController?.setPlayhead(recState.committedColumns);
+            recUpdateDurationHint();
+        }
+
+        /// Refresh the "recording — M:SS / N cols" hint. Driven by `recTick`
+        /// at the column-tick rate; updates feel real-time at 1/8 120 BPM
+        /// (4 Hz), still readable at 1/4 (2 Hz).
+        function recUpdateDurationHint() {
+            const elapsedMs = performance.now() - recState.recordingStartTime;
+            const elapsedSecs = Math.max(0, Math.floor(elapsedMs / 1000));
+            const m = Math.floor(elapsedSecs / 60);
+            const s = String(elapsedSecs % 60).padStart(2, '0');
+            el('recorder-hint').textContent =
+                `recording — ${m}:${s} / ${recState.committedColumns} cols  ` +
+                `(${recState.bpm} BPM, 1/${recState.resolutionDenom})`;
         }
 
         function recStopRecording(hintText) {
@@ -2790,12 +2804,18 @@
             recState.rendererController?.setScore(recState.score);
             recState.rendererController?.setPlayhead(Math.max(0, recState.committedColumns - 1));
 
+            const elapsedMs = performance.now() - recState.recordingStartTime;
+            const elapsedSecs = Math.max(0, Math.floor(elapsedMs / 1000));
+            const m = Math.floor(elapsedSecs / 60);
+            const s = String(elapsedSecs % 60).padStart(2, '0');
+
             el('recorder-start-btn').textContent = 'Start recording';
             el('recorder-save-btn').disabled = recState.committedColumns === 0;
             el('recorder-clear-btn').disabled = false;
             el('recorder-settings').classList.remove('is-recording');
             el('recorder-hint').textContent =
-                (hintText ?? 'stopped') + ' — ' + recState.committedColumns + ' columns captured';
+                (hintText ?? 'stopped') +
+                ` — ${m}:${s} / ${recState.committedColumns} cols captured`;
         }
 
         function recClear() {

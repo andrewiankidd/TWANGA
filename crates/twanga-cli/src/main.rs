@@ -864,9 +864,14 @@ fn run_recorder(
     eprintln!();
 
     let n_rows = recorder.string_count();
+    // +1 row for the duration / column-count status appended below the tab.
+    // Each block recreates the display so the status sits at the bottom of
+    // whatever block is currently growing.
     let mut display: Option<MultiLineDisplay> = None;
     let mut buf = vec![0.0_f32; READ_CHUNK];
     let stdin_rx = twanga_tui::spawn_line_reader();
+    let mut total_samples: u64 = 0;
+    let mut total_columns: u64 = 0;
 
     loop {
         if twanga_tui::is_shutdown_requested() {
@@ -887,6 +892,7 @@ fn run_recorder(
         }
         let n = stream.read(&mut buf);
         if n > 0 {
+            total_samples += n as u64;
             tuner.feed(&buf[..n]);
             for r in tuner.take_readings() {
                 if let Some(m) = effective.match_to_fret(r.detected, MAX_FRET) {
@@ -901,10 +907,17 @@ fn run_recorder(
 
                 // Every committed column gets written to alphaTex.
                 recording_writer.write_column(column_marks)?;
+                total_columns += 1;
 
                 // Display: refresh in place for ColumnTick, finalize for BlockComplete.
-                let d = display.get_or_insert_with(|| MultiLineDisplay::new(n_rows));
-                d.render(rows)?;
+                // We render n_rows tab strings + 1 status line below, so the
+                // multi-line display tracks n_rows + 1 rows.
+                let elapsed_secs = total_samples / sample_rate.max(1) as u64;
+                let elapsed = format_mmss(elapsed_secs);
+                let mut rows_with_status: Vec<String> = rows.clone();
+                rows_with_status.push(format!("  {elapsed} | {total_columns} cols"));
+                let d = display.get_or_insert_with(|| MultiLineDisplay::new(n_rows + 1));
+                d.render(&rows_with_status)?;
                 if is_block_complete {
                     // After render(), cursor sits on the line below the
                     // block — a blank println pushes the next block one
@@ -1169,7 +1182,22 @@ fn run_playback(
             }
 
             let column = &tab.columns[col_idx];
-            let rows = render_playback_rows(&tab, col_idx, PLAYBACK_WINDOW_COLS, name_width);
+            // Duration progress within the current loop iteration. For
+            // non-loop playback `loop_start = 0` and `loop_end =
+            // tab.columns.len()`, so this naturally reads as the full-tab
+            // elapsed/total. For section loops it resets at the top of
+            // each iteration, which matches how the user thinks about
+            // section practice.
+            let elapsed_secs = (col_idx - loop_start) as u64 * ms_per_col as u64 / 1000;
+            let total_secs = (loop_end - loop_start) as u64 * ms_per_col as u64 / 1000;
+            let rows = render_playback_rows(
+                &tab,
+                col_idx,
+                PLAYBACK_WINDOW_COLS,
+                name_width,
+                elapsed_secs,
+                total_secs,
+            );
             display.render(&rows)?;
 
             // Metronome tick on the downbeat of each beat.
@@ -1241,12 +1269,14 @@ fn parse_loop_spec(spec: Option<&str>, total: usize) -> Result<(usize, usize, bo
 
 /// Render the playback view: one row per string showing a window of columns
 /// centred on `current_col`, with the current column bracketed. Last row is a
-/// `[col / total]` progress line.
+/// `[col / total]` progress + `M:SS / M:SS` elapsed line.
 fn render_playback_rows(
     tab: &ParsedTab,
     current_col: usize,
     window_cols: usize,
     name_width: usize,
+    elapsed_secs: u64,
+    total_secs: u64,
 ) -> Vec<String> {
     let half = window_cols / 2;
     let start = current_col.saturating_sub(half);
@@ -1271,16 +1301,26 @@ fn render_playback_rows(
 
     let pad = format!("{:<width$}", "", width = name_width);
     rows.push(format!(
-        "{pad}   col {}/{}  (bar {}, beat {})",
+        "{pad}   col {}/{}  (bar {}, beat {})  {} / {}",
         current_col + 1,
         tab.columns.len(),
         current_col / tab.columns[0].duration_denom as usize + 1,
         (current_col % tab.columns[0].duration_denom as usize)
             / ((tab.columns[0].duration_denom / 4) as usize).max(1)
             + 1,
+        format_mmss(elapsed_secs),
+        format_mmss(total_secs),
     ));
 
     rows
+}
+
+/// Format seconds as `M:SS`. Shared between record + play; record uses it
+/// alone, play uses it on both sides of a `/`.
+fn format_mmss(total_secs: u64) -> String {
+    let m = total_secs / 60;
+    let s = total_secs % 60;
+    format!("{m}:{s:02}")
 }
 
 fn char_for_column(col: &alphatex::TabColumn, string_idx: usize) -> char {

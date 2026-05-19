@@ -10,6 +10,19 @@ dated section.
 
 ### Added
 
+- Live duration / progress display on every record + play surface.
+  - `twanga record`: a status line below the scrolling tab block
+    showing `M:SS | N cols` (elapsed wall-clock + total committed
+    columns). Refreshes every column tick.
+  - `twanga play`: the existing `col N/M (bar X, beat Y)` progress
+    line now also shows `M:SS / M:SS` (elapsed in the current loop
+    iteration / total length of the loop range). For non-loop
+    playback this reads as full-tab elapsed / total; for section
+    loops it resets at the top of each iteration.
+  - GUI Recorder: hint line below the renderer updates each tick to
+    `recording — M:SS / N cols (BPM, resolution)`. Stop message
+    also carries the final elapsed time.
+  - GUI Playback gets parity automatically when that screen lands.
 - Recording titles on both `twanga record` and the browser Recorder.
   CLI: new `--title` flag with the three-form pattern (`--title value`
   / `--title` bare → prompt / omitted → prompt). Filename derives from
