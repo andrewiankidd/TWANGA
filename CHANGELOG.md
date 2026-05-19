@@ -10,6 +10,74 @@ dated section.
 
 ### Added
 
+- **GUI Playback at full CLI parity.** New `#playback` screen with
+  a combined library list + per-tab playback view:
+  - **Library** — bundled examples (shipped via
+    `assets/examples/manifest.json` — same files the CLI reads
+    from disk) merged with user recordings from IndexedDB
+    (`twanga-tabs-v1`). Drop-zone import accepts local
+    `.alphatex` files. Per-row Load / Download / Delete (bundled
+    examples skip the latter two). User rows show a
+    `Backed up <when>` / `Never backed up` pill so the user can
+    see at a glance which recordings have been exported.
+  - **Per-tab view** — header (title / subtitle / file tempo +
+    tuning), tuning picker (third consumer of the shared
+    `makeTuningController` factory — see below) with full capo
+    support, BPM override (stepper + reset-to-file-tempo button),
+    loop range input (`off` / `full` / `START:END` — same syntax
+    as `twanga play --loop`), pre-roll count-in, metronome
+    toggle, wait-mode toggle, renderer dropdown (Tab / Highway),
+    Play / Pause / Stop transport with a Spacebar shortcut,
+    "Skipped:" preamble listing notes that couldn't be placed on
+    the transposed tuning. Tab renderer now smooth-scrolls
+    horizontally as the playhead crosses out of the visible band.
+- **Tab library module** (`frontend/web/lib/library.js`) backing
+  the Recorder save flow + Playback library. IndexedDB store
+  keyed by auto-increment integer; bundled examples merged in
+  lazily from the manifest. Stub `library-tauri.js` defines the
+  same shape for the future filesystem backend.
+- **Browser-storage warning layer** on the Recorder + Playback
+  screens (web only — Tauri's `is-tauri` body class hides the
+  warning). Persistent amber banner explains that browser
+  storage can be cleared; post-save toast offers a one-click
+  Download for safekeeping; per-entry "Backed up: <when>" tag
+  on library rows. `navigator.storage.persist()` requested
+  opportunistically on first save.
+- **WASM `WebParsedTab`** wrapping `twanga_tabs::alphatex::ParsedTab`
+  with accessors (`title`, `subtitle_display`, `tempo`,
+  `tuning_names`, `columns_count`, `column_at`, `capo_spec`) plus
+  `transpose_to` / `transpose_to_dropped_notes` for the playback
+  transpose flow. New `parse_alphatex(text)` free function.
+  3 new cargo tests covering the parse surface.
+
+### Changed
+
+- **Shared tuning + capo controller**
+  (`frontend/web/controllers/tuning.js`) consumed by Tuner,
+  Recorder, and Playback. Roughly ~400 lines of duplicated picker
+  + capo + per-string state-machine code collapsed into one
+  factory function. Vanilla ES module, no framework — preserves
+  the project's "no React" stance. Closes the BACKLOG item
+  explicitly tagged "once Playback adds a third consumer."
+- **User-tunings storage** extracted to its own ES module
+  (`frontend/web/lib/user-tunings.js`). Same
+  `twanga-user-tunings-v1` localStorage key + same `PresetEntry`
+  schema; now imported by the controller, the Tunings screen, and
+  the (eventual) library metadata.
+- **Recorder save flow** now persists to the library instead of
+  going straight to a download. Post-save toast offers Download
+  as a one-click action and records the export time via
+  `library.markDownloaded(id)` so the Library list can surface a
+  `Backed up <when>` tag.
+- **Recorder localStorage shape:** tuning + capo state moved into
+  the controller's separate `twanga-recorder-tuning-v1` key;
+  recorder-only settings (BPM, resolution, block width,
+  metronome, pre-roll) stay under `twanga-recorder-v1`. Users
+  see a one-time tuning + capo reset on upgrade — recoverable in
+  one click.
+
+### Added (earlier in this batch)
+
 - Pause / resume on `twanga record`, `twanga play`, and the browser
   Recorder. CLI: type `p` + Enter (or `pause`) to toggle; pause
   freezes the column-tick driver / playhead, resume continues at

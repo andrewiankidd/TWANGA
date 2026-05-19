@@ -17,10 +17,12 @@
 | Web Tunings screen: built-in + user-defined merged list, inline editor, capo round-trip | done |
 | Pluggable renderer system (registry + Tab + Highway built-in plugins, same path for future third-party renderers) | done |
 | Web tab recorder — mic → fret detection → alphaTex download (full parity with `twanga record`) | done |
-| **Web tab playback** — load `.alphatex` (drop-zone or bundled examples), scroll a playhead via the renderer host, wait / loop / metronome layered on top | next |
-| Recorder + Playback QoL pass across CLI + GUI: metronome on `record`, pre-roll / count-in, pause/resume, duration display, title prompt on `record`, "couldn't fit on fretboard" indicator on `record` + transpose. Each lands on both surfaces in the same commit batch so parity stays maintained ([BACKLOG.md](BACKLOG.md#recorder--playback-qol)). | follows |
-| Custom CLI subcommand `twanga tunings remove` for parity with the GUI's delete button | follows |
+| Web tab playback — library list (bundled examples + IDB-stored user recordings + drop-zone import), playhead-driven renderer, wait / loop / metronome / pre-roll / BPM override / transpose / pause | done |
+| Recorder + Playback QoL pass across CLI + GUI — title prompt on record, duration display, "couldn't fit on fretboard" indicator, metronome on record, pre-roll / count-in, pause / resume | done |
+| Shared `makeTuningController` widget consumed by Tuner + Recorder + Playback (closes the duplication backlog item) | done |
+| Custom CLI subcommand `twanga tunings remove` for parity with the GUI's delete button | next |
 | Bidirectional sync of `$CONFIG/twanga/tunings.toml` ↔ `localStorage` via a Tauri command | follows |
+| Tauri filesystem backend for the browser tab library — `library-tauri.js` reads `$CONFIG/twanga/recordings/` once the matching Tauri commands land in `twanga-app` | follows |
 | Chord trainer with polyphonic *verification* (not transcription) | follows |
 | Slow-down practice (time-stretch via `rubato` or signalsmith-stretch) | follows |
 | Section looper / adaptive difficulty / tab fade-out | follows |

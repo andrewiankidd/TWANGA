@@ -39,10 +39,20 @@ Three of the four CLI surfaces have GUI counterparts at 1:1 parity. The fourth
   `match_pitch_to_fret` against the active tuning + capo (same algorithm as the
   CLI's recorder, same `MAX_FRET=20` ceiling). Column-by-column commits at
   tempo, with the score fed to the active renderer plugin. Stop & Save →
-  `.alphatex` written by the same Rust `AlphaTexWriter` the CLI uses, downloaded
-  as `twanga-recording-<ISO-timestamp>.alphatex` — round-trips through
-  `twanga play --capo`. ✅ parity
-- **Playback** — not yet built. ⛔
+  `.alphatex` written by the same Rust `AlphaTexWriter` the CLI uses; entries
+  persist in the in-browser library (IndexedDB) and offer Download for
+  off-browser backup. ✅ parity
+- **Playback** — full `twanga play` parity. Library list combining
+  bundled examples (shipped via `assets/examples/manifest.json`) with
+  user recordings from IndexedDB; drop-zone for `.alphatex` imports.
+  Load a tab and you get the same renderer host as the Recorder, plus
+  transport controls (Play / Pause / Stop, Spacebar shortcut), wait
+  mode (mic + chromatic `WebTuner` + ±50 cents match), loop range
+  (`off` / `full` / `START:END`), BPM override (slider + reset), pre-roll
+  (count-in audible regardless of metronome flag), metronome toggle, and
+  pre-flight "Skipped:" preamble of any notes that wouldn't fit on the
+  transposed tuning. All controls use the same shared
+  `makeTuningController` factory the Tuner + Recorder use. ✅ parity
 
 ## Renderer plugin system
 
@@ -86,27 +96,26 @@ stays compact.
 
 ## What's next
 
-**Web Playback.** Load an alphaTex file (drop-zone or bundled examples),
-scroll a playhead through it via the renderer host, layer wait / loop /
-metronome controls on top. Closes the last whole-screen parity gap.
-
-**After Playback — Recorder + Playback QoL pass (CLI + GUI).** The Recorder
-work surfaced a set of items both surfaces are missing in equal measure,
-detailed in [BACKLOG.md](BACKLOG.md#recorder--playback-qol):
-
-- Metronome on `record` (play already has it; record doesn't).
-- Pre-roll / count-in on `record` and `play`.
-- Pause / resume on `record` and `play`.
-- Recording duration display on `record` and `play`.
-- Title prompt on `record` — writes `\title` to alphaTex + uses for filename.
-- "Couldn't fit on fretboard" indicator on `record` and on `play --tuning`
-  transposes (silently dropped today).
-
-Each lands on both surfaces in the same commit batch so parity stays
-maintained.
+**The GUI is now at full CLI parity for the four main surfaces** —
+Tuner, Tunings, Recorder, Playback. The QoL pass items the Recorder
+build surfaced (metronome on record, pre-roll, pause/resume, duration
+display, title prompt, fretboard-fit indicator) all shipped on both
+CLI and GUI; Playback inherited each one as it landed.
 
 **Smaller CLI follow-ons** ([ROADMAP.md](ROADMAP.md)):
 
 - `twanga tunings remove` subcommand (GUI has the delete button; CLI doesn't).
 - Tauri command to bidirectionally sync `$CONFIG/twanga/tunings.toml` ↔
   browser `localStorage` so custom tunings cross the CLI ↔ desktop-app boundary.
+
+**Tauri library backend** — `frontend/web/lib/library-tauri.js` is
+stubbed but unimplemented. Once Tauri commands `list_recordings` /
+`load_recording` / `save_recording` exist on the desktop side, the
+GUI's library reads from `$CONFIG/twanga/recordings/` instead of
+IndexedDB, the browser-storage warnings hide automatically, and CLI
+recordings show up in the desktop app's library list.
+
+**Beyond parity:** the practice mechanics, tab editor, and continuous-
+pitch (Audiosurf-mode) directions on [BACKLOG.md](BACKLOG.md) open up.
+None of them are committed yet — they need a real shape decision before
+they land on the roadmap.

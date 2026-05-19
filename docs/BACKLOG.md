@@ -17,10 +17,9 @@ The web frontend (`frontend/web/`) is shipped via GitHub Pages and wrapped by th
 
 ### Still owed
 
-- **Tab playback** — load `.alphatex` (drop-zone or bundled examples), scroll a playhead via the renderer host, wait / loop / metronome layered on top. Equivalent of `twanga play`.
-- **Tab library.** Drop-zone for local `.alphatex` files (no upload; processed entirely in the browser). Persist the list across sessions.
-- **Persist "last session" state** — last opened tab + position + selected tuning + capo. One-click resume.
+- **Persist "last session" state** — last opened tab + last column position. (Tuning + capo already persist via the controller.) One-click resume on next visit.
 - **`twanga tunings remove` CLI subcommand.** GUI has a per-row delete button; the CLI has no equivalent (users edit the TOML by hand). Adding `tunings remove <slug>` would close the only direction-reversed parity gap.
+- **Tauri filesystem library backend** — the `library-tauri.js` stub already mirrors the IDB backend's interface; once `list_recordings` / `load_recording` / `save_recording` Tauri commands land on the desktop side, the browser-storage warnings disappear and CLI recordings show up in the desktop library.
 
 ### Renderer plugin system (shipped)
 
@@ -214,7 +213,6 @@ Tuner-driven passive sample collection. The chore (tuning) becomes the data sour
 - **`twanga-import` crate?** Once OCR / Demucs / transcription pipelines arrive, isolating them in a single crate keeps the optional heavy dependencies out of the core build.
 - **Single internal arrangement format (TwangaTab).** Near-superset of MusicXML with instrument-agnostic extensions (tuning per string, fingering hints, folk-specific technique tags). All importers funnel into this; all renderers/players consume it.
 - **Three serialisation formats:** TwangaTab (internal) ↔ alphaTex (human-friendly paste/edit) ↔ MusicXML (interop). One model, three faces.
-- **Factor out shared "tuning + capo" widget in the web frontend.** Tuner and Recorder each carry their own ~250 lines of tuning-picker + capo (uniform + per-string) DOM wiring. Same logic, different element IDs. Refactor into a vanilla-JS factory function (`makeTuningController({ pickerEl, capoControlEl, perStringPanelEl, ... }) → controller`) — *no React*, *no framework*, just an ES module that hands back a controller object. Worth doing once the Playback screen lands and there's a third consumer.
 
 ## Explicit non-goals (do not build)
 
