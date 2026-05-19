@@ -36,13 +36,14 @@ enum Command {
     /// Live tuner — capture audio and show detected pitch vs the nearest target.
     /// Without `--tuning`, prompts to pick an instrument (or "no instrument" for a chromatic tuner).
     Tune {
-        /// Tuning preset. If omitted, the CLI prompts interactively.
-        #[arg(long)]
+        /// Tuning preset. Omit or pass `--tuning` with no value to be prompted;
+        /// pass `--tuning <slug>` to skip the prompt.
+        #[arg(long, num_args = 0..=1, default_missing_value = "")]
         tuning: Option<String>,
-        /// Capo, in semitones. `--capo 3` raises every string by 3 semitones;
-        /// `--capo "0,2,2,2,2,2"` is a per-string partial capo for drop-D-style
-        /// setups. Omit to be prompted (default 0 = no capo).
-        #[arg(long, allow_hyphen_values = true)]
+        /// Capo, in semitones. `--capo 3` is a uniform capo, `--capo "0,2,2,2,2,2"`
+        /// is per-string for drop-D-style setups. Omit or pass `--capo` with no
+        /// value to be prompted; default 0 = no capo.
+        #[arg(long, num_args = 0..=1, default_missing_value = "")]
         capo: Option<String>,
     },
     /// Play back a `.alphatex` recording. Scrolling cursor view, optional
@@ -54,12 +55,15 @@ enum Command {
         /// Re-tune the tab to a different instrument's tuning. Notes are
         /// transposed by absolute pitch — e.g. play a uke tab on banjo with
         /// `--tuning standard-banjo`. Notes outside the target instrument's
-        /// playable range are silently dropped.
-        #[arg(long)]
+        /// playable range are silently dropped. Omit or pass `--tuning` with
+        /// no value to be prompted.
+        #[arg(long, num_args = 0..=1, default_missing_value = "")]
         tuning: Option<String>,
-        /// Override the tempo from the file (BPM).
-        #[arg(long)]
-        bpm: Option<u32>,
+        /// Override the tempo from the file (BPM). Omit or pass `--bpm` with
+        /// no value to keep the file's tempo (no prompt — there's already a
+        /// sensible default from the file).
+        #[arg(long, num_args = 0..=1, default_missing_value = "")]
+        bpm: Option<String>,
         /// Disable the metronome click (default: on).
         #[arg(long)]
         no_metronome: bool,
@@ -77,30 +81,35 @@ enum Command {
         )]
         loop_spec: Option<String>,
         /// Capo position applied to the tab's tuning before pitch comparison.
-        /// `--capo 3` lifts every expected pitch by 3 semitones (your physical
-        /// capo). Omit to be prompted; default 0 = no capo.
-        #[arg(long, allow_hyphen_values = true)]
+        /// Omit or pass `--capo` with no value to be prompted; default 0 = no
+        /// capo. Falls back to whatever the file's `\subtitle` embedded if
+        /// neither flag nor prompt provides one.
+        #[arg(long, num_args = 0..=1, default_missing_value = "")]
         capo: Option<String>,
     },
     /// Live tab recorder — capture played notes as horizontal ASCII tab notation.
     /// Any argument left unset triggers an interactive prompt (with the default
     /// pre-filled — just press enter to accept).
     Record {
-        /// Tuning preset.
-        #[arg(long)]
+        /// Tuning preset. Omit or pass `--tuning` with no value to be prompted.
+        #[arg(long, num_args = 0..=1, default_missing_value = "")]
         tuning: Option<String>,
-        /// Tempo for the time grid (BPM).
-        #[arg(long)]
-        bpm: Option<u32>,
-        /// Note value per column. Accepts `1/4`, `1/8`, `1/16`, `1/32`.
-        #[arg(long)]
+        /// Tempo for the time grid (BPM, 20–400). Omit or pass `--bpm` with no
+        /// value to be prompted; default 120.
+        #[arg(long, num_args = 0..=1, default_missing_value = "")]
+        bpm: Option<String>,
+        /// Note value per column. Accepts `1/4`, `1/8`, `1/16`, `1/32`. Omit or
+        /// pass `--resolution` with no value to be prompted; default `1/8`.
+        #[arg(long, num_args = 0..=1, default_missing_value = "")]
         resolution: Option<String>,
-        /// Number of columns per scrolling block.
-        #[arg(long)]
-        block_width: Option<usize>,
+        /// Columns per scrolling block (4–200). Omit or pass `--block-width`
+        /// with no value to be prompted; default 32.
+        #[arg(long, num_args = 0..=1, default_missing_value = "")]
+        block_width: Option<String>,
         /// Capo position. `--capo 3` records as if every string is 3 semitones
-        /// higher; logged frets are capo-relative. Omit to be prompted.
-        #[arg(long, allow_hyphen_values = true)]
+        /// higher; logged frets are capo-relative. Omit or pass `--capo` with
+        /// no value to be prompted.
+        #[arg(long, num_args = 0..=1, default_missing_value = "")]
         capo: Option<String>,
     },
     /// List available audio input devices.
@@ -170,7 +179,6 @@ fn run_tunings_path() -> Result<()> {
 }
 
 fn run_tunings_add() -> Result<()> {
-    twanga_tui::motd::print_banner()?;
     eprintln!("Define a new tuning. Strings are entered in string-number order");
     eprintln!("(string 1 first), NOT pitch order — this matters for the banjo");
     eprintln!("5th-string drone and the ukulele's reentrant high G. For reentrant");
@@ -308,9 +316,19 @@ fn tune_menu_options() -> Vec<String> {
     v
 }
 
+/// Helper: treat an `Option<String>` as "explicit value present" only when
+/// the string is non-empty. With `num_args = 0..=1` + `default_missing_value
+/// = ""`, a bare `--flag` (no value) shows up as `Some("")` from clap — both
+/// `None` and `Some("")` mean "prompt me." Lets the same flag work as
+/// `--flag` (prompt), `--flag value` (use directly), or absent (prompt /
+/// default depending on subcommand).
+fn flag_value(arg: &Option<String>) -> Option<&str> {
+    arg.as_deref().filter(|s| !s.is_empty())
+}
+
 fn resolve_mode(arg: Option<String>) -> Result<TunerMode> {
-    if let Some(name) = arg {
-        let tuning = lookup_tuning(&name).ok_or_else(|| {
+    if let Some(name) = flag_value(&arg) {
+        let tuning = lookup_tuning(name).ok_or_else(|| {
             anyhow!(
                 "unknown preset '{name}'. options: {}",
                 known_slugs().join(", ")
@@ -332,14 +350,14 @@ fn resolve_mode(arg: Option<String>) -> Result<TunerMode> {
     }
 }
 
-/// Resolve a capo. If `arg` is provided, parse it against `tuning`'s string
-/// count. Otherwise, prompt for a uniform integer capo (default 0). Returns
-/// a no-op capo if not running on a terminal. The interactive prompt only
-/// supports uniform capos; partial capos must come from the `--capo` flag.
+/// Resolve a capo. If `arg` is a non-empty value, parse it against `tuning`'s
+/// string count. Otherwise (absent or bare `--capo`), prompt for a uniform
+/// integer (default 0). The interactive prompt only supports uniform capos;
+/// partial capos must come from the `--capo "0,2,2,..."` flag value.
 fn resolve_capo(arg: Option<String>, tuning: &Tuning) -> Result<Capo> {
     let n_strings = tuning.strings.len();
-    if let Some(spec) = arg {
-        return Capo::parse(&spec, n_strings).map_err(|e| anyhow!("{e}"));
+    if let Some(spec) = flag_value(&arg) {
+        return Capo::parse(spec, n_strings).map_err(|e| anyhow!("{e}"));
     }
     use std::io::IsTerminal;
     if !std::io::stdin().is_terminal() || !std::io::stderr().is_terminal() {
@@ -352,8 +370,8 @@ fn resolve_capo(arg: Option<String>, tuning: &Tuning) -> Result<Capo> {
 }
 
 fn resolve_tuning(arg: Option<String>) -> Result<Tuning> {
-    if let Some(name) = arg {
-        return lookup_tuning(&name).ok_or_else(|| {
+    if let Some(name) = flag_value(&arg) {
+        return lookup_tuning(name).ok_or_else(|| {
             anyhow!(
                 "unknown preset '{name}'. options: {}",
                 known_slugs().join(", ")
@@ -373,8 +391,8 @@ fn resolve_tuning(arg: Option<String>) -> Result<Tuning> {
 /// Non-TTY callers skip the prompt and get `None`, matching the previous
 /// behaviour where `play` without `--tuning` just used the file's tuning.
 fn resolve_play_tuning(arg: Option<String>, tab: &ParsedTab) -> Result<Option<String>> {
-    if arg.is_some() {
-        return Ok(arg);
+    if let Some(name) = flag_value(&arg) {
+        return Ok(Some(name.to_string()));
     }
     use std::io::IsTerminal;
     if !std::io::stdin().is_terminal() || !std::io::stderr().is_terminal() {
@@ -394,11 +412,15 @@ fn resolve_play_tuning(arg: Option<String>, tab: &ParsedTab) -> Result<Option<St
     }
 }
 
-/// If `arg` is provided, validate it; otherwise prompt with the default.
-fn resolve_bpm(arg: Option<u32>) -> Result<u32> {
-    if let Some(b) = arg {
-        validate_bpm(b)?;
-        return Ok(b);
+/// Resolve a BPM. If `arg` is a non-empty value, parse and validate. Otherwise
+/// (absent or bare `--bpm`) prompt with the default.
+fn resolve_bpm(arg: Option<String>) -> Result<u32> {
+    if let Some(s) = flag_value(&arg) {
+        let n: u32 = s
+            .parse()
+            .map_err(|_| anyhow!("invalid BPM '{s}' (expected an integer)"))?;
+        validate_bpm(n)?;
+        return Ok(n);
     }
     twanga_tui::prompt_parsed("Tempo (BPM)", DEFAULT_BPM, |s| {
         let n: u32 = s
@@ -417,10 +439,24 @@ fn validate_bpm(n: u32) -> Result<()> {
     }
 }
 
-/// If `arg` is provided, parse it; otherwise prompt from the fixed list.
+/// Resolve a `play --bpm` override. Like `resolve_bpm` but the "absent" case
+/// returns `None` (let the file's tempo win) instead of prompting — no point
+/// asking the user to retype a value that's already in the file.
+fn resolve_bpm_override(arg: Option<String>) -> Result<Option<u32>> {
+    if let Some(s) = flag_value(&arg) {
+        let n: u32 = s
+            .parse()
+            .map_err(|_| anyhow!("invalid BPM '{s}' (expected an integer)"))?;
+        validate_bpm(n)?;
+        return Ok(Some(n));
+    }
+    Ok(None)
+}
+
+/// If `arg` is a non-empty value, parse it; otherwise prompt from the fixed list.
 fn resolve_resolution(arg: Option<String>) -> Result<u32> {
-    if let Some(r) = arg {
-        return parse_resolution(&r);
+    if let Some(r) = flag_value(&arg) {
+        return parse_resolution(r);
     }
     const LABELS: &[&str] = &["1/4", "1/8", "1/16", "1/32"];
     const DENOMS: &[u32] = &[4, 8, 16, 32];
@@ -432,11 +468,15 @@ fn resolve_resolution(arg: Option<String>) -> Result<u32> {
     Ok(DENOMS[idx])
 }
 
-/// If `arg` is provided, validate it; otherwise prompt with the default.
-fn resolve_block_width(arg: Option<usize>) -> Result<usize> {
-    if let Some(b) = arg {
-        validate_block_width(b)?;
-        return Ok(b);
+/// If `arg` is a non-empty value, parse and validate; otherwise prompt with
+/// the default.
+fn resolve_block_width(arg: Option<String>) -> Result<usize> {
+    if let Some(s) = flag_value(&arg) {
+        let n: usize = s
+            .parse()
+            .map_err(|_| anyhow!("invalid block width '{s}' (expected an integer)"))?;
+        validate_block_width(n)?;
+        return Ok(n);
     }
     twanga_tui::prompt_parsed(
         "Block width (columns per scrolling block)",
@@ -820,9 +860,12 @@ fn run_recorder(
 fn main() -> Result<()> {
     twanga_tui::install_ctrl_c_handler()?;
     let cli = Cli::parse();
+    // Banner once at the top — every subcommand gets it. It goes to stderr so
+    // piped stdout (e.g. `twanga devices | grep USB`, `twanga tunings path`
+    // inside a `$()`) stays clean; interactive users see a consistent splash.
+    twanga_tui::motd::print_banner()?;
     match cli.command {
         Command::Tune { tuning, capo } => {
-            twanga_tui::motd::print_banner()?;
             let mode = resolve_mode(tuning)?;
             let mode = match mode {
                 TunerMode::Chromatic => TunerMode::Chromatic,
@@ -841,7 +884,6 @@ fn main() -> Result<()> {
             block_width,
             capo,
         } => {
-            twanga_tui::motd::print_banner()?;
             let t = resolve_tuning(tuning)?;
             let c = resolve_capo(capo, &t)?;
             let bpm = resolve_bpm(bpm)?;
@@ -858,7 +900,6 @@ fn main() -> Result<()> {
             loop_spec,
             capo,
         } => {
-            twanga_tui::motd::print_banner()?;
             // Parse first so the tuning prompt can show what's in the file.
             let content = fs::read_to_string(&path)
                 .with_context(|| format!("failed to read '{}'", path.display()))?;
@@ -868,6 +909,7 @@ fn main() -> Result<()> {
                 return Err(anyhow!("'{}' has no notes to play", path.display()));
             }
             let tuning = resolve_play_tuning(tuning, &parsed)?;
+            let bpm = resolve_bpm_override(bpm)?;
             run_playback(
                 path,
                 parsed,
