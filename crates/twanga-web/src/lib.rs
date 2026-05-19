@@ -274,13 +274,16 @@ impl WebTuner {
             .map_err(|e| format!("malformed tuning shape: {e}"))?;
         Self::build_from_entry(entry, capo_spec, sample_rate)
     }
-}
 
-impl WebTuner {
     /// Native-Rust path used by both the wasm-exported `new_for_strings_custom*`
     /// constructors and the `cargo test` suite (where building a `JsValue`
     /// outside wasm isn't possible). Same validation + capo application as the
-    /// JS-facing wrappers.
+    /// JS-facing wrappers. Lives inside the `#[wasm_bindgen]` impl block on
+    /// purpose: closing the block here and reopening a plain `impl` for the
+    /// rest of the methods would silently drop them from the exported JS
+    /// class (cargo tests don't catch this — the macro is a no-op on
+    /// native — but the deployed WASM bundle would lose `name()`,
+    /// `string_labels()`, `feed()`, etc).
     fn build_from_entry(
         entry: twanga_core::PresetEntry,
         capo_spec: &str,
