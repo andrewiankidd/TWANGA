@@ -10,6 +10,7 @@ members = [
     "crates/twanga-cli",
     "crates/twanga-bench",
     "crates/twanga-app",
+    "crates/twanga-web",
 ]
 
 [workspace.package]

@@ -8,6 +8,10 @@
 # Frontend
 /frontend/dist/
 /frontend/node_modules/
+# wasm-bindgen build artifacts — regenerated from twanga-web via
+# `cargo build --target wasm32-unknown-unknown -p twanga-web --release`
+# followed by `wasm-bindgen --target web --out-dir frontend/web/pkg ...`.
+/frontend/web/pkg/
 
 # User recordings produced by `twanga record`
 /recordings/
