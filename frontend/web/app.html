@@ -713,6 +713,65 @@
             min-height: 200px;
         }
 
+        /* Recorder-specific settings (BPM / resolution / block-width). Each
+           setting is its own little card with a label + control(s). Disabled
+           styling kicks in while recording so the user can't change the
+           grid mid-take. */
+        .rec-settings {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.6rem;
+            margin-bottom: 1rem;
+        }
+        .rec-setting {
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 0.4rem 0.7rem;
+        }
+        .rec-setting label {
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: var(--muted);
+            font-weight: 700;
+        }
+        .rec-setting input[type="number"] {
+            width: 4em;
+            background: var(--background);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            color: var(--text);
+            padding: 0.25rem 0.4rem;
+            font-family: monospace;
+            font-size: 0.9rem;
+            text-align: center;
+        }
+        .rec-setting select {
+            background: var(--background);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            color: var(--text);
+            padding: 0.3rem 0.55rem;
+            font-family: "Montserrat", sans-serif;
+            font-size: 0.85rem;
+            cursor: pointer;
+        }
+        .rec-setting input:focus, .rec-setting select:focus {
+            outline: none;
+            border-color: var(--highlight);
+        }
+        .rec-settings.is-recording .rec-setting,
+        .rec-settings.is-recording input,
+        .rec-settings.is-recording select,
+        .rec-settings.is-recording button {
+            opacity: 0.5;
+            pointer-events: none;
+        }
+
         .coming-soon {
             background: var(--card);
             border: 1px solid var(--border);
@@ -840,12 +899,59 @@
             </div>
             <h2>Recorder</h2>
             <p class="subtitle">
-                Live tab recorder. Pick how you want to see your playing — Tab
-                grid (CLI-style), Highway (notes coming toward you), or any
-                renderer you've added. Mic capture and save-to-alphaTex land
-                in the next iteration; for now the screen previews the
-                renderer system with a sample score.
+                Live tab recorder. Pick a tuning, set the tempo grid, click
+                Start recording, and play. Detected notes land in the
+                current column at the matching string and fret — same pitch
+                matching the CLI uses. Stop when done, then Save to
+                download a <code>.alphatex</code> file that round-trips
+                through <code>twanga play</code>.
             </p>
+
+            <div class="tuning-picker" id="recorder-tuning-picker"></div>
+            <p class="picker-hint">
+                Don't see your tuning? <a href="#tunings">Define a custom one →</a>
+            </p>
+
+            <div class="active-tuning-row">
+                <div class="active-tuning-name" id="recorder-active-tuning-name">—</div>
+                <div class="capo-control" id="recorder-capo-control" hidden>
+                    <span class="capo-label">Capo</span>
+                    <div class="capo-uniform" id="recorder-capo-uniform">
+                        <button class="capo-btn" id="recorder-capo-down" aria-label="Decrease capo">−</button>
+                        <span class="capo-value" id="recorder-capo-value">0</span>
+                        <button class="capo-btn" id="recorder-capo-up" aria-label="Increase capo">+</button>
+                    </div>
+                    <button class="capo-mode-toggle" id="recorder-capo-mode-toggle"
+                            title="Toggle per-string capo (drop-D / banjo 5th-string / partial capos)">
+                        Per-string
+                    </button>
+                </div>
+            </div>
+            <div class="capo-per-string" id="recorder-capo-per-string" hidden></div>
+
+            <div class="rec-settings" id="recorder-settings">
+                <div class="rec-setting">
+                    <label for="recorder-bpm">BPM</label>
+                    <button class="capo-btn" id="recorder-bpm-down" aria-label="Decrease BPM">−</button>
+                    <input type="number" id="recorder-bpm" min="20" max="400" step="1" value="120">
+                    <button class="capo-btn" id="recorder-bpm-up" aria-label="Increase BPM">+</button>
+                </div>
+                <div class="rec-setting">
+                    <label for="recorder-resolution">Resolution</label>
+                    <select id="recorder-resolution">
+                        <option value="4">1/4</option>
+                        <option value="8" selected>1/8</option>
+                        <option value="16">1/16</option>
+                        <option value="32">1/32</option>
+                    </select>
+                </div>
+                <div class="rec-setting">
+                    <label for="recorder-blockwidth">Block width</label>
+                    <button class="capo-btn" id="recorder-blockwidth-down" aria-label="Decrease block width">−</button>
+                    <input type="number" id="recorder-blockwidth" min="4" max="200" step="1" value="32">
+                    <button class="capo-btn" id="recorder-blockwidth-up" aria-label="Increase block width">+</button>
+                </div>
+            </div>
 
             <div class="renderer-controls">
                 <label class="renderer-label" for="recorder-renderer-select">View</label>
@@ -854,9 +960,13 @@
 
             <div class="renderer-host" id="recorder-renderer-host"></div>
 
-            <p class="tuner-hint" id="recorder-hint">
-                renderer-only preview — mic capture coming next
-            </p>
+            <p class="tuner-hint" id="recorder-hint">pick a tuning, then click Start recording</p>
+
+            <div class="row">
+                <button class="action" id="recorder-start-btn">Start recording</button>
+                <button class="action secondary" id="recorder-save-btn" disabled>Save .alphatex</button>
+                <button class="action secondary" id="recorder-clear-btn">Clear</button>
+            </div>
         </section>
 
         <!-- Tunings screen -->
@@ -941,6 +1051,9 @@
             midi_from_name,
             midi_to_name,
             validate_preset_entry,
+            match_pitch_to_fret,
+            serialize_recording,
+            builtin_preset_entry,
             WebTuner,
         } from './pkg/twanga_web.js';
         import { registry as rendererRegistry } from './render/registry.js';
@@ -1047,17 +1160,17 @@
             renderTuningsScreen();
             wireAddTuningForm();
 
-            // Renderer system — register the built-in plugins and wire the
-            // Recorder host's dropdown. Built-ins use the exact same
-            // `registry.register` call path that a third-party plugin
-            // would; the host code below never branches on plugin id.
+            // Renderer system — register the built-in plugins. The
+            // Recorder + (later) Playback screens consume the same
+            // registry. Built-ins use the exact same `registry.register`
+            // call path a third-party plugin would; the host code below
+            // never branches on plugin id.
             installBuiltinRenderers();
-            wireRendererHost({
-                selectId: 'recorder-renderer-select',
-                hostId: 'recorder-renderer-host',
-                storageKey: 'twanga-recorder-renderer-v1',
-                initialScore: sampleScore(),
-            });
+
+            // Recorder screen — full CLI-parity controls (tuning, capo,
+            // BPM, resolution, block-width) plus the renderer dropdown,
+            // mic capture loop, and save-to-alphaTex.
+            initRecorder();
 
             // Menu navigation.
             document.querySelectorAll('[data-screen]').forEach((btn) => {
@@ -1587,91 +1700,134 @@
         }
 
         // ----------------------------------------------------------------
-        // Live microphone capture via Web Audio
+        // Shared mic session (used by Tuner and Recorder)
         // ----------------------------------------------------------------
         //
-        // Held-state singleton: at most one AudioContext + one MediaStream
-        // active at a time. Re-clicking "Start mic" while it's already
-        // running is a no-op via the running flag in the click handler.
+        // At most one AudioContext + one MediaStream active at a time. The
+        // *consumer* is whichever screen called `start()` last — its
+        // `onSamples` callback receives every chunk from the AudioWorklet.
+        // Starting a second consumer implicitly stops the previous one, so
+        // the user can never accidentally run Tuner and Recorder against
+        // the same mic at the same time.
+        //
+        // `consumerName` is just a label used by stop() so a screen can
+        // tell "did *I* stop my own session, or did someone else take
+        // over?" — Tuner doesn't want to update its mic button if Recorder
+        // grabbed the mic via screen navigation.
+
+        const micSession = {
+            ctx: null,
+            stream: null,
+            node: null,
+            source: null,
+            consumerName: null,
+
+            isRunning() { return this.ctx !== null; },
+
+            sampleRate() { return this.ctx?.sampleRate ?? 48_000; },
+
+            async start({ onSamples, consumerName }) {
+                if (this.isRunning()) this.stop();
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    audio: {
+                        // Disable browser preprocessing — pitch detection
+                        // wants the raw signal, not Chrome's voice-call
+                        // cleanup.
+                        echoCancellation: false,
+                        noiseSuppression: false,
+                        autoGainControl: false,
+                    },
+                });
+                const ctx = new (window.AudioContext || window.webkitAudioContext)();
+                await ctx.audioWorklet.addModule('audio-worklet.js');
+                const source = ctx.createMediaStreamSource(stream);
+                const node = new AudioWorkletNode(ctx, 'pitch-processor');
+                node.port.onmessage = (e) => onSamples(e.data);
+                // Connect source → worklet but NOT worklet → destination,
+                // otherwise the mic would loop back through the speakers
+                // and the YIN detector would chase its own tail.
+                source.connect(node);
+                this.ctx = ctx;
+                this.stream = stream;
+                this.node = node;
+                this.source = source;
+                this.consumerName = consumerName;
+                return ctx.sampleRate;
+            },
+
+            stop() {
+                if (!this.isRunning()) return;
+                try {
+                    this.source?.disconnect();
+                    this.node?.disconnect();
+                    this.stream?.getTracks().forEach((t) => t.stop());
+                    this.ctx?.close();
+                } catch (e) {
+                    console.warn('mic teardown error (ignored)', e);
+                }
+                this.ctx = null;
+                this.stream = null;
+                this.node = null;
+                this.source = null;
+                this.consumerName = null;
+            },
+        };
+
+        // Backwards-compatible alias so old call sites keep working until
+        // we finish migrating them. `audioState.ctx` is read by
+        // `rebuildTuner()` to find the live mic sample rate.
         const audioState = {
-            running: false,
-            ctx: null,       // AudioContext
-            stream: null,    // MediaStream from getUserMedia
-            node: null,      // AudioWorkletNode
-            source: null,    // MediaStreamSource
+            get running() { return micSession.isRunning() && micSession.consumerName === 'tuner'; },
+            get ctx() { return micSession.consumerName === 'tuner' ? micSession.ctx : null; },
         };
 
         async function startMic() {
             el('tuner-hint').textContent = 'requesting microphone…';
-            const stream = await navigator.mediaDevices.getUserMedia({
-                audio: {
-                    // Disable browser preprocessing — pitch detection wants
-                    // the raw signal, not Chrome's voice-call cleanup.
-                    echoCancellation: false,
-                    noiseSuppression: false,
-                    autoGainControl: false,
+            const sr = await micSession.start({
+                consumerName: 'tuner',
+                onSamples: (samples) => {
+                    if (!tunerState.tuner) return;
+                    tunerState.tuner.feed(samples);
+                    const readings = tunerState.tuner.take_readings();
+                    if (readings.length > 0) applyReadings(readings);
                 },
             });
-            const ctx = new (window.AudioContext || window.webkitAudioContext)();
-            await ctx.audioWorklet.addModule('audio-worklet.js');
-
-            // Hand the live AudioContext to audioState BEFORE rebuilding the
-            // tuner so `rebuildTuner` picks up the actual sample rate
-            // (44.1k or 48k depending on hardware). YIN's frequency math
-            // depends on the sample rate so this matters — feeding a 48k
-            // tuner with 44.1k samples would show every note ~80 cents flat.
-            audioState.ctx = ctx;
+            // Rebuild AFTER the session is open so the tuner picks up the
+            // live sample rate (44.1 vs 48 kHz depending on hardware) —
+            // feeding a 48k tuner with 44.1k samples would show every note
+            // ~80 cents flat.
+            tunerState.sampleRate = sr;
             rebuildTuner();
-            const sr = ctx.sampleRate;
-
-            const source = ctx.createMediaStreamSource(stream);
-            const node = new AudioWorkletNode(ctx, 'pitch-processor');
-
-            node.port.onmessage = (e) => {
-                if (!tunerState.tuner) return;
-                tunerState.tuner.feed(e.data);
-                const readings = tunerState.tuner.take_readings();
-                if (readings.length > 0) applyReadings(readings);
-            };
-
-            // Connect source → worklet, but DON'T connect worklet → destination.
-            // Otherwise the mic would loop back through the speakers and the
-            // YIN detector would chase its own tail.
-            source.connect(node);
-
-            audioState.running = true;
-            // audioState.ctx already set above (so rebuildTuner could read the SR).
-            audioState.stream = stream;
-            audioState.node = node;
-            audioState.source = source;
-
             el('mic-btn').textContent = 'Stop mic';
             el('tuner-hint').textContent = `listening… (${Math.round(sr)} Hz mic)`;
         }
 
         function stopMic() {
-            if (!audioState.running) return;
-            try {
-                audioState.source?.disconnect();
-                audioState.node?.disconnect();
-                audioState.stream?.getTracks().forEach((t) => t.stop());
-                audioState.ctx?.close();
-            } catch (e) {
-                console.warn('stopMic cleanup error (ignored)', e);
-            }
-            audioState.running = false;
-            audioState.ctx = null;
-            audioState.stream = null;
-            audioState.node = null;
-            audioState.source = null;
+            // Only react if WE are the active consumer; if Recorder took
+            // over via screen navigation, don't clobber its UI.
+            if (micSession.consumerName !== 'tuner') return;
+            micSession.stop();
             el('mic-btn').textContent = 'Start mic';
             el('tuner-hint').textContent = 'mic stopped';
         }
 
-        // If the user navigates away from the tuner screen, stop the mic so
-        // we're not silently holding the permission + draining battery.
+        // Mic-session ownership on screen changes. Each mic-using screen
+        // releases the session when the user navigates away — otherwise
+        // we'd hold the permission + drain battery on the previous
+        // screen's mic indefinitely.
         window.addEventListener('hashchange', () => {
-            if (location.hash.replace(/^#/, '') !== 'tuner') stopMic();
+            const screen = location.hash.replace(/^#/, '');
+            if (screen === 'tuner') {
+                // Navigated INTO tuner — release recorder's mic if it's
+                // still holding it (e.g. user mid-recording switched tabs).
+                if (micSession.consumerName === 'recorder') micSession.stop();
+            } else if (screen === 'recorder') {
+                // Navigated INTO recorder — release tuner's mic.
+                stopMic();
+            } else {
+                // Anywhere else — release whichever session is active.
+                micSession.stop();
+            }
         });
 
         // Whenever the user lands back on the menu, re-roll the splash. The
@@ -2125,6 +2281,581 @@
                 ],
             };
         }
+
+        // ----------------------------------------------------------------
+        // Recorder screen — full CLI parity
+        // ----------------------------------------------------------------
+        //
+        // Mirrors `twanga record` exactly:
+        // - Tuning picker (built-in + user)        ↔ `--tuning <slug>`
+        // - Capo (uniform + per-string)            ↔ `--capo`
+        // - BPM input (20–400, default 120)        ↔ `--bpm`
+        // - Resolution select (1/4..1/32)          ↔ `--resolution`
+        // - Block-width input (4–200, default 32)  ↔ `--block-width`
+        // - Mic loop → pitch → match_to_fret       ↔ same Rust helpers via WASM
+        // - Save → alphaTex via AlphaTexWriter     ↔ same crate the CLI uses
+        //
+        // State is kept separate from `tunerState` so the two screens have
+        // independent settings (matches CLI invocation semantics — `tune`
+        // and `record` don't share args). Most DOM-wiring helpers parallel
+        // the Tuner's; a future refactor could factor out a shared
+        // tuning-picker widget, but for now the duplication is contained
+        // and obvious.
+
+        const RECORDER_STORAGE_KEY = 'twanga-recorder-v1';
+        const MAX_FRET = 20; // matches twanga-cli::main::MAX_FRET
+
+        const recState = {
+            // Settings (persisted)
+            mode: null,             // tuning slug, never 'chromatic' for Recorder
+            capoMode: 'uniform',
+            capo: 0,
+            capoSpec: [],
+            baseLabels: [],
+            bpm: 120,
+            resolutionDenom: 8,
+            blockWidth: 32,
+
+            // Recording-time ephemeral
+            isRecording: false,
+            score: null,            // { tempo, tuning, columns, ... }
+            currentMarks: [],       // marks accumulating in the current uncommitted column
+            recordingStartTime: 0,
+            msPerColumn: 0,
+            committedColumns: 0,
+            tickHandle: null,
+            chromaticTuner: null,   // WebTuner in chromatic mode, fed by mic
+            presetEntry: null,      // PresetEntry JSON of the active tuning (cached for match calls)
+
+            rendererController: null,
+        };
+
+        function initRecorder() {
+            recHydrateFromStorage();
+            recRenderTuningPicker();
+            recWireCapoControl();
+            recWireSettings();
+            recWireButtons();
+            recState.rendererController = wireRendererHost({
+                selectId: 'recorder-renderer-select',
+                hostId: 'recorder-renderer-host',
+                storageKey: 'twanga-recorder-renderer-v1',
+                initialScore: recEmptyScoreOrSample(),
+            });
+            // Saved-state restore: select the saved tuning if it still
+            // exists in the merged registry, else fall back to the first
+            // available built-in.
+            const builtins = builtin_tuning_slugs();
+            const allUserSlugs = loadUserTunings().map((e) => e.slug);
+            const allValid = [...builtins, ...allUserSlugs];
+            const initial = allValid.includes(recState.mode) ? recState.mode : builtins[0];
+            if (initial) recSelectTuning(initial);
+        }
+
+        // ---- Persistence ----------------------------------------------------
+
+        function recHydrateFromStorage() {
+            let saved = {};
+            try {
+                const raw = localStorage.getItem(RECORDER_STORAGE_KEY);
+                if (raw) saved = JSON.parse(raw) ?? {};
+            } catch (e) {
+                console.warn('recorder localStorage read failed', e);
+            }
+            recState.mode = typeof saved.mode === 'string' ? saved.mode : null;
+            recState.capoMode = saved.capoMode === 'per-string' ? 'per-string' : 'uniform';
+            recState.capo = Number.isInteger(saved.capo) && saved.capo >= 0 && saved.capo <= MAX_CAPO
+                ? saved.capo : 0;
+            recState.capoSpec = Array.isArray(saved.capoSpec)
+                ? saved.capoSpec.map((v) => Number.isInteger(v) && v >= 0 && v <= MAX_CAPO ? v : 0)
+                : [];
+            recState.bpm = Number.isInteger(saved.bpm) && saved.bpm >= 20 && saved.bpm <= 400
+                ? saved.bpm : 120;
+            recState.resolutionDenom = [4, 8, 16, 32].includes(saved.resolutionDenom)
+                ? saved.resolutionDenom : 8;
+            recState.blockWidth = Number.isInteger(saved.blockWidth) && saved.blockWidth >= 4 && saved.blockWidth <= 200
+                ? saved.blockWidth : 32;
+        }
+
+        function recSaveToStorage() {
+            try {
+                localStorage.setItem(RECORDER_STORAGE_KEY, JSON.stringify({
+                    mode: recState.mode,
+                    capoMode: recState.capoMode,
+                    capo: recState.capo,
+                    capoSpec: recState.capoSpec,
+                    bpm: recState.bpm,
+                    resolutionDenom: recState.resolutionDenom,
+                    blockWidth: recState.blockWidth,
+                }));
+            } catch (e) {
+                console.warn('recorder localStorage write failed', e);
+            }
+        }
+
+        // ---- Tuning picker --------------------------------------------------
+
+        function recAllKnownSlugs() {
+            // Same merge logic as the Tuner's `allKnownSlugs`, minus the
+            // chromatic sentinel — recording against the chromatic tuner
+            // makes no sense (there are no strings to record to).
+            const builtinSet = new Set(builtin_tuning_slugs());
+            const users = loadUserTunings()
+                .map((e) => e.slug)
+                .filter((s) => !builtinSet.has(s));
+            return [...builtin_tuning_slugs(), ...users];
+        }
+
+        function recRenderTuningPicker() {
+            const picker = el('recorder-tuning-picker');
+            picker.textContent = '';
+            for (const slug of recAllKnownSlugs()) {
+                const btn = document.createElement('button');
+                btn.className = 'tuning-option';
+                btn.dataset.slug = slug;
+                btn.textContent = shortName(slug);
+                btn.title = fullName(slug);
+                btn.addEventListener('click', () => recSelectTuning(slug));
+                picker.appendChild(btn);
+            }
+        }
+
+        function recSelectTuning(slug) {
+            if (recState.isRecording) return; // never swap mid-take
+            recState.mode = slug;
+            recState.baseLabels = computeBaseLabels(slug);
+            if (recState.capoSpec.length !== recState.baseLabels.length) {
+                recState.capoSpec = recState.baseLabels.map(() => 0);
+            }
+            // Cache the PresetEntry shape for `match_pitch_to_fret` and
+            // `serialize_recording`. User tunings are already in this shape
+            // in localStorage; built-ins go through `builtin_preset_entry`.
+            const user = userTuningBySlug(slug);
+            recState.presetEntry = user ?? builtin_preset_entry(slug);
+
+            document.querySelectorAll('#recorder-tuning-picker .tuning-option').forEach((b) => {
+                b.classList.toggle('active', b.dataset.slug === slug);
+            });
+            el('recorder-active-tuning-name').textContent = fullName(slug);
+
+            recUpdateCapoDisplay();
+            recRenderPerStringCapo();
+            // Reset any in-progress score — switching tuning invalidates
+            // string indices, so previously-recorded columns wouldn't make
+            // sense anyway.
+            recClear();
+            recSaveToStorage();
+        }
+
+        // ---- Capo (uniform + per-string) ------------------------------------
+
+        function recWireCapoControl() {
+            el('recorder-capo-down').addEventListener('click', () => {
+                if (recState.isRecording || recState.capo <= 0) return;
+                recState.capo -= 1;
+                recOnCapoChanged();
+            });
+            el('recorder-capo-up').addEventListener('click', () => {
+                if (recState.isRecording || recState.capo >= MAX_CAPO) return;
+                recState.capo += 1;
+                recOnCapoChanged();
+            });
+            el('recorder-capo-mode-toggle').addEventListener('click', () => {
+                if (recState.isRecording) return;
+                if (recState.capoMode === 'uniform') {
+                    recState.capoMode = 'per-string';
+                    recState.capoSpec = Array.from(
+                        { length: recState.baseLabels.length },
+                        () => recState.capo,
+                    );
+                } else {
+                    recState.capoMode = 'uniform';
+                }
+                recUpdateCapoDisplay();
+                recRenderPerStringCapo();
+                recClear();
+                recSaveToStorage();
+            });
+            recUpdateCapoDisplay();
+        }
+
+        function recOnCapoChanged() {
+            recUpdateCapoDisplay();
+            recClear(); // capo change → previous columns reference wrong frets
+            recSaveToStorage();
+        }
+
+        function recUpdateCapoDisplay() {
+            el('recorder-capo-value').textContent = recState.capo.toString();
+            el('recorder-capo-down').disabled = recState.capo <= 0;
+            el('recorder-capo-up').disabled = recState.capo >= MAX_CAPO;
+            el('recorder-capo-control').hidden = !recState.mode;
+            el('recorder-capo-mode-toggle').classList.toggle(
+                'active', recState.capoMode === 'per-string',
+            );
+            el('recorder-capo-uniform').hidden = recState.capoMode === 'per-string';
+            el('recorder-capo-per-string').hidden =
+                !recState.mode || recState.capoMode !== 'per-string';
+        }
+
+        function recRenderPerStringCapo() {
+            const panel = el('recorder-capo-per-string');
+            panel.textContent = '';
+            if (!recState.mode || recState.capoMode !== 'per-string') return;
+
+            const header = document.createElement('div');
+            header.className = 'ps-header';
+            header.textContent = 'Per-string capo (semitones)';
+            panel.appendChild(header);
+
+            recState.baseLabels.forEach((label, idx) => {
+                const row = document.createElement('div');
+                row.className = 'capo-string-row';
+
+                const lab = document.createElement('span');
+                lab.className = 'ps-label';
+                lab.textContent = `#${idx + 1} (${label})`;
+                row.appendChild(lab);
+
+                const down = document.createElement('button');
+                down.className = 'capo-btn';
+                down.textContent = '−';
+                const value = document.createElement('span');
+                value.className = 'capo-value';
+                const up = document.createElement('button');
+                up.className = 'capo-btn';
+                up.textContent = '+';
+
+                const refresh = () => {
+                    const v = recState.capoSpec[idx] ?? 0;
+                    value.textContent = String(v);
+                    down.disabled = v <= 0 || recState.isRecording;
+                    up.disabled = v >= MAX_CAPO || recState.isRecording;
+                };
+                down.addEventListener('click', () => {
+                    if (recState.isRecording) return;
+                    if ((recState.capoSpec[idx] ?? 0) > 0) {
+                        recState.capoSpec[idx] -= 1;
+                        refresh();
+                        recClear();
+                        recSaveToStorage();
+                    }
+                });
+                up.addEventListener('click', () => {
+                    if (recState.isRecording) return;
+                    if ((recState.capoSpec[idx] ?? 0) < MAX_CAPO) {
+                        recState.capoSpec[idx] = (recState.capoSpec[idx] ?? 0) + 1;
+                        refresh();
+                        recClear();
+                        recSaveToStorage();
+                    }
+                });
+                refresh();
+
+                row.appendChild(down);
+                row.appendChild(value);
+                row.appendChild(up);
+                panel.appendChild(row);
+            });
+        }
+
+        function recCapoIsActive() {
+            return recState.capoMode === 'per-string'
+                ? recState.capoSpec.some((v) => v > 0)
+                : recState.capo > 0;
+        }
+
+        function recCapoSpecString() {
+            // CLI capo syntax: `"3"` uniform / `"0,2,2,2,2,2"` per-string.
+            // Empty string + the `capoIsActive` gate above lets callers
+            // skip the no-op capo path entirely.
+            return recState.capoMode === 'per-string'
+                ? recState.capoSpec.join(',')
+                : String(recState.capo);
+        }
+
+        // ---- Settings (BPM, resolution, block-width) -----------------------
+
+        function recWireSettings() {
+            const bpmInput = el('recorder-bpm');
+            const bwInput = el('recorder-blockwidth');
+            const resSelect = el('recorder-resolution');
+            bpmInput.value = String(recState.bpm);
+            bwInput.value = String(recState.blockWidth);
+            resSelect.value = String(recState.resolutionDenom);
+
+            const clampInt = (raw, min, max, fallback) => {
+                const n = Number.parseInt(raw, 10);
+                if (Number.isNaN(n)) return fallback;
+                return Math.max(min, Math.min(max, n));
+            };
+
+            const stepBpm = (delta) => {
+                if (recState.isRecording) return;
+                recState.bpm = clampInt(recState.bpm + delta, 20, 400, 120);
+                bpmInput.value = String(recState.bpm);
+                recSaveToStorage();
+            };
+            el('recorder-bpm-down').addEventListener('click', () => stepBpm(-1));
+            el('recorder-bpm-up').addEventListener('click', () => stepBpm(+1));
+            bpmInput.addEventListener('change', () => {
+                if (recState.isRecording) { bpmInput.value = String(recState.bpm); return; }
+                recState.bpm = clampInt(bpmInput.value, 20, 400, 120);
+                bpmInput.value = String(recState.bpm);
+                recSaveToStorage();
+            });
+
+            const stepBw = (delta) => {
+                if (recState.isRecording) return;
+                recState.blockWidth = clampInt(recState.blockWidth + delta, 4, 200, 32);
+                bwInput.value = String(recState.blockWidth);
+                recSaveToStorage();
+            };
+            el('recorder-blockwidth-down').addEventListener('click', () => stepBw(-1));
+            el('recorder-blockwidth-up').addEventListener('click', () => stepBw(+1));
+            bwInput.addEventListener('change', () => {
+                if (recState.isRecording) { bwInput.value = String(recState.blockWidth); return; }
+                recState.blockWidth = clampInt(bwInput.value, 4, 200, 32);
+                bwInput.value = String(recState.blockWidth);
+                recSaveToStorage();
+            });
+
+            resSelect.addEventListener('change', () => {
+                if (recState.isRecording) { resSelect.value = String(recState.resolutionDenom); return; }
+                const v = clampInt(resSelect.value, 4, 32, 8);
+                recState.resolutionDenom = [4, 8, 16, 32].includes(v) ? v : 8;
+                resSelect.value = String(recState.resolutionDenom);
+                recSaveToStorage();
+            });
+        }
+
+        // ---- Score model construction --------------------------------------
+
+        function recBuildScoreModel() {
+            // Build the score model the renderers consume. Tuning info goes
+            // in post-capo so the renderer's string labels match what the
+            // user is actually playing. The alphaTex writer (in WASM) uses
+            // the base tuning + capo separately, so the saved file is
+            // correctly re-tunable via `twanga play --capo`.
+            const baseStrings = recState.presetEntry?.strings ?? [];
+            const labels = recState.baseLabels;
+            return {
+                tempo: recState.bpm,
+                resolutionDenom: recState.resolutionDenom,
+                columnsPerBar: recState.resolutionDenom,
+                tuning: {
+                    name: fullName(recState.mode),
+                    // Use post-capo labels if available; baseStrings have
+                    // the underlying MIDI (which the renderer doesn't read
+                    // anyway, but include for completeness).
+                    strings: labels.length === baseStrings.length
+                        ? labels.map((name, i) => ({ name, midi: baseStrings[i].midi }))
+                        : baseStrings,
+                },
+                capoSpec: recCapoSpecString(),
+                columns: [],
+            };
+        }
+
+        function recEmptyScoreOrSample() {
+            // Before any tuning is selected, show a small placeholder so
+            // the renderer host has something to draw and the user can
+            // preview both views. Once `recSelectTuning` runs, the score
+            // is replaced with a real (empty) one matching the active
+            // tuning.
+            if (!recState.mode) return sampleScore();
+            return recBuildScoreModel();
+        }
+
+        // ---- Recording controls --------------------------------------------
+
+        function recWireButtons() {
+            el('recorder-start-btn').addEventListener('click', () => {
+                if (recState.isRecording) {
+                    recStopRecording('Recording stopped.');
+                } else {
+                    recStartRecording().catch((err) => {
+                        console.error('recStartRecording failed', err);
+                        el('recorder-hint').textContent =
+                            'failed to start: ' + (err?.message ?? err);
+                    });
+                }
+            });
+            el('recorder-save-btn').addEventListener('click', recSave);
+            el('recorder-clear-btn').addEventListener('click', () => {
+                if (recState.isRecording) return;
+                recClear();
+            });
+        }
+
+        async function recStartRecording() {
+            if (!recState.mode) {
+                el('recorder-hint').textContent = 'pick a tuning first';
+                return;
+            }
+            // Fresh score for this take.
+            recState.score = recBuildScoreModel();
+            recState.currentMarks = recState.baseLabels.map(() => null);
+            recState.committedColumns = 0;
+            recState.rendererController?.setScore(recState.score);
+            recState.rendererController?.setPlayhead(0);
+
+            // Chromatic WebTuner gives us raw detected pitches (silence-gated)
+            // without imposing the string-distance gate that would clip
+            // high-fret notes. We do our own fret-aware matching via
+            // `match_pitch_to_fret` against the base PresetEntry + capo.
+            const sr = micSession.sampleRate(); // may be 48k stub before mic is up
+            recState.chromaticTuner = WebTuner.new_chromatic(sr);
+
+            try {
+                const liveSr = await micSession.start({
+                    consumerName: 'recorder',
+                    onSamples: (samples) => {
+                        if (!recState.chromaticTuner) return;
+                        recState.chromaticTuner.feed(samples);
+                        const readings = recState.chromaticTuner.take_readings();
+                        for (const r of readings) {
+                            const m = match_pitch_to_fret(
+                                recState.presetEntry,
+                                recCapoIsActive() ? recCapoSpecString() : '',
+                                r.detected_hz,
+                                MAX_FRET,
+                            );
+                            if (m && Number.isInteger(m.string_idx) && Number.isInteger(m.fret)) {
+                                if (m.string_idx < recState.currentMarks.length) {
+                                    recState.currentMarks[m.string_idx] = m.fret;
+                                }
+                            }
+                        }
+                    },
+                });
+                // Rebuild the chromatic tuner against the actual live SR
+                // (44.1 vs 48 kHz). YIN's pitch math depends on it.
+                if (Math.round(liveSr) !== sr) {
+                    recState.chromaticTuner.free?.();
+                    recState.chromaticTuner = WebTuner.new_chromatic(liveSr);
+                }
+            } catch (err) {
+                recState.chromaticTuner?.free?.();
+                recState.chromaticTuner = null;
+                throw err;
+            }
+
+            // Column-tick driver — wall-clock based so missed JS timer fires
+            // don't drop columns. Same `240_000 / (bpm * resolution_denom)`
+            // formula the CLI uses (ms per column).
+            recState.msPerColumn = 240_000 / (recState.bpm * recState.resolutionDenom);
+            recState.recordingStartTime = performance.now();
+            recState.tickHandle = setInterval(recTick, Math.max(20, recState.msPerColumn / 4));
+
+            recState.isRecording = true;
+            el('recorder-start-btn').textContent = 'Stop recording';
+            el('recorder-save-btn').disabled = true;
+            el('recorder-clear-btn').disabled = true;
+            el('recorder-settings').classList.add('is-recording');
+            el('recorder-hint').textContent = `recording at ${recState.bpm} BPM, 1/${recState.resolutionDenom}`;
+        }
+
+        function recTick() {
+            if (!recState.isRecording) return;
+            const elapsed = performance.now() - recState.recordingStartTime;
+            const expected = Math.floor(elapsed / recState.msPerColumn);
+            while (recState.committedColumns < expected) {
+                recState.score.columns.push([...recState.currentMarks]);
+                recState.currentMarks = recState.baseLabels.map(() => null);
+                recState.committedColumns += 1;
+            }
+            recState.rendererController?.setScore(recState.score);
+            recState.rendererController?.setPlayhead(recState.committedColumns);
+        }
+
+        function recStopRecording(hintText) {
+            if (!recState.isRecording) return;
+            recState.isRecording = false;
+            if (recState.tickHandle) {
+                clearInterval(recState.tickHandle);
+                recState.tickHandle = null;
+            }
+            if (micSession.consumerName === 'recorder') micSession.stop();
+            recState.chromaticTuner?.free?.();
+            recState.chromaticTuner = null;
+
+            // Final partial-column commit, so we don't drop the marks the
+            // user played in the half-second before they hit Stop.
+            if (recState.currentMarks.some((m) => m !== null)) {
+                recState.score.columns.push([...recState.currentMarks]);
+                recState.currentMarks = recState.baseLabels.map(() => null);
+                recState.committedColumns += 1;
+            }
+            recState.rendererController?.setScore(recState.score);
+            recState.rendererController?.setPlayhead(Math.max(0, recState.committedColumns - 1));
+
+            el('recorder-start-btn').textContent = 'Start recording';
+            el('recorder-save-btn').disabled = recState.committedColumns === 0;
+            el('recorder-clear-btn').disabled = false;
+            el('recorder-settings').classList.remove('is-recording');
+            el('recorder-hint').textContent =
+                (hintText ?? 'stopped') + ' — ' + recState.committedColumns + ' columns captured';
+        }
+
+        function recClear() {
+            if (recState.isRecording) recStopRecording('Recording stopped (cleared).');
+            recState.score = recBuildScoreModel();
+            recState.currentMarks = recState.baseLabels.map(() => null);
+            recState.committedColumns = 0;
+            recState.rendererController?.setScore(recState.score);
+            recState.rendererController?.setPlayhead(0);
+            el('recorder-save-btn').disabled = true;
+            el('recorder-hint').textContent = recState.mode
+                ? 'cleared — click Start recording'
+                : 'pick a tuning, then click Start recording';
+        }
+
+        function recSave() {
+            if (!recState.mode || !recState.score || recState.score.columns.length === 0) {
+                el('recorder-hint').textContent = 'nothing recorded yet';
+                return;
+            }
+            let alphaTex;
+            try {
+                alphaTex = serialize_recording(
+                    recState.presetEntry,
+                    recCapoIsActive() ? recCapoSpecString() : '',
+                    recState.bpm,
+                    recState.resolutionDenom,
+                    recState.score.columns,
+                );
+            } catch (err) {
+                console.error('serialize_recording failed', err);
+                el('recorder-hint').textContent =
+                    'save failed: ' + (typeof err === 'string' ? err : err?.message ?? err);
+                return;
+            }
+
+            // Trigger a browser download. Filename mirrors the CLI's
+            // `recording-<timestamp>.alphatex` shape but uses ISO format
+            // so it sorts naturally in a file picker.
+            const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+            const blob = new Blob([alphaTex], { type: 'text/plain;charset=utf-8' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `twanga-recording-${stamp}.alphatex`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            setTimeout(() => URL.revokeObjectURL(url), 1000);
+            el('recorder-hint').textContent = `saved twanga-recording-${stamp}.alphatex`;
+        }
+
+        // Stop recording cleanly if the user navigates away mid-take —
+        // mic stays acquired until micSession.stop runs via the screen
+        // change handler, but the tick driver needs explicit teardown.
+        window.addEventListener('hashchange', () => {
+            if (location.hash.replace(/^#/, '') !== 'recorder' && recState.isRecording) {
+                recStopRecording('Recording stopped (left screen).');
+            }
+        });
 
         main().catch((e) => {
             el('splash').textContent = 'WASM load failed: ' + e;

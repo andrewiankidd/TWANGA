@@ -21,6 +21,19 @@ dated section.
 
 ### Added
 
+- Browser Recorder at full CLI parity. New screen with the same controls
+  `twanga record` exposes — tuning picker (built-in + user), uniform +
+  per-string capo, BPM (20-400), resolution (1/4..1/32), block width
+  (4-200) — all persisted to `localStorage`. Live mic capture pipes
+  through a chromatic `WebTuner`, runs `match_pitch_to_fret` against
+  the active tuning + capo for every detection (same algorithm
+  `twanga record` uses), accumulates hits into time columns at the
+  configured tempo, and feeds the score into the active renderer
+  (Tab or Highway). Stop and Save → a `.alphatex` file serialised
+  by the **same** `AlphaTexWriter` the CLI uses (new
+  `serialize_recording` WASM binding), so browser-saved recordings
+  round-trip through `twanga play --capo`. Files download with an
+  ISO-stamped `twanga-recording-<timestamp>.alphatex` name.
 - Pluggable renderer system in [frontend/web/render/](frontend/web/render/).
   A `RendererRegistry` holds plugin objects (`{ id, name, version, create }`)
   that return instances implementing `setScore` / `setPlayhead` / `destroy`.
