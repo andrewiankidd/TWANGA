@@ -21,22 +21,30 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # `friendly` is the stable, user-facing slug used for the archive
+          # filename (so `releases/latest/download/twanga-windows.zip` resolves
+          # the same URL release-to-release). The `target` triple is still in
+          # the extracted directory name + tagged into the release notes.
           - target: x86_64-pc-windows-msvc
             os: windows-latest
             archive: zip
             bin: twanga.exe
+            friendly: windows
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
             archive: tar.gz
             bin: twanga
+            friendly: linux
           - target: x86_64-apple-darwin
             os: macos-13
             archive: tar.gz
             bin: twanga
+            friendly: macos-intel
           - target: aarch64-apple-darwin
             os: macos-latest
             archive: tar.gz
             bin: twanga
+            friendly: macos-apple-silicon
 
     steps:
       - uses: actions/checkout@v4
@@ -67,36 +75,42 @@ jobs:
           else
             tag="${GITHUB_REF#refs/tags/}"
           fi
-          name="twanga-${tag}-${{ matrix.target }}"
+          # `staged` keeps the version + triple visible inside the archive
+          # (extracted dir tells you which release + which CPU you grabbed);
+          # `archive` is the stable user-facing filename (latest-download URL
+          # stays the same release-to-release).
+          staged="twanga-${tag}-${{ matrix.target }}"
+          archive="twanga-${{ matrix.friendly }}"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
-          echo "name=$name" >> "$GITHUB_OUTPUT"
+          echo "staged=$staged" >> "$GITHUB_OUTPUT"
+          echo "archive=$archive" >> "$GITHUB_OUTPUT"
 
       - name: Stage archive contents
         shell: bash
         run: |
-          name="${{ steps.meta.outputs.name }}"
-          stage="dist/$name"
-          mkdir -p "$stage/examples"
-          cp "target/${{ matrix.target }}/release/${{ matrix.bin }}" "$stage/"
-          cp README.md LICENSE-MIT LICENSE-APACHE "$stage/"
-          cp assets/examples/*.alphatex "$stage/examples/"
+          staged="${{ steps.meta.outputs.staged }}"
+          dir="dist/$staged"
+          mkdir -p "$dir/examples"
+          cp "target/${{ matrix.target }}/release/${{ matrix.bin }}" "$dir/"
+          cp README.md LICENSE-MIT LICENSE-APACHE "$dir/"
+          cp assets/examples/*.alphatex "$dir/examples/"
 
       - name: Pack zip
         if: matrix.archive == 'zip'
         shell: pwsh
         working-directory: dist
-        run: Compress-Archive -Path "${{ steps.meta.outputs.name }}" -DestinationPath "${{ steps.meta.outputs.name }}.zip"
+        run: Compress-Archive -Path "${{ steps.meta.outputs.staged }}" -DestinationPath "${{ steps.meta.outputs.archive }}.zip"
 
       - name: Pack tar.gz
         if: matrix.archive == 'tar.gz'
         shell: bash
         working-directory: dist
-        run: tar -czf "${{ steps.meta.outputs.name }}.tar.gz" "${{ steps.meta.outputs.name }}"
+        run: tar -czf "${{ steps.meta.outputs.archive }}.tar.gz" "${{ steps.meta.outputs.staged }}"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{ steps.meta.outputs.name }}
-          path: dist/${{ steps.meta.outputs.name }}.${{ matrix.archive }}
+          name: ${{ steps.meta.outputs.archive }}
+          path: dist/${{ steps.meta.outputs.archive }}.${{ matrix.archive }}
           if-no-files-found: error
 
   release:
