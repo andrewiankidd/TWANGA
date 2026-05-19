@@ -1,0 +1,44 @@
+# cargo-audit configuration.
+#
+# Every entry in `ignore` is a known unmaintained advisory pulled in
+# transitively by Tauri 2's Linux webview backend (`wry` → GTK3 bindings).
+# None are actionable on our side until Tauri's Linux backend migrates to
+# GTK4. Revisit the whole list when bumping `tauri` to a major version.
+#
+# A non-trivial NEW advisory landing on a crate we actually use should
+# trip cargo-audit and surface here — do not blanket-ignore it; either
+# upgrade the affected dep or add it to this list with an explicit
+# justification.
+
+[advisories]
+ignore = [
+    # gtk-rs GTK3 bindings cluster — `wry` (Tauri's webview crate)
+    # depends on these on Linux. Maintained as long as wry stays on GTK3.
+    "RUSTSEC-2024-0411", # gdkwayland-sys
+    "RUSTSEC-2024-0412", # gdk
+    "RUSTSEC-2024-0413", # atk
+    "RUSTSEC-2024-0414", # gdkx11-sys
+    "RUSTSEC-2024-0415", # gtk
+    "RUSTSEC-2024-0416", # atk-sys
+    "RUSTSEC-2024-0417", # gdkx11
+    "RUSTSEC-2024-0418", # gdk-sys
+    "RUSTSEC-2024-0419", # gtk3-macros
+    "RUSTSEC-2024-0420", # gtk-sys
+
+    # `proc-macro-error` is unmaintained — pulled in transitively by
+    # `gtk3-macros`. Same Tauri-Linux cluster; resolved when GTK4.
+    "RUSTSEC-2024-0370",
+
+    # `glib::VariantStrIter` unsoundness — also pulled by the Tauri Linux
+    # backend. The path that uses VariantStrIter doesn't appear in our
+    # call graph; revisit if our usage of glib widens.
+    "RUSTSEC-2024-0429",
+
+    # unic-* family unmaintained — transitive deps of Tauri's identifier
+    # parsing. Migration target is the `icu` family of crates upstream.
+    "RUSTSEC-2025-0075", # unic-char-range
+    "RUSTSEC-2025-0080", # unic-common
+    "RUSTSEC-2025-0081", # unic-char-property
+    "RUSTSEC-2025-0098", # unic-ucd-version
+    "RUSTSEC-2025-0100", # unic-ucd-ident
+]

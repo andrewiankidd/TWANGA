@@ -138,3 +138,37 @@ matches or exceeds the verification value. Use judgement.
   (via the `directories` crate). Browser uses `localStorage`. Both
   schemas are identical (`PresetEntry`, `Capo` spec strings, etc.) so a
   future Tauri shell can sync the two.
+
+## Dev-environment setup (one-time, per clone)
+
+Static analysis is shared between a local pre-push hook (fast failure on
+your machine) and CI (the actual gate). To get the local half:
+
+```bash
+# 1. Point Git at the versioned hooks dir. Without this, .githooks/* is
+#    just files in the repo — Git won't run them. core.hooksPath was
+#    added in Git 2.9; if you're on something older, upgrade.
+git config core.hooksPath .githooks
+
+# 2. Install the extra cargo tools the hook calls. rustfmt + clippy
+#    come with the toolchain already; these don't.
+cargo install cargo-audit cargo-machete cargo-deny
+```
+
+After that, every `git push` runs the pre-push hook at
+[`.githooks/pre-push`](.githooks/pre-push), which calls (in order):
+
+1. `cargo fmt --all -- --check` — formatting matches rustfmt.
+2. `cargo clippy --workspace --all-targets -- -D warnings` — no lints.
+3. `cargo machete` — no declared-but-unused deps in Cargo.toml.
+4. `cargo audit` — no known security advisories in `Cargo.lock`.
+
+The hook skips itself entirely if the push has no Rust/TOML changes
+(docs-only / frontend-HTML-only pushes don't pay the lint cost).
+Failures abort the push so they're caught before CI does.
+
+CI's [`Audit + deny + machete`](.github/workflows/ci.yml) job runs the
+same checks plus `cargo deny check` (license + ban + dup + sources, all
+configured in [`deny.toml`](deny.toml) at repo root). `cargo deny`
+isn't in the pre-push because it's slower and the local audit step
+already covers the advisory subset.

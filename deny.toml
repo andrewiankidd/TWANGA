@@ -1,0 +1,90 @@
+# cargo-deny config — license, advisory, banned-crate, and source policy.
+# Run: `cargo deny check` (covers all sections) or e.g. `cargo deny check
+# licenses` to drill into one.
+#
+# Tuned to be useful out of the box without false-positive noise. The
+# allow-list is "common open-source licenses TWANGA's stack actually uses
+# today"; expanding it should be deliberate. Banned crates is empty —
+# add entries as we find real problems.
+
+[graph]
+# Match what CI actually builds — desktop (where most of our compile
+# graph lives) plus the WASM target. Pulls correct license set for both.
+targets = [
+    "x86_64-pc-windows-msvc",
+    "x86_64-unknown-linux-gnu",
+    "x86_64-apple-darwin",
+    "aarch64-apple-darwin",
+    "wasm32-unknown-unknown",
+]
+
+[advisories]
+# RustSec advisory database. Yanked crates count too — if a dep was
+# pulled because of a security issue, we want to know.
+db-path = "~/.cargo/advisory-db"
+db-urls = ["https://github.com/rustsec/advisory-db"]
+yanked = "deny"
+# Same ignore list as `.cargo/audit.toml` — keep these two in sync.
+# Every entry is a Tauri-Linux transitive (GTK3 cluster + unic-*); none
+# are actionable on our side until Tauri migrates the webview backend.
+ignore = [
+    "RUSTSEC-2024-0370", # proc-macro-error
+    "RUSTSEC-2024-0411", # gdkwayland-sys
+    "RUSTSEC-2024-0412", # gdk
+    "RUSTSEC-2024-0413", # atk
+    "RUSTSEC-2024-0414", # gdkx11-sys
+    "RUSTSEC-2024-0415", # gtk
+    "RUSTSEC-2024-0416", # atk-sys
+    "RUSTSEC-2024-0417", # gdkx11
+    "RUSTSEC-2024-0418", # gdk-sys
+    "RUSTSEC-2024-0419", # gtk3-macros
+    "RUSTSEC-2024-0420", # gtk-sys
+    "RUSTSEC-2024-0429", # glib (unsound VariantStrIter)
+    "RUSTSEC-2025-0075", # unic-char-range
+    "RUSTSEC-2025-0080", # unic-common
+    "RUSTSEC-2025-0081", # unic-char-property
+    "RUSTSEC-2025-0098", # unic-ucd-version
+    "RUSTSEC-2025-0100", # unic-ucd-ident
+]
+
+[licenses]
+# License IDs from https://spdx.org/licenses/. This list is the union of
+# what every crate in the current dependency graph uses, plus a couple
+# of conservative additions for crates we'll likely pull in (rubato,
+# alphaTab WASM bindings, etc).
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-3.0",
+    "Unicode-DFS-2016",
+    "Zlib",
+    "0BSD",
+    "MPL-2.0",
+    "CC0-1.0",
+]
+confidence-threshold = 0.93
+
+[bans]
+# Multiple versions of the same crate are common in transitive deps and
+# usually fine — duplicates only matter when they bloat the binary or
+# encode genuine API skew. Warn so we notice; don't fail. Most current
+# duplicates come from Tauri's transitive web (windows-* / toml / syn).
+multiple-versions = "warn"
+# Internal workspace deps use `{ path = "..." }` without a `version =`,
+# which cargo-deny treats as a wildcard by default. allow-wildcard-paths
+# opts path-deps out so the real "depending on `*` from crates.io" check
+# still fires.
+wildcards = "deny"
+allow-wildcard-paths = true
+deny = []
+
+[sources]
+# Only allow crates.io as a registry. Git deps require an explicit
+# entry under `allow-git`; we have none today.
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-git = []

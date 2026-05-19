@@ -11,7 +11,7 @@ env:
 
 jobs:
   check:
-    name: Check + fmt (linux)
+    name: Check + fmt + clippy (linux)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -28,10 +28,44 @@ jobs:
             build-essential
       - uses: dtolnay/rust-toolchain@stable
         with:
-          components: rustfmt
+          components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
-      - run: cargo fmt --all -- --check
-      - run: cargo check --workspace --all-targets
+      - name: cargo fmt --check
+        run: cargo fmt --all -- --check
+      - name: cargo clippy
+        # Same lint gate the pre-push hook enforces; CI is the safety net.
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: cargo check
+        run: cargo check --workspace --all-targets
+
+  lint:
+    # Static-analysis pass that doesn't need the Rust toolchain to compile
+    # the project — license/advisory/unused-dep checks read Cargo.lock /
+    # Cargo.toml directly. Kept separate so the heavier `check` job above
+    # doesn't have to also bring these tools in.
+    name: Audit + deny + machete
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: cargo-audit (RustSec advisories)
+        uses: rustsec/audit-check@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: cargo-deny (license + ban + dup + advisories)
+        # Reads deny.toml at the repo root. License allow-list is intentional;
+        # adding a license requires a deliberate edit.
+        uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check
+      - name: Install cargo-machete (prebuilt binary)
+        run: |
+          VERSION=0.7.0
+          curl -sL "https://github.com/bnjbvr/cargo-machete/releases/download/v${VERSION}/cargo-machete-v${VERSION}-x86_64-unknown-linux-musl.tar.gz" \
+            | tar xz
+          sudo mv "cargo-machete-v${VERSION}-x86_64-unknown-linux-musl/cargo-machete" /usr/local/bin/
+          cargo-machete --version
+      - name: cargo-machete (unused dependencies)
+        run: cargo-machete
 
   test:
     name: Test (${{ matrix.os }})
