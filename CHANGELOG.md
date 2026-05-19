@@ -10,6 +10,18 @@ dated section.
 
 ### Added
 
+- Pre-roll / count-in on `twanga record` and `twanga play` (CLI),
+  and on the browser Recorder (GUI). New `--pre-roll <N>` flag with
+  the standard three-form pattern; default 4 ticks (one bar at
+  4/4), range 0–16, 0 disables. Always audible — fires even when
+  `--no-metronome` silences the main run, because the whole point
+  is to be heard. Aborts cleanly on Ctrl-C / `q + Enter` (CLI) or a
+  Stop click during the count (GUI), so the user isn't stuck
+  through 16 beats if they change their mind. Setting persists in
+  the GUI's `localStorage` under the existing recorder key. New
+  shared `run_pre_roll` helper in `twanga-cli` is reused by both
+  `record` and `play`; saved the duplication while the surfaces
+  still grow.
 - Metronome click on `twanga record`. `--no-metronome` disables it,
   matching the existing `play` flag exactly (default on). Click
   fires on every beat boundary derived from the current resolution

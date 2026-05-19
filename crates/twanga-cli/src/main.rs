@@ -86,6 +86,13 @@ enum Command {
         /// neither flag nor prompt provides one.
         #[arg(long, num_args = 0..=1, default_missing_value = "")]
         capo: Option<String>,
+        /// Pre-roll / count-in ticks before playback starts. Always audible
+        /// (independent of `--no-metronome` — the count needs to be heard
+        /// even when the main run is silent). Default 4 (one bar at 4/4).
+        /// Range 0–16; 0 disables. Omit or pass `--pre-roll` bare to be
+        /// prompted.
+        #[arg(long, num_args = 0..=1, default_missing_value = "")]
+        pre_roll: Option<String>,
     },
     /// Live tab recorder — capture played notes as horizontal ASCII tab notation.
     /// Any argument left unset triggers an interactive prompt (with the default
@@ -117,6 +124,12 @@ enum Command {
         /// other column). Useful for keeping a steady tempo while playing.
         #[arg(long)]
         no_metronome: bool,
+        /// Pre-roll / count-in ticks before recording starts. Always audible
+        /// (independent of `--no-metronome`). Default 4 (one bar at 4/4).
+        /// Range 0–16; 0 disables. Omit or pass `--pre-roll` bare to be
+        /// prompted.
+        #[arg(long, num_args = 0..=1, default_missing_value = "")]
+        pre_roll: Option<String>,
         /// Human-readable title for the recording — written to `\title` in the
         /// alphaTex header AND used to derive the filename
         /// (`<slug>-<unix-secs>.alphatex` if provided, `recording-<unix-secs>`
@@ -517,6 +530,36 @@ fn resolve_block_width(arg: Option<String>) -> Result<usize> {
     )
 }
 
+const DEFAULT_PRE_ROLL: u32 = 4;
+
+/// Resolve `--pre-roll <N>` for both `record` and `play`. Three-form
+/// pattern: explicit value passes through, bare flag prompts, omission
+/// also prompts. Default 4 ticks (one bar at 4/4). Range 0–16.
+fn resolve_pre_roll(arg: Option<String>) -> Result<u32> {
+    if let Some(s) = flag_value(&arg) {
+        let n: u32 = s
+            .parse()
+            .map_err(|_| anyhow!("invalid pre-roll '{s}' (expected an integer)"))?;
+        validate_pre_roll(n)?;
+        return Ok(n);
+    }
+    twanga_tui::prompt_parsed("Pre-roll ticks (0 to disable)", DEFAULT_PRE_ROLL, |s| {
+        let n: u32 = s
+            .parse()
+            .map_err(|e: std::num::ParseIntError| e.to_string())?;
+        validate_pre_roll(n).map_err(|e| e.to_string())?;
+        Ok(n)
+    })
+}
+
+fn validate_pre_roll(n: u32) -> Result<()> {
+    if n <= 16 {
+        Ok(())
+    } else {
+        Err(anyhow!("pre-roll out of range (0–16): {n}"))
+    }
+}
+
 /// Resolve `--title` for `record`. Three-form pattern: explicit value
 /// passes through, bare flag prompts (default blank → no title), omission
 /// also defers to a prompt. Blank input is preserved as `None` so the
@@ -823,6 +866,7 @@ fn run_recorder(
     resolution_denom: u32,
     block_width: usize,
     metronome: bool,
+    pre_roll: u32,
     title: Option<String>,
 ) -> Result<()> {
     let mut stream = InputStream::open()?;
@@ -832,10 +876,9 @@ fn run_recorder(
     // every other column is a beat; at 1/16, every fourth; etc.
     let cols_per_beat = (resolution_denom as usize / 4).max(1);
 
-    // Open an output stream only if the user wants a metronome — saves a
-    // device acquisition + a pre-computed click buffer when the user is
-    // recording to a backing track or doesn't want the click in the mic.
-    let mut output = if metronome {
+    // Open an output stream if the user wants a metronome OR a pre-roll —
+    // pre-roll is always audible, even when the main metronome is off.
+    let mut output = if metronome || pre_roll > 0 {
         Some(OutputStream::open()?)
     } else {
         None
@@ -878,6 +921,7 @@ fn run_recorder(
         block_width as u32 * ms_per_col,
     );
     eprintln!("Metronome:  {}", if metronome { "on" } else { "off" });
+    eprintln!("Pre-roll:   {pre_roll}");
     eprintln!("Saving to:  {}", recording_path.display());
     eprintln!();
     eprintln!("─────────────────────────────────────────────────");
@@ -892,6 +936,14 @@ fn run_recorder(
     let mut display: Option<MultiLineDisplay> = None;
     let mut buf = vec![0.0_f32; READ_CHUNK];
     let stdin_rx = twanga_tui::spawn_line_reader();
+
+    if run_pre_roll(pre_roll, bpm, &mut output, click.as_ref(), &stdin_rx)? {
+        return finalize_recording(
+            &mut recording_writer,
+            &recording_path,
+            "Recording cancelled during pre-roll.",
+        );
+    }
     let mut total_samples: u64 = 0;
     let mut total_columns: u64 = 0;
     // Aggregate count of detected pitches that no string + fret combo could
@@ -1003,6 +1055,7 @@ fn main() -> Result<()> {
             block_width,
             capo,
             no_metronome,
+            pre_roll,
             title,
         } => {
             let t = resolve_tuning(tuning)?;
@@ -1010,8 +1063,9 @@ fn main() -> Result<()> {
             let bpm = resolve_bpm(bpm)?;
             let denom = resolve_resolution(resolution)?;
             let bw = resolve_block_width(block_width)?;
+            let pre_roll = resolve_pre_roll(pre_roll)?;
             let title = resolve_title(title)?;
-            run_recorder(t, c, bpm, denom, bw, !no_metronome, title)?;
+            run_recorder(t, c, bpm, denom, bw, !no_metronome, pre_roll, title)?;
         }
         Command::Play {
             path,
@@ -1021,6 +1075,7 @@ fn main() -> Result<()> {
             wait,
             loop_spec,
             capo,
+            pre_roll,
         } => {
             // Parse first so the tuning prompt can show what's in the file.
             let content = fs::read_to_string(&path)
@@ -1032,6 +1087,7 @@ fn main() -> Result<()> {
             }
             let tuning = resolve_play_tuning(tuning, &parsed)?;
             let bpm = resolve_bpm_override(bpm)?;
+            let pre_roll = resolve_pre_roll(pre_roll)?;
             run_playback(
                 path,
                 parsed,
@@ -1041,6 +1097,7 @@ fn main() -> Result<()> {
                 wait,
                 loop_spec,
                 capo,
+                pre_roll,
             )?;
         }
         Command::Devices => {
@@ -1083,6 +1140,7 @@ fn run_playback(
     wait: bool,
     loop_spec: Option<String>,
     capo_spec: Option<String>,
+    pre_roll: u32,
 ) -> Result<()> {
     // Transpose if --tuning was provided (either explicitly via flag or via
     // the prompt). The transposed tab carries the target tuning's names in
@@ -1143,7 +1201,7 @@ fn run_playback(
     };
     let header_capo = effective_capo;
 
-    let mut output = if metronome {
+    let mut output = if metronome || pre_roll > 0 {
         Some(OutputStream::open()?)
     } else {
         None
@@ -1204,6 +1262,7 @@ fn run_playback(
             format!("columns {loop_start}-{}", loop_end - 1)
         }
     );
+    eprintln!("Pre-roll:   {pre_roll}");
     eprintln!();
     if !dropped.is_empty() {
         eprintln!(
@@ -1235,6 +1294,11 @@ fn run_playback(
     let stdin_rx = twanga_tui::spawn_line_reader();
     // One row per string + one for the position/progress line.
     let mut display = MultiLineDisplay::new(tab.tuning_names.len() + 1);
+
+    if run_pre_roll(pre_roll, bpm, &mut output, click.as_ref(), &stdin_rx)? {
+        eprintln!("Playback cancelled during pre-roll.");
+        return Ok(());
+    }
 
     'session: loop {
         for col_idx in loop_start..loop_end {
@@ -1416,6 +1480,44 @@ fn metronome_click(sample_rate: u32) -> Vec<f32> {
         *s *= 0.3;
     }
     buf
+}
+
+/// Run a `pre_roll`-tick count-in before the main record/play loop starts.
+/// Always audible — independent of any `--no-metronome` choice — because
+/// the entire point is to give the user time to react. Aborts cleanly on
+/// Ctrl-C / `q + Enter` so the user isn't stuck through 16 beats if they
+/// changed their mind. No-op when `pre_roll == 0`.
+fn run_pre_roll(
+    pre_roll: u32,
+    bpm: u32,
+    output: &mut Option<OutputStream>,
+    click: Option<&Vec<f32>>,
+    stdin_rx: &std::sync::mpsc::Receiver<String>,
+) -> Result<bool> {
+    if pre_roll == 0 {
+        return Ok(false); // not aborted
+    }
+    let beat_ms = (60_000 / bpm.max(1)) as u64;
+    let beat_dur = std::time::Duration::from_millis(beat_ms);
+    eprintln!("Pre-roll:   {pre_roll} count(s)…");
+    for i in 1..=pre_roll {
+        if twanga_tui::is_shutdown_requested() {
+            return Ok(true);
+        }
+        if let Ok(input) = stdin_rx.try_recv()
+            && is_quit_input(&input)
+        {
+            return Ok(true);
+        }
+        eprint!("  {i}/{pre_roll}");
+        if let (Some(out), Some(click)) = (output.as_mut(), click) {
+            out.write(click);
+        }
+        std::thread::sleep(beat_dur);
+        eprint!("\r");
+    }
+    eprintln!("           "); // clear the in-place counter
+    Ok(false)
 }
 
 /// In wait mode, block until the user plays a frequency that matches one of

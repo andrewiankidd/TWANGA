@@ -726,6 +726,26 @@
             accent-color: var(--highlight);
             cursor: pointer;
         }
+        .rec-preroll-label {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.4rem;
+        }
+        .rec-preroll-label input {
+            width: 3em;
+            background: var(--background);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            color: var(--text);
+            padding: 0.2rem 0.35rem;
+            font-family: monospace;
+            font-size: 0.85rem;
+            text-align: center;
+        }
+        .rec-preroll-label input:focus {
+            outline: none;
+            border-color: var(--highlight);
+        }
 
         /* Recorder-specific settings (BPM / resolution / block-width). Each
            setting is its own little card with a label + control(s). Disabled
@@ -973,6 +993,10 @@
                 <label class="renderer-label rec-metronome-label">
                     <input type="checkbox" id="recorder-metronome-toggle" checked>
                     Metronome
+                </label>
+                <label class="renderer-label rec-preroll-label" title="Count-in ticks before recording starts (0 disables)">
+                    Pre-roll
+                    <input type="number" id="recorder-preroll-input" min="0" max="16" step="1" value="4">
                 </label>
             </div>
 
@@ -2334,9 +2358,12 @@
             resolutionDenom: 8,
             blockWidth: 32,
             metronome: true,        // live toggleable mid-recording
+            preRoll: 4,             // count-in ticks before recording starts; 0 disables
 
             // Recording-time ephemeral
             isRecording: false,
+            preRollActive: false,   // count-in is firing; Stop aborts it
+            preRollAbort: false,    // set by Stop click during pre-roll
             score: null,            // { tempo, tuning, columns, ... }
             currentMarks: [],       // marks accumulating in the current uncommitted column
             recordingStartTime: 0,
@@ -2396,6 +2423,8 @@
             recState.blockWidth = Number.isInteger(saved.blockWidth) && saved.blockWidth >= 4 && saved.blockWidth <= 200
                 ? saved.blockWidth : 32;
             recState.metronome = saved.metronome !== false; // default on (older saves have no field)
+            recState.preRoll = Number.isInteger(saved.preRoll) && saved.preRoll >= 0 && saved.preRoll <= 16
+                ? saved.preRoll : 4;
         }
 
         function recSaveToStorage() {
@@ -2409,6 +2438,7 @@
                     resolutionDenom: recState.resolutionDenom,
                     blockWidth: recState.blockWidth,
                     metronome: recState.metronome,
+                    preRoll: recState.preRoll,
                 }));
             } catch (e) {
                 console.warn('recorder localStorage write failed', e);
@@ -2660,6 +2690,17 @@
                 recState.metronome = metToggle.checked;
                 recSaveToStorage();
             });
+
+            // Pre-roll input — locked while recording (pre-roll only
+            // matters at the moment Start is clicked). 0 disables.
+            const prInput = el('recorder-preroll-input');
+            prInput.value = String(recState.preRoll);
+            prInput.addEventListener('change', () => {
+                if (recState.isRecording) { prInput.value = String(recState.preRoll); return; }
+                recState.preRoll = clampInt(prInput.value, 0, 16, 4);
+                prInput.value = String(recState.preRoll);
+                recSaveToStorage();
+            });
         }
 
         // ---- Score model construction --------------------------------------
@@ -2704,7 +2745,10 @@
 
         function recWireButtons() {
             el('recorder-start-btn').addEventListener('click', () => {
-                if (recState.isRecording) {
+                if (recState.preRollActive) {
+                    // Stop clicked during the count-in — abort cleanly.
+                    recState.preRollAbort = true;
+                } else if (recState.isRecording) {
                     recStopRecording('Recording stopped.');
                 } else {
                     recStartRecording().catch((err) => {
@@ -2716,7 +2760,7 @@
             });
             el('recorder-save-btn').addEventListener('click', recSave);
             el('recorder-clear-btn').addEventListener('click', () => {
-                if (recState.isRecording) return;
+                if (recState.isRecording || recState.preRollActive) return;
                 recClear();
             });
         }
@@ -2746,8 +2790,16 @@
                     consumerName: 'recorder',
                     onSamples: (samples) => {
                         if (!recState.chromaticTuner) return;
+                        // Always feed the tuner — keeps its internal buffer
+                        // primed so the first reading after pre-roll
+                        // doesn't have to wait for a full window to fill.
                         recState.chromaticTuner.feed(samples);
+                        // But only *commit* hits + drops while actively
+                        // recording. During pre-roll we drain readings to
+                        // keep the tuner's internal queue from growing,
+                        // but throw them away.
                         const readings = recState.chromaticTuner.take_readings();
+                        if (!recState.isRecording) return;
                         for (const r of readings) {
                             const m = match_pitch_to_fret(
                                 recState.presetEntry,
@@ -2779,6 +2831,41 @@
                 recState.chromaticTuner?.free?.();
                 recState.chromaticTuner = null;
                 throw err;
+            }
+
+            // Pre-roll: audible count-in before the recording actually
+            // starts. Always plays a click per beat regardless of the main
+            // metronome setting — the count needs to be heard even when
+            // the run itself is silent. Aborts cleanly if the user clicks
+            // Stop mid-count.
+            if (recState.preRoll > 0) {
+                recState.preRollActive = true;
+                recState.preRollAbort = false;
+                el('recorder-start-btn').textContent = 'Stop';
+                el('recorder-save-btn').disabled = true;
+                el('recorder-clear-btn').disabled = true;
+                el('recorder-settings').classList.add('is-recording');
+                const beatMs = 60_000 / Math.max(1, recState.bpm);
+                for (let i = 1; i <= recState.preRoll; i++) {
+                    if (recState.preRollAbort) break;
+                    recPlayMetronomeClick();
+                    el('recorder-hint').textContent =
+                        `pre-roll: ${i} / ${recState.preRoll}`;
+                    await new Promise((resolve) => setTimeout(resolve, beatMs));
+                }
+                recState.preRollActive = false;
+                if (recState.preRollAbort) {
+                    // User aborted mid-count — tear down mic + tuner, back to idle.
+                    recState.preRollAbort = false;
+                    if (micSession.consumerName === 'recorder') micSession.stop();
+                    recState.chromaticTuner?.free?.();
+                    recState.chromaticTuner = null;
+                    el('recorder-start-btn').textContent = 'Start recording';
+                    el('recorder-clear-btn').disabled = false;
+                    el('recorder-settings').classList.remove('is-recording');
+                    el('recorder-hint').textContent = 'pre-roll cancelled';
+                    return;
+                }
             }
 
             // Column-tick driver — wall-clock based so missed JS timer fires
