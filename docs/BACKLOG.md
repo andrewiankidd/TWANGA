@@ -4,19 +4,27 @@ Ideas and feature directions discussed during early scoping. Not commitments —
 
 See [ROADMAP.md](ROADMAP.md) for what's actually committed next; this file is everything we've thought about that we might do someday.
 
-## GUI (v1)
+## Web build feature parity with CLI
 
-The CLI flows are the wireframe. Translate them directly to GUI rather than redesigning.
+The web frontend (`frontend/web/`) is shipped via GitHub Pages and wrapped by the Tauri 2 desktop shell. Same HTML/JS/WASM bundle, two delivery paths. Today the web tuner is a chromatic Hz readout — these items close the gap with `twanga-cli`:
 
-- Device picker (mirrors `twanga devices`)
-- Tuning picker (chromatic + built-in presets + user-defined tunings; data model already shipped, GUI just needs to consume `twanga_core::Tuning::builtin_presets()` plus the user file)
-- Capo picker (data model already shipped; GUI just needs an integer slider for uniform capo + an "advanced" per-string mode for partial capos)
-- Tuner screen — per-string live cents-deviation, large readable display
-- Tab library — folder picker for `.alphatex` files, list view
-- Playback screen — alphaTab renderer + cursor + BPM slider + wait-mode toggle + transpose dropdown
-- Recorder screen — live scrolling tab being written, save-to-file
-- Persist "last session" state (last played tab + position + tuning + speed) so app can resume in one click
-- Rust→JS event bridge for high-frequency updates (push, not poll); audio thread stays in Rust untouched by Tauri
+- **Per-string tuner display.** Tuning picker (built-in presets + future user tunings) → per-string targets with cents-deviation indicator. Mirrors `format_string_row` from the CLI. Same `Tuning::nearest_string` math lives in WASM via `twanga-web` already.
+- **Capo picker on the tuner screen.** Integer slider for uniform; "advanced" mode collapses to per-string offsets for partial capos / banjo 5th-string. Backend data model already ships.
+- **Tab playback** — alphaTab.js loads in the webview, scrolls a cursor through bundled / user-uploaded `.alphatex` files. BPM slider, wait-mode toggle, transpose dropdown.
+- **Tab recorder in browser** — equivalent of `twanga record`: mic → fret detection → alphaTex string the user can download or copy to clipboard. The native CLI writes to disk; the web build will write to a Blob → save-as.
+- **Tab library.** Drop-zone for local `.alphatex` files (no upload; processed entirely in the browser). Persist the list across sessions.
+- **Custom tunings in the browser.** `twanga tunings add` equivalent, persisting to `localStorage` instead of `$CONFIG/twanga/tunings.toml`. Same `PresetEntry` schema either way.
+- **Persist "last session" state** — last opened tab + position + selected tuning + capo. One-click resume.
+
+## Tauri desktop polish
+
+Quality-of-life work for the Tauri shell after the basic webview-bundle path is in. Mobile via Tauri Mobile is its own roadmap item ([ROADMAP.md](ROADMAP.md)).
+
+- **Wire `@tauri-apps/plugin-shell`.** External-link clicks in app.html already get intercepted via the `window.__TAURI__` runtime check, but the resulting `shell.open(url)` call is currently a no-op until the plugin is added to `tauri.conf.json`'s allowlist + the JS-side glue is imported. Without this the personal-site logo + "TWANGA Homepage" link don't actually open in the system browser when running under Tauri.
+- **Native CPAL backend exposed as a Tauri command.** Web Audio's AudioWorklet runs at 50-150ms latency depending on backend; CPAL gives sub-20ms on desktop. Expose `start_capture` / `stop_capture` Tauri commands that stream samples from `twanga-audio` to the JS frontend over Tauri events. Only worth doing once wait-mode lands and the latency actually matters.
+- **Filesystem access for `~/.config/twanga/tunings.toml`.** Browser uses `localStorage`; Tauri can read/write the same TOML the CLI uses. Means custom tunings sync across the CLI + desktop app without a separate user file.
+- **Hand-crafted icon set.** `cargo tauri icon` auto-converted the workspace logo. Production builds want a hand-tuned `icon.icns` / `icon.ico` with proper rounded-rect / dark-mode variants per platform's conventions.
+- **`cargo tauri build` smoke run + installer asset upload.** The release workflow currently ships only `twanga-cli`. Once a known-good `cargo tauri build` exists, add it to the release matrix so each tag also publishes desktop installers (`.msi`, `.dmg`, `.deb`, `.AppImage`).
 
 ## Practice mechanics — compounding over time
 
@@ -151,9 +159,8 @@ Tuner-driven passive sample collection. The chore (tuning) becomes the data sour
 
 ## Architecture / infrastructure
 
-- **CI mobile targets.** GitHub Actions on push/PR + tagged-release pipeline shipping Windows / macOS Intel / macOS Apple Silicon / Linux x64 already ship. Mobile (iOS / Android via Tauri Mobile) is the next platform tier to add.
+- **CI mobile targets.** Linux/Windows/macOS already ship via the CI + release workflows. GitHub Pages deploy for the web build also ships (`pages.yml`). Mobile (iOS / Android via Tauri Mobile) is the next platform tier to add.
 - **ASIO-enabled Windows build variant.** Two Windows binaries — without ASIO (works for everyone) and with (lower latency, needs ASIO driver). Deferred on the redistribution-license question (Steinberg SDK).
-- **Dependabot for Cargo.** Weekly dependency updates, free security scanning.
 - **`twanga-trace` crate.** Continuous pitch contour comparison (DTW + pitch distance). For the Audiosurf-mode work.
 - **`twanga-import` crate?** Once OCR / Demucs / transcription pipelines arrive, isolating them in a single crate keeps the optional heavy dependencies out of the core build.
 - **Single internal arrangement format (TwangaTab).** Near-superset of MusicXML with instrument-agnostic extensions (tuning per string, fingering hints, folk-specific technique tags). All importers funnel into this; all renderers/players consume it.
