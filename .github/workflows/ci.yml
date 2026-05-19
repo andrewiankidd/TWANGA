@@ -15,10 +15,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Install audio deps
+      - name: Install system deps (audio + Tauri webview)
         run: |
           sudo apt-get update
-          sudo apt-get install -y libasound2-dev
+          sudo apt-get install -y \
+            libasound2-dev \
+            libwebkit2gtk-4.1-dev \
+            libssl-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libsoup-3.0-dev \
+            build-essential
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
@@ -35,11 +42,22 @@ jobs:
         os: [ubuntu-latest, windows-latest, macos-latest]
     steps:
       - uses: actions/checkout@v4
-      - name: Install audio deps (linux)
+      # Linux runners need the audio (alsa) + Tauri (webkit, gtk, soup, etc.)
+      # system libraries before any cargo invocation that touches twanga-audio
+      # or twanga-app. Windows ships WebView2 by default; macOS uses system
+      # WebKit; neither needs anything extra.
+      - name: Install system deps (audio + Tauri webview)
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libasound2-dev
+          sudo apt-get install -y \
+            libasound2-dev \
+            libwebkit2gtk-4.1-dev \
+            libssl-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libsoup-3.0-dev \
+            build-essential
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:

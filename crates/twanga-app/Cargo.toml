@@ -5,16 +5,23 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
-description = "Tauri shell. Run `cargo install tauri-cli@^2` then `cargo tauri init` in this crate."
+description = "TWANGA Tauri desktop shell — hosts the shared frontend/web/ bundle in a native window (Windows/macOS/Linux today; iOS/Android via Tauri Mobile)."
+build = "build.rs"
+
+# Tauri 2's recommended split: a `lib` exposes the `run()` entry point that
+# both the desktop bin and the future mobile entry-point macros call into.
+# Keeps a single `run()` definition across all targets.
+[lib]
+name = "twanga_app"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[[bin]]
+name = "twanga-app"
+path = "src/main.rs"
 
 [dependencies]
 twanga-core = { path = "../twanga-core" }
-twanga-dsp = { path = "../twanga-dsp" }
-twanga-audio = { path = "../twanga-audio" }
-anyhow.workspace = true
+tauri = { version = "2", features = [] }
 
-# Uncomment after `cargo install tauri-cli@^2` and `cargo tauri init` have been run here.
-# tauri = { version = "2", features = [] }
-#
-# [build-dependencies]
-# tauri-build = { version = "2", features = [] }
+[build-dependencies]
+tauri-build = { version = "2", features = [] }

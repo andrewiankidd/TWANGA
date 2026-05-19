@@ -28,7 +28,7 @@ Multi-crate Cargo workspace. Each crate has a narrow, deliberately-enforced resp
 | **[twanga-tui](crates/twanga-tui/)** | Terminal UX primitives shared across TWANGA's CLIs — selection menus, refreshing displays, Ctrl-C handling, ANSI colours. |
 | **[twanga-cli](crates/twanga-cli/)** | CLI binary `twanga` — `tune`, `record`, `play`, `tunings`, `devices`, `convert` subcommands. |
 | **[twanga-bench](crates/twanga-bench/)** | Latency + pitch-detection accuracy benchmarks (placeholder). |
-| **[twanga-app](crates/twanga-app/)** | Tauri shell (placeholder). Frontend in [frontend/](frontend/) (framework TBD), tab rendering via [alphaTab](https://github.com/CoderLine/alphaTab) in the webview. |
+| **[twanga-app](crates/twanga-app/)** | Tauri 2 desktop shell — hosts the shared [frontend/web/](frontend/web/) bundle (HTML + WASM bindings) in a native window. Same UI as the web build, just wrapped in a Tauri webview. Tab rendering will use [alphaTab](https://github.com/CoderLine/alphaTab) once the playback screen lands. |
 
 ## Quick start
 
