@@ -28,7 +28,7 @@ Public surface worth knowing:
 - `Capo::is_none()` / `Capo::is_uniform()` — discriminate for display ("Capo: 3" vs "Capo: [0,2,2,2,2,2]").
 - `join_capo_into_subtitle(name, &capo)` / `split_capo_from_subtitle(s)` + `CAPO_SUBTITLE_TOKEN` — the convention `twanga-tabs` uses to persist a capo through the alphaTex `\subtitle` field (since alphaTex has no native `\capo` directive).
 
-**MOTD splashes.** `SPLASHES` / `splashes()` — backronyms for the CLI banner (`twanga_tui::motd`), shared with the future Tauri main menu (`twanga_app`). One source of truth so the two surfaces can't drift.
+**MOTD splashes.** `SPLASHES` / `splashes()` — backronyms for the CLI banner (`twanga_tui::motd`) and the web/Tauri main menu (the browser pulls them via `twanga_web::pick_splash`). One source of truth so the two surfaces can't drift.
 
 - **Check**: `cargo check -p twanga-core`
 - **Test**: `cargo test -p twanga-core`

@@ -10,6 +10,13 @@ dated section.
 
 ### Added
 
+- **Cross-tab library sync** via `BroadcastChannel`. When the
+  user records in one browser tab and has another open on the
+  Playback library, the second tab refreshes its list
+  automatically (save / delete / markDownloaded all publish).
+  Silent no-op on older browsers without `BroadcastChannel`
+  support; the single-tab experience is unaffected.
+  `library.subscribe(callback)` is the new public API.
 - **GUI Playback at full CLI parity.** New `#playback` screen with
   a combined library list + per-tab playback view:
   - **Library** — bundled examples (shipped via
@@ -52,6 +59,18 @@ dated section.
 
 ### Changed
 
+- **Playback auto-loads the file's tuning + capo on load.** Was:
+  the controller stayed on its last selection so loading a uke
+  tab while the controller was on standard-guitar silently
+  transposed (the "Skipped:" preamble surfaced drops but gave
+  no signal about the cause). Now: each `playbackLoad` matches
+  the file's `\tuning` line against the merged registry by
+  MIDI list (so reentrant / drone-suffixed registry names
+  don't block matches) and, on hit, also applies the file's
+  `\subtitle ; capo=<spec>` annotation. Falls back to the
+  controller's restored state when no registry match exists.
+  New `matchRegistrySlugForTuningNames(names)` and controller
+  method `setCapo(spec)` in `controllers/tuning.js`.
 - **Shared tuning + capo controller**
   (`frontend/web/controllers/tuning.js`) consumed by Tuner,
   Recorder, and Playback. Roughly ~400 lines of duplicated picker

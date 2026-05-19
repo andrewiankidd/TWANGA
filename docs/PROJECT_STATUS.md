@@ -20,8 +20,7 @@ the alphaTex format:
 
 ## Web build + Tauri desktop shell
 
-Three of the four CLI surfaces have GUI counterparts at 1:1 parity. The fourth
-(Playback) is the next milestone.
+All four user-facing CLI surfaces have GUI counterparts at 1:1 parity.
 
 - **Tuner** — built-in + user tuning picker, uniform capo stepper, per-string
   capo panel (for drop-D / banjo 5th-string / partial capos), live mic capture
@@ -56,8 +55,8 @@ Three of the four CLI surfaces have GUI counterparts at 1:1 parity. The fourth
 
 ## Renderer plugin system
 
-The Recorder (and the future Playback screen) consume any registered renderer
-through a uniform plugin contract. Two ship by default:
+Both Recorder and Playback consume any registered renderer through a uniform
+plugin contract. Two ship by default:
 
 - **Tab** — column-grid view, one row per string, mirroring the CLI's record
   layout.
@@ -89,10 +88,13 @@ tuning, built-in or custom. `--capo 3` is a uniform capo; `--capo "0,2,2,2,2,2"`
 is a partial capo (drop-D style); `--capo "3,3,3,3,0"` keeps the banjo
 5th-string drone open while capoing the body. Capo info round-trips through
 the alphaTex `\subtitle` field — `; capo=<spec>` — so a recording made with a
-capo replays without the user having to remember the value. Both Tuner and
-Recorder GUIs expose uniform + per-string capo controls; the per-string panel
-is collapsible behind a "Per-string" toggle so the common-case uniform stepper
-stays compact.
+capo replays without the user having to remember the value. Tuner, Recorder,
+and Playback GUIs share the same `makeTuningController` factory and so expose
+identical uniform + per-string capo controls; the per-string panel is
+collapsible behind a "Per-string" toggle so the common-case uniform stepper
+stays compact. Playback additionally auto-loads the file's embedded capo on
+tab load when the file's tuning matches a registry entry, mirroring how the
+CLI's `twanga play` falls back to the file's capo when `--capo` isn't supplied.
 
 ## What's next
 

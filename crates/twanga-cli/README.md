@@ -8,7 +8,7 @@ The `twanga` command-line binary. Mostly UX glue — the analysis logic lives in
 - `--flag` (no value) — explicitly ask to be prompted (or, for `--bpm` on `play`, explicitly defer to the file's tempo).
 - `(omitted)` — same as bare `--flag` when run in a terminal; falls back to a sensible default (or just doesn't apply) when stdin isn't a TTY.
 
-Ctrl-C and `q + Enter` both produce a clean exit.
+Ctrl-C and `q + Enter` both produce a clean exit. `p + Enter` toggles pause/resume on `record` and `play`.
 
 ## Subcommands
 
@@ -23,9 +23,9 @@ Capture audio, show detected pitch vs nearest target. Prompts for tuning if `--t
 
 ### `record` — live tab recorder
 
-Capture played notes as alphaTex, saved to `recordings/recording-<unix-secs>.alphatex`. Each detected pitch is mapped to the smallest non-negative fret position on the (capo'd) tuning, so a played D5 on uke registers as fret 5 on the A string, not fret 14 on the C string. The display shows a refreshing multi-string view of the in-progress block.
+Capture played notes as alphaTex. If you provide a `--title`, the filename slugifies to `<title>-<unix-secs>.alphatex`; otherwise it falls back to `recordings/recording-<unix-secs>.alphatex`. Each detected pitch is mapped to the smallest non-negative fret position on the (capo'd) tuning, so a played D5 on uke registers as fret 5 on the A string, not fret 14 on the C string. The display shows a refreshing multi-string view of the in-progress block; a status line below tracks elapsed time, total columns, and (when non-zero) a count of pitches that didn't fit on the active fretboard.
 
-When a capo is set, logged frets are **capo-relative** (the musical convention) and the file's `\subtitle` field carries the capo via a `; capo=<spec>` suffix so the recording round-trips through playback without the user having to remember and re-pass the same value.
+When a capo is set, logged frets are **capo-relative** (the musical convention) and the file's `\subtitle` field carries the capo via a `; capo=<spec>` suffix so the recording round-trips through playback without the user having to remember and re-pass the same value. Any `--title` you supply gets written to the alphaTex `\title` directive so playback (CLI or GUI) shows it in the header.
 
 | Flag | Description |
 |------|-------------|
@@ -34,6 +34,9 @@ When a capo is set, logged frets are **capo-relative** (the musical convention) 
 | `--bpm <N>` | Tempo (20–400). Prompted if omitted; default 120. |
 | `--resolution <1/N>` | Note value per column: `1/4`, `1/8`, `1/16`, `1/32`. Prompted if omitted; default `1/8`. |
 | `--block-width <N>` | Columns per scrolling block (4–200). Prompted if omitted; default 32. |
+| `--no-metronome` | Disable the metronome click on each beat (default: on). |
+| `--pre-roll <N>` | Audible count-in ticks before recording starts (0–16). Prompted if omitted; default 4. Always audible, even when `--no-metronome` is set. Aborts cleanly on Ctrl-C / `q + Enter`. |
+| `--title <text>` | Human-readable title — written to `\title` in the alphaTex header AND used to derive the filename (`<slug>-<unix-secs>.alphatex`). Prompted if omitted; accept blank to fall back to the original `recording-<unix-secs>.alphatex` shape. |
 
 ### `play <path>` — play back a recording
 
@@ -49,6 +52,7 @@ Load an `.alphatex` file, scroll a cursor through it at the file's (or overridde
 | `--wait` | Practice mode — cursor pauses at each note until you play it (within ±50 cents on any expected string/fret). Rests still advance with time so the metronome stays musical. |
 | `--loop` | Loop the entire file continuously. |
 | `--loop <START:END>` | Loop a specific column range (0-indexed, end exclusive). E.g. `--loop 0:20` plays columns 0–19 on repeat; `--loop 20:30` loops columns 20–29. |
+| `--pre-roll <N>` | Audible count-in ticks before playback starts (0–16). Prompted if omitted; default 4. Always audible, even when `--no-metronome` is set. |
 
 Example with the bundled demo:
 
@@ -87,6 +91,6 @@ Placeholder. Will eventually round-trip alphaTex ↔ MusicXML once the MusicXML 
 - **Check**: `cargo check -p twanga-cli`
 - **Test**: `cargo test -p twanga-cli`
 - **Run**: `cargo run -p twanga-cli -- <subcommand>` (each subcommand also responds to `--help`)
-- **Depends on**: `twanga-core`, `twanga-audio`, `twanga-dsp`, `twanga-synth`, `twanga-tabs`, `twanga-tui`, `clap`, `anyhow`, `serde`, `toml`, `directories`
+- **Depends on**: `twanga-core`, `twanga-audio`, `twanga-dsp`, `twanga-synth`, `twanga-tabs`, `twanga-tui`, `clap`, `anyhow`, `toml`, `directories`
 
 See [the workspace README](../../README.md) for project context.

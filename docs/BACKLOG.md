@@ -6,24 +6,18 @@ See [ROADMAP.md](ROADMAP.md) for what's actually committed next; this file is ev
 
 ## Web build feature parity with CLI
 
-The web frontend (`frontend/web/`) is shipped via GitHub Pages and wrapped by the Tauri 2 desktop shell. Same HTML/JS/WASM bundle, two delivery paths. The Tuner, Tunings, and Recorder screens are now at 1:1 parity with their CLI counterparts; Playback is the remaining gap.
-
-### Shipped
-
-- **Per-string tuner display.** Tuning picker (built-in + user tunings), per-target cents indicator, mic capture via Web Audio + AudioWorklet → YIN via WASM. Persists last-used tuning to `localStorage`.
-- **Capo on the tuner.** Uniform 0–12 stepper plus a "Per-string" toggle that expands into one stepper per string for partial / drone-style capos.
-- **Custom tunings in the browser.** Merged built-in + user list, inline "Define a new tuning" form (display name, per-string note inputs with live MIDI preview, auto-derived slug, full validation via the same Rust rules `twanga tunings add` enforces). Stored in `localStorage` under the same `PresetEntry` schema the CLI writes to TOML.
-- **Tab recorder in browser.** Full `twanga record` parity (tuning, capo, BPM, resolution, block-width). Mic → chromatic `WebTuner` → `match_pitch_to_fret` → column tracker at tempo → renderer host. Save downloads a `.alphatex` written by the same Rust `AlphaTexWriter` the CLI uses, so files round-trip through `twanga play --capo`.
+The web frontend (`frontend/web/`) ships via GitHub Pages and is wrapped by the Tauri 2 desktop shell. Same HTML/JS/WASM bundle, two delivery paths. **All four user-facing CLI surfaces are at 1:1 GUI parity** as of 2026-05-19 — Tuner, Tunings, Recorder, Playback. Detailed feature inventory lives in the [CHANGELOG](../CHANGELOG.md); this section is just what remains.
 
 ### Still owed
 
 - **Persist "last session" state** — last opened tab + last column position. (Tuning + capo already persist via the controller.) One-click resume on next visit.
 - **`twanga tunings remove` CLI subcommand.** GUI has a per-row delete button; the CLI has no equivalent (users edit the TOML by hand). Adding `tunings remove <slug>` would close the only direction-reversed parity gap.
 - **Tauri filesystem library backend** — the `library-tauri.js` stub already mirrors the IDB backend's interface; once `list_recordings` / `load_recording` / `save_recording` Tauri commands land on the desktop side, the browser-storage warnings disappear and CLI recordings show up in the desktop library.
+- **Tauri filesystem tunings sync** — same pattern as the library, but for `$CONFIG/twanga/tunings.toml` ↔ `localStorage`. Desktop app reads/writes the CLI's TOML directly so a custom tuning defined in the GUI shows up in `twanga record --tuning <slug>`.
 
-### Renderer plugin system (shipped)
+### Renderer plugin system (shipped — what's next)
 
-The Recorder (and the future Playback screen) consume any registered renderer through a uniform plugin contract: `{ id, name, version, create(container, options) }` registered with the module-singleton `RendererRegistry`. Built-in `twanga.tab` (column-grid) and `twanga.highway` (notes-toward-you) ship via the *same* `register()` path future third-party plugins will use — no special lane for built-ins, no host-side branching on plugin id. See [`frontend/web/render/`](../frontend/web/render/).
+Both Recorder and Playback consume any registered renderer through a uniform plugin contract: `{ id, name, version, create(container, options) }` registered with the module-singleton `RendererRegistry`. Built-in `twanga.tab` (column-grid) and `twanga.highway` (notes-toward-you) ship via the *same* `register()` path future third-party plugins will use — no special lane for built-ins, no host-side branching on plugin id. See [`frontend/web/render/`](../frontend/web/render/).
 
 Future delivery mechanisms (none yet built, but the contract is stable enough that they're additive):
 
@@ -31,28 +25,15 @@ Future delivery mechanisms (none yet built, but the contract is stable enough th
 - **"Load from URL"** in the web build, with explicit user consent + content-hash check.
 - **Decentralised plugin directory** — a list of plugin-manifest URLs the user adds (like git remotes or APT sources). Anyone can host a registry; we ship a default one. Aligns with the local-first / no-walled-garden ethos. Steam Workshop is explicitly *not* the model.
 
-## Recorder + Playback QoL
+## Recorder + Playback QoL — still owed
 
-Cross-cutting improvements to live capture and tab playback. Each item flags whether it lands on the CLI, the GUI, or both. CLI flags follow the standard three-form pattern documented in [twanga-cli/README.md](../crates/twanga-cli/README.md): `--flag value` direct, `--flag` bare → prompt, omitted → default.
-
-- **Metronome on `record` (CLI + GUI).** Playback already has it; recording doesn't. Add `--metronome` to `twanga record` (default on, `--no-metronome` to disable) — same three-form pattern as the existing playback flag. GUI Recorder gets a live toggle that's also default-on. Implementation reuses the column-tick driver as the click source so it can't drift from the recorded grid.
-
-- **Pre-roll / count-in on `record` and `play` (CLI + GUI).** N ticks of metronome before the playhead actually starts, so the user has time to react. Add `--pre-roll <N>` to both subcommands (default 4 ticks, bare-form prompt, configurable default). GUI gets a toggle (on/off) and an `N` input. Useful even when the metronome flag is off — pre-roll always ticks audibly during the count, even if the main run is silent.
-
-- **Pause / resume on `record` and `play` (CLI + GUI).** Spacebar (or `p + Enter`) toggles. On record, pause freezes the column-tick driver and stops accepting new pitch events; resume picks up at the same column. On play, pause freezes the playhead; resume continues. Both surfaces get this. Prerequisite for the "undo last column" GUI affordance below — pause + undo + resume becomes a real workflow.
-
-- **Duration display on `record` and `play` (CLI + GUI).** Status line shows `0:42 / 24 cols` while recording, `0:18 / 1:24` while playing back. Cheap to add — both flows already track sample count / column index.
-
-- **Title prompt on `record` (CLI + GUI).** CLI prompts for a title at recording start (default = `untitled-<timestamp>`); writes it to `\title` in the alphaTex header AND uses it for the filename. GUI surfaces a Save modal with a title input that does the same. The current behaviour (no `\title`, filename is the timestamp) is the fallback when the user accepts the default.
-
-- **"Couldn't fit on fretboard" indicator (CLI + GUI).** When a detected pitch can't be reached within `MAX_FRET` on the active tuning + capo, it's silently dropped today. Surface it:
-  - CLI `record`: print a small running counter ("3 notes dropped — pitch out of fretboard range"). Per-frame logging is too noisy; aggregate is enough.
-  - CLI `play --tuning <other>` (transpose): pre-scan the file and print the list of un-transposable notes up front, before the cursor starts. User decides whether to proceed.
-  - GUI Recorder: small "✗" indicator next to the status hint, tooltip lists the unreachable pitches.
+Most of this section shipped in the 2026-05-19 cross-cutting QoL batch (metronome on record, pre-roll, pause/resume, duration display, title prompt on record, "couldn't fit on fretboard" indicator — see [CHANGELOG](../CHANGELOG.md)). What remains:
 
 - **Mic-level meter (GUI only, with caveat).** RMS bar so silence vs "mic not detecting your pitch" don't look the same. Doable on the CLI too in principle, but the scrolling tab output would overwrite it — a fixed bottom-line meter would need a multi-region terminal layout that's more work than it's worth. GUI-only is the pragmatic call, even though the CLI gap is a known asymmetry.
 
-- **Live editing / undo last column (GUI only, prerequisite: pause/resume + tab editor).** Once pause/resume is in (above), the GUI can offer "Undo last column" while paused — pop the last committed column, rewind the playhead one step, resume from there. The CLI doesn't get this because mid-recording terminal editing is unwieldy; we'd need a dedicated tab-editor screen for it (see below) which exists at a different stage of the workflow.
+- **Live editing / undo last column (GUI only, prerequisite: tab editor).** Pause/resume shipped in the QoL batch; the natural follow-on is offering "Undo last column" while paused — pop the last committed column, rewind the playhead one step, resume from there. The CLI doesn't get this because mid-recording terminal editing is unwieldy; we'd need a dedicated tab-editor screen for it (see below) which exists at a different stage of the workflow.
+
+- **Library "Last session" auto-resume.** The library tracks `createdAt` + `lastBackedUpAt` per entry; adding a `lastPlayedAt` + `lastColumn` would let Playback offer "Resume your last tab where you left off" on screen entry. Bookmark behaviour.
 
 ## Tab editor (eventual, GUI-first)
 
