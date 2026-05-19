@@ -44,6 +44,16 @@ pub fn midi_to_name(midi: u8) -> String {
     twanga_core::MidiNote(midi).name()
 }
 
+/// Human-readable display name for a built-in preset slug — e.g.
+/// `"Standard Ukulele (Reentrant GCEA)"` for `"standard-ukulele"`. Returns
+/// `None` for unknown slugs (matches `MidiNote::from_name`'s shape). Used
+/// by the tuning picker so buttons read "Standard Ukulele" rather than
+/// the developer-facing `standard-ukulele` slug.
+#[wasm_bindgen]
+pub fn preset_display_name(slug: &str) -> Option<String> {
+    twanga_core::Tuning::from_preset(slug).map(|t| t.name)
+}
+
 /// Run YIN pitch detection over a buffer of mono f32 samples at `sample_rate`.
 /// Returns the detected frequency in Hz, or `None` if the buffer is too quiet
 /// or doesn't contain a confident pitch. This is the actual pitch engine the
@@ -62,17 +72,26 @@ pub fn detect_pitch(samples: &[f32], sample_rate: u32) -> Option<f32> {
 /// samples across multiple `feed` calls (web audio worklets post 128-sample
 /// chunks; the YIN window is ~8K samples), drains readings on demand.
 ///
-/// Two factory constructors:
+/// Three factory constructors:
 /// - `WebTuner.new_chromatic(sr)` — nearest-12-TET-note mode; one reading
 ///   per accepted detection, label is the note name (`A4`, `C#3`, …).
 /// - `WebTuner.new_for_strings(slug, sr)` — per-string mode against the
 ///   built-in tuning identified by `slug` (`standard-guitar`, etc.). At most
 ///   one reading per string per analysis window, gated against detections
 ///   that aren't plausibly any string in the tuning.
+/// - `WebTuner.new_for_strings_with_capo(slug, capo_spec, sr)` — as above,
+///   but applies a `Capo` (parsed from `capo_spec` — `"3"` for uniform,
+///   `"0,2,2,2,2,2"` for per-string) before constructing the underlying
+///   tuner. Targets are the effective post-capo open pitches, matching
+///   what `twanga tune --capo` does on the CLI.
 #[wasm_bindgen]
 pub struct WebTuner {
     inner: twanga_dsp::Tuner,
     string_labels: Vec<String>,
+    /// The tuning's display name, possibly suffixed with `(capo N)` /
+    /// `(partial capo)` if a capo was applied. Mirrors `Tuning.name` after
+    /// `Capo::apply`.
+    name: String,
 }
 
 #[derive(serde::Serialize)]
@@ -98,6 +117,7 @@ impl WebTuner {
         WebTuner {
             inner: twanga_dsp::Tuner::new(twanga_dsp::TunerMode::Chromatic, sample_rate),
             string_labels: Vec::new(),
+            name: "Chromatic".to_string(),
         }
     }
 
@@ -112,10 +132,44 @@ impl WebTuner {
         let tuning = twanga_core::Tuning::from_preset(slug)
             .ok_or_else(|| format!("unknown tuning slug: {slug}"))?;
         let labels = tuning.strings.iter().map(|s| s.name.clone()).collect();
+        let name = tuning.name.clone();
         Ok(WebTuner {
             inner: twanga_dsp::Tuner::new(twanga_dsp::TunerMode::Strings(tuning), sample_rate),
             string_labels: labels,
+            name,
         })
+    }
+
+    /// Like [`Self::new_for_strings`] but applies a `Capo` first, so the
+    /// targets are the post-capo open pitches. `capo_spec` accepts either a
+    /// uniform integer (`"3"` — capo on fret 3) or a per-string comma list
+    /// (`"0,2,2,2,2,2"` — drop-D-style partial capo). Empty / `"0"` produces
+    /// a no-op capo and behaves identically to `new_for_strings`. Mirrors
+    /// `twanga tune --capo` on the CLI exactly.
+    pub fn new_for_strings_with_capo(
+        slug: &str,
+        capo_spec: &str,
+        sample_rate: u32,
+    ) -> Result<WebTuner, String> {
+        let tuning = twanga_core::Tuning::from_preset(slug)
+            .ok_or_else(|| format!("unknown tuning slug: {slug}"))?;
+        let capo = twanga_core::Capo::parse(capo_spec, tuning.strings.len())?;
+        let effective = capo.apply(&tuning)?;
+        let labels = effective.strings.iter().map(|s| s.name.clone()).collect();
+        let name = effective.name.clone();
+        Ok(WebTuner {
+            inner: twanga_dsp::Tuner::new(twanga_dsp::TunerMode::Strings(effective), sample_rate),
+            string_labels: labels,
+            name,
+        })
+    }
+
+    /// Effective display name for the active tuning. After capo application
+    /// this is e.g. `"Standard Banjo (Open G) (capo 3)"`; without a capo it's
+    /// the raw preset name (`"Standard Ukulele (Reentrant GCEA)"`). For
+    /// chromatic-mode tuners it's `"Chromatic"`.
+    pub fn name(&self) -> String {
+        self.name.clone()
     }
 
     /// The string labels in string-number order (string 1 first). Lets the
@@ -329,5 +383,81 @@ mod tests {
         let readings: Vec<_> = t.inner.take_readings().collect();
         assert!(!readings.is_empty());
         assert_eq!(readings[0].label, "A4");
+    }
+
+    #[test]
+    fn preset_display_name_returns_human_label() {
+        assert_eq!(
+            preset_display_name("standard-ukulele").as_deref(),
+            Some("Standard Ukulele (Reentrant GCEA)"),
+        );
+        assert_eq!(
+            preset_display_name("drop-d-guitar").as_deref(),
+            Some("Drop D Guitar (DADGBE)"),
+        );
+        assert!(preset_display_name("not-a-tuning").is_none());
+    }
+
+    #[test]
+    fn web_tuner_name_reflects_active_mode() {
+        let chromatic = WebTuner::new_chromatic(48_000);
+        assert_eq!(chromatic.name(), "Chromatic");
+
+        let uke = WebTuner::new_for_strings("standard-ukulele", 48_000).unwrap();
+        assert_eq!(uke.name(), "Standard Ukulele (Reentrant GCEA)");
+    }
+
+    #[test]
+    fn web_tuner_with_capo_shifts_targets_and_relabels_strings() {
+        // Uniform capo 3 on uke: every string +3 semitones. A4 → C5,
+        // E4 → G4, C4 → D#4 (Eb4), reentrant g4 → A#4 (Bb4). The labels
+        // come from `MidiNote::name()` of the shifted MIDI value, which
+        // is `Capo::apply`'s convention when the offset is non-zero.
+        let t =
+            WebTuner::new_for_strings_with_capo("standard-ukulele", "3", 48_000).unwrap();
+        let labels = t.string_labels();
+        assert_eq!(labels, vec!["C5", "G4", "D#4", "A#4"]);
+
+        // Effective name carries the capo annotation.
+        assert!(
+            t.name().contains("capo 3"),
+            "expected '(capo 3)' in name, got {:?}",
+            t.name(),
+        );
+    }
+
+    #[test]
+    fn web_tuner_with_zero_capo_matches_no_capo_constructor() {
+        // `"0"` is the canonical no-op capo. Should produce the same labels
+        // as the no-capo constructor, with the reentrant label preserved
+        // (since the offset on that string is also 0).
+        let with = WebTuner::new_for_strings_with_capo("standard-ukulele", "0", 48_000).unwrap();
+        let without = WebTuner::new_for_strings("standard-ukulele", 48_000).unwrap();
+        assert_eq!(with.string_labels(), without.string_labels());
+        assert_eq!(with.string_labels()[3], "g4 (reentrant)");
+    }
+
+    #[test]
+    fn web_tuner_with_partial_capo_preserves_unchanged_string_labels() {
+        // Banjo body capo on fret 3, 5th-string drone left open. The drone
+        // label `g4 (drone)` should survive because its offset is 0; the
+        // body strings get relabelled to their new MIDI names.
+        let t = WebTuner::new_for_strings_with_capo("standard-banjo", "3,3,3,3,0", 48_000)
+            .unwrap();
+        let labels = t.string_labels();
+        // Body strings: D4+3=F4, B3+3=D4, G3+3=A#3, D3+3=F3.
+        assert_eq!(&labels[..4], &["F4", "D4", "A#3", "F3"]);
+        // 5th-string drone label is preserved (offset 0).
+        assert_eq!(labels[4], "g4 (drone)");
+        assert!(t.name().contains("partial capo"));
+    }
+
+    #[test]
+    fn web_tuner_with_invalid_capo_returns_err() {
+        // Capo spec with wrong length should propagate the Capo::parse
+        // error message up to the JS side, not panic.
+        assert!(
+            WebTuner::new_for_strings_with_capo("standard-ukulele", "1,2", 48_000).is_err()
+        );
     }
 }
