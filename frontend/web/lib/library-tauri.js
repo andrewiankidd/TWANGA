@@ -22,3 +22,9 @@ export async function save(_entry) { throw new Error(NOT_READY); }
 export async function deleteTab(_id) { throw new Error(NOT_READY); }
 export async function markDownloaded(_id, _when) { /* no-op: filesystem persistence is automatic */ }
 export async function requestPersistence() { return true; /* filesystem is always persistent */ }
+
+/// Filesystem-watch-based subscribe is the eventual implementation —
+/// the Tauri command would post `file changed in $CONFIG/twanga/recordings/`
+/// events back to JS. For now: no-op (single-tab usage on desktop is the
+/// common case and the user can just hit refresh).
+export function subscribe(_callback) { return () => {}; }

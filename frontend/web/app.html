@@ -3168,6 +3168,18 @@
             wirePlaybackSettings();
             el('playback-back-to-library-btn').addEventListener('click', playbackUnload);
 
+            // Cross-tab IDB sync: if the user records in another tab,
+            // refresh our library list so the new entry shows up here
+            // without a manual reload. Re-render only when in the
+            // library view (loading a tab swaps the visible UI, and
+            // mutating IDB during playback shouldn't yank the user out).
+            library.subscribe(() => {
+                if (!playbackState.loadedTab
+                    && el('screen-playback').classList.contains('active')) {
+                    renderPlaybackLibrary();
+                }
+            });
+
             // Tuning controller is instantiated lazily on first tab load —
             // before that, the controller's DOM (capo control etc) is
             // inside `playback-tab-view` which is hidden. `makeTuningController`

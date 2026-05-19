@@ -27,6 +27,37 @@ const DB_VERSION = 1;
 
 let _dbPromise = null;
 
+// Cross-tab change notifications via BroadcastChannel. When the user
+// records in one tab and has another tab open on the Playback library
+// screen, the second tab can refresh its list without a manual reload.
+// BC posts only to OTHER tabs (not the originating one), which is fine —
+// the originating tab updates its own UI synchronously.
+//
+// Older browsers without BroadcastChannel: silent no-op. The single-tab
+// experience is unaffected; cross-tab refresh just won't happen.
+const _channel = typeof BroadcastChannel !== 'undefined'
+    ? new BroadcastChannel('twanga-tabs-changed')
+    : null;
+
+function _notify(event) {
+    if (!_channel) return;
+    try { _channel.postMessage(event); } catch (e) { /* swallow */ }
+}
+
+/// Subscribe to cross-tab library changes. The callback receives an
+/// event object `{ type: 'save'|'delete'|'markDownloaded', id }`. The
+/// returned function unsubscribes; idempotent + safe to call after
+/// the channel was never created (no-op when unsupported).
+export function subscribe(callback) {
+    if (!_channel) return () => {};
+    const handler = (e) => {
+        try { callback(e.data); }
+        catch (err) { console.warn('library.subscribe handler threw', err); }
+    };
+    _channel.addEventListener('message', handler);
+    return () => _channel.removeEventListener('message', handler);
+}
+
 function openDb() {
     if (_dbPromise) return _dbPromise;
     _dbPromise = new Promise((resolve, reject) => {
@@ -170,6 +201,7 @@ export async function save({ title, alphatex, source = 'user' }) {
         lastBackedUpAt: null,
     };
     const id = await tx('readwrite', (store) => reqAsPromise(store.add(row)));
+    _notify({ type: 'save', id });
     return id;
 }
 
@@ -180,6 +212,7 @@ export async function deleteTab(id) {
         return; // bundled examples are read-only
     }
     await tx('readwrite', (store) => reqAsPromise(store.delete(id)));
+    _notify({ type: 'delete', id });
 }
 
 /// Mark a user tab as exported to a real file at `when` (defaults to
@@ -202,6 +235,7 @@ export async function markDownloaded(id, when = Date.now()) {
         };
         getReq.onerror = () => reject(getReq.error);
     }));
+    _notify({ type: 'markDownloaded', id });
 }
 
 /// Ask the browser to mark our storage as persistent so it's less
