@@ -497,10 +497,11 @@
             color: var(--highlight);
         }
 
-        /* Tunings screen — merged list of built-in + user-defined tunings,
-           each row showing the display name, slug, origin badge, and (for
-           user tunings only) a delete button. Mirrors the CLI's merged
-           registry shape. */
+        /* Tunings screen — merged list of built-in + user-defined tunings.
+           Two-line layout per row: display name on top, slug underneath as
+           the developer-facing reference. Built-in vs user is signalled
+           implicitly by the presence/absence of a delete button — no
+           explicit badge needed. */
         .tuning-list {
             display: flex;
             flex-direction: column;
@@ -517,37 +518,29 @@
             border-radius: var(--radius);
             padding: 0.6rem 0.9rem;
         }
+        .tuning-row .info {
+            display: flex;
+            flex-direction: column;
+            gap: 0.1rem;
+            min-width: 0;
+        }
         .tuning-row .name {
             font-weight: 700;
             color: var(--primary);
             font-size: 0.95rem;
+            line-height: 1.2;
         }
         .tuning-row .slug {
             color: var(--muted);
             font-family: monospace;
-            font-size: 0.8rem;
+            font-size: 0.75rem;
+            line-height: 1.2;
         }
         .tuning-row .pitches {
             margin-left: auto;
             color: var(--muted);
             font-family: monospace;
             font-size: 0.8rem;
-        }
-        .origin-badge {
-            font-size: 0.65rem;
-            font-weight: 700;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-            padding: 0.15rem 0.5rem;
-            border-radius: 999px;
-            border: 1px solid var(--border);
-        }
-        .origin-builtin {
-            color: var(--muted);
-        }
-        .origin-user {
-            color: var(--highlight);
-            border-color: var(--highlight);
         }
         .delete-btn {
             background: transparent;
@@ -1759,8 +1752,9 @@
 
         /// Render the merged tuning list (built-ins first, then user
         /// tunings). Built-ins are read-only; user tunings get a delete
-        /// button. Origin badges match the CLI menu's `[builtin]` / `[user]`
-        /// annotations.
+        /// button. Built-in vs user origin is conveyed implicitly by the
+        /// presence (user) or absence (built-in) of the delete button —
+        /// the explicit badge is gone.
         function renderTuningsScreen() {
             const list = el('tuning-list');
             list.textContent = '';
@@ -1778,26 +1772,30 @@
                 const row = document.createElement('div');
                 row.className = 'tuning-row';
 
+                // Stacked label: display name on top, slug (the
+                // developer-facing reference) on a second line underneath.
+                // Wrapping both in an `.info` flex column keeps `.pitches`
+                // and the optional `.delete-btn` free to sit on the row's
+                // right via `margin-left: auto`.
+                const info = document.createElement('div');
+                info.className = 'info';
+
                 const name = document.createElement('span');
                 name.className = 'name';
                 name.textContent = fullName(r.slug);
-                row.appendChild(name);
+                info.appendChild(name);
 
                 const slug = document.createElement('span');
                 slug.className = 'slug';
                 slug.textContent = r.slug;
-                row.appendChild(slug);
+                info.appendChild(slug);
 
-                const badge = document.createElement('span');
-                badge.className = 'origin-badge ' +
-                    (r.origin === 'user' ? 'origin-user' : 'origin-builtin');
-                badge.textContent = r.origin;
-                row.appendChild(badge);
+                row.appendChild(info);
 
                 // Open-string preview — same shape as the CLI's tuning list.
                 // For user tunings we read pitches directly from the stored
-                // entry; for built-ins we construct a tuner just to query
-                // its string labels via the existing WASM surface.
+                // entry; for built-ins we briefly construct a tuner and read
+                // `string_labels()` (more direct than `strings_info()`).
                 const pitches = document.createElement('span');
                 pitches.className = 'pitches';
                 pitches.textContent = pitchPreview(r);
