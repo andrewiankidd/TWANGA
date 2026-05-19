@@ -21,6 +21,11 @@
             --card: #2a2520;
             --border: #3d362b;
             --radius: 5px;
+            /* Per-cents status colours, shared by both light + dark themes
+               (slightly desaturated so they don't fight the amber highlight). */
+            --ok: #6bbf59;
+            --warn: #d4a84a;
+            --err: #c97373;
         }
         body.light {
             --background: #f0ebe0;
@@ -188,32 +193,136 @@
         }
 
         /* Tuner-screen widgets */
-        .tuner-readout {
+        /* Tuning picker — horizontal button row. Active selection has the
+           highlight colour; rest are muted cards. */
+        .tuning-picker {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.4rem;
+            margin-bottom: 1.5rem;
+        }
+        .tuning-option {
+            background: var(--card);
+            border: 1px solid var(--border);
+            color: var(--text);
+            padding: 0.5rem 0.9rem;
+            border-radius: var(--radius);
+            font-family: "Montserrat", sans-serif;
+            font-size: 0.85rem;
+            font-weight: 700;
+            cursor: pointer;
+            transition: background 0.15s, border-color 0.15s, color 0.15s;
+        }
+        .tuning-option:hover {
+            border-color: var(--highlight);
+        }
+        .tuning-option.active {
+            background: var(--highlight);
+            border-color: var(--highlight);
+            color: var(--background);
+        }
+
+        /* String rows — one per tuning string, plus a special "Chromatic"
+           variant that uses just one row showing the current nearest note. */
+        .strings {
+            display: flex;
+            flex-direction: column;
+            gap: 0.6rem;
+            margin-bottom: 1.5rem;
+        }
+        .string-row {
             background: var(--card);
             border: 1px solid var(--border);
             border-radius: var(--radius);
-            padding: 1.5rem;
-            text-align: center;
-            margin-bottom: 1rem;
+            padding: 1rem 1.2rem;
+            transition: border-color 0.2s, background 0.2s;
         }
-        .tuner-readout .hz {
-            font-size: 2.2rem;
+        .string-row.is-active {
+            border-color: var(--highlight);
+        }
+        .string-row-head {
+            display: flex;
+            justify-content: space-between;
+            align-items: baseline;
+            margin-bottom: 0.5rem;
+        }
+        .string-row-head .name {
+            font-size: 1.4rem;
             font-weight: 800;
             font-family: monospace;
-            color: var(--highlight);
+            color: var(--primary);
         }
-        .tuner-readout .label {
+        .string-row-head .target {
             color: var(--muted);
-            text-transform: uppercase;
-            font-size: 0.75rem;
-            letter-spacing: 1px;
-            margin-bottom: 0.6rem;
+            font-size: 0.85rem;
+            font-family: monospace;
         }
-        .tuner-readout .hint {
+        /* Cents bar — visual indicator of how off the detected pitch is.
+           Vertical centre line is "in tune"; cursor slides left/right
+           proportional to cents off, capped at the edges. */
+        .cents-bar {
+            position: relative;
+            width: 100%;
+            height: 10px;
+            background: var(--background);
+            border-radius: 5px;
+            margin: 0.4rem 0;
+        }
+        .cents-bar::before {
+            /* Centre tick marking 0¢ */
+            content: "";
+            position: absolute;
+            left: 50%;
+            top: -4px;
+            bottom: -4px;
+            width: 2px;
+            background: var(--muted);
+            opacity: 0.6;
+            transform: translateX(-50%);
+        }
+        .cents-bar-cursor {
+            position: absolute;
+            top: -3px;
+            bottom: -3px;
+            width: 14px;
+            background: var(--muted);
+            border-radius: 3px;
+            transform: translateX(-50%);
+            left: 50%;
+            opacity: 0.3;
+            transition: left 0.18s ease-out, background 0.2s, opacity 0.3s;
+        }
+        .string-row.has-reading .cents-bar-cursor { opacity: 1; }
+        .string-row.is-tuned .cents-bar-cursor { background: var(--ok); }
+        .string-row.is-close .cents-bar-cursor { background: var(--warn); }
+        .string-row.is-off   .cents-bar-cursor { background: var(--err); }
+        .string-row-foot {
+            display: flex;
+            justify-content: space-between;
+            align-items: baseline;
+            font-size: 0.85rem;
+        }
+        .string-row-foot .detected {
+            font-family: monospace;
+            color: var(--text);
+        }
+        .string-row-foot .status {
             color: var(--muted);
-            font-size: 0.8rem;
-            margin-top: 0.6rem;
             font-style: italic;
+        }
+        .string-row.is-tuned .status { color: var(--ok); font-style: normal; font-weight: 700; }
+        .string-row.is-close .status { color: var(--warn); }
+        .string-row.is-off   .status { color: var(--err); }
+
+        /* Chromatic mode: same .string-row shell, but the name is what was
+           detected (e.g. "A4") and target is the note's exact Hz. */
+
+        .tuner-hint {
+            color: var(--muted);
+            font-size: 0.85rem;
+            font-style: italic;
+            text-align: center;
+            margin: 0.5rem 0 1rem;
         }
         .row {
             display: flex;
@@ -234,6 +343,15 @@
             font-size: 0.9rem;
         }
         button.action:hover { filter: brightness(1.1); }
+        button.action.secondary {
+            background: transparent;
+            border: 1px solid var(--border);
+            color: var(--text);
+        }
+        button.action.secondary:hover {
+            border-color: var(--highlight);
+            color: var(--highlight);
+        }
 
         .tuning-list { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.5rem; }
         .tuning-list .pill {
@@ -324,23 +442,23 @@
             </div>
             <h2>Tuner</h2>
             <p class="subtitle">
-                Web Audio capture (<code>getUserMedia</code> + AudioWorklet)
-                feeds mic samples to the same YIN detector the CLI ships, via
-                the <code>twanga-web</code> WASM bindings. Per-string tuning
-                comparison and a multi-string display arrive once the tuner
-                screen learns to consume a tuning preset; for now this is a
-                bare chromatic readout — whatever you play, in Hz.
+                Pick a tuning, click Start mic, and play any string. Each row
+                shows your detected pitch against the target — the bar's
+                cursor slides left if you're flat, right if you're sharp,
+                centred when you're in tune (within ±5¢). Same YIN detector
+                the CLI ships, just running in WASM with samples piped
+                through Web Audio.
             </p>
 
-            <div class="tuner-readout">
-                <div class="label">Detected frequency</div>
-                <div class="hz" id="pitch-hz">—</div>
-                <div class="hint" id="pitch-hint">click Start to begin</div>
-            </div>
+            <div class="tuning-picker" id="tuning-picker"></div>
+
+            <div class="strings" id="strings"></div>
+
+            <p class="tuner-hint" id="tuner-hint">click Start mic to begin</p>
 
             <div class="row">
                 <button class="action" id="mic-btn">Start mic</button>
-                <button class="action" id="pitch-btn">Test (440 Hz sine)</button>
+                <button class="action secondary" id="pitch-btn">Test (440 Hz sine)</button>
             </div>
         </section>
 
@@ -392,7 +510,7 @@
         import init, {
             pick_splash,
             builtin_tuning_slugs,
-            detect_pitch,
+            WebTuner,
         } from './pkg/twanga_web.js';
 
         function el(id) { return document.getElementById(id); }
@@ -493,22 +611,29 @@
             window.addEventListener('hashchange', routeFromHash);
             routeFromHash();
 
-            // Synthetic-pitch demo on the tuner screen.
+            renderTuningPicker();
+            // Default to chromatic — works for any instrument without making
+            // the user pick first. They can swap to a per-string tuning once
+            // they know what they're playing.
+            selectTuning('chromatic');
+
             el('pitch-btn').addEventListener('click', () => {
-                stopMic(); // can't run synthetic + mic at once on a single readout
+                stopMic(); // can't run synthetic + mic at once
                 const sr = 48_000;
                 const N = 4096;
                 const buf = new Float32Array(N);
                 for (let i = 0; i < N; i++) {
                     buf[i] = Math.sin((2 * Math.PI * 440 * i) / sr);
                 }
-                const hz = detect_pitch(buf, sr);
-                if (hz === undefined) {
-                    el('pitch-hz').textContent = '—';
-                    el('pitch-hint').textContent = 'no pitch detected';
-                } else {
-                    el('pitch-hz').textContent = hz.toFixed(2) + ' Hz';
-                    el('pitch-hint').textContent = 'expected 440.00 Hz';
+                // Drive the existing tuner with the synthetic buffer — same
+                // path the mic flow uses, just one frame of synthetic audio
+                // instead of streaming real audio in. Gives a clean
+                // "440 Hz → A4, near zero cents" without any mic noise.
+                if (tunerState.tuner) {
+                    tunerState.tuner.feed(buf);
+                    const readings = tunerState.tuner.take_readings();
+                    applyReadings(readings);
+                    el('tuner-hint').textContent = 'tested with synthetic 440 Hz';
                 }
             });
 
@@ -518,7 +643,7 @@
                 } else {
                     startMic().catch((err) => {
                         console.error('startMic failed', err);
-                        el('pitch-hint').textContent = String(err.message || err);
+                        el('tuner-hint').textContent = String(err.message || err);
                         el('mic-btn').textContent = 'Start mic';
                     });
                 }
@@ -526,25 +651,205 @@
         }
 
         // ----------------------------------------------------------------
+        // Tuner state (mode selection + WebTuner instance + DOM rows)
+        // ----------------------------------------------------------------
+        //
+        // The tuner is parameterised by "mode" — a tuning slug or the
+        // sentinel `chromatic`. Switching mode rebuilds the per-string DOM
+        // rows and (if the mic is live) restarts the WebTuner so it picks
+        // up the new tuning's targets. Strict in-tune threshold matches the
+        // CLI: ±5 cents = tuned, ±20 cents = close, beyond = off.
+
+        const TUNED_CENTS = 5.0;
+        const CLOSE_CENTS = 20.0;
+        // ±50 cents (a quartertone in either direction) maps to the full
+        // width of the cents bar. Anything beyond clamps to the edge.
+        const CENTS_FULL_SCALE = 50.0;
+
+        const tunerState = {
+            mode: null,        // 'chromatic' or a tuning slug
+            tuner: null,       // active WebTuner instance
+            rowsByLabel: new Map(), // string label → row element (string mode only)
+            sampleRate: 48_000,
+        };
+
+        function renderTuningPicker() {
+            const picker = el('tuning-picker');
+            picker.textContent = '';
+
+            const makeButton = (slug, label) => {
+                const btn = document.createElement('button');
+                btn.className = 'tuning-option';
+                btn.dataset.slug = slug;
+                btn.textContent = label;
+                btn.addEventListener('click', () => selectTuning(slug));
+                return btn;
+            };
+
+            picker.appendChild(makeButton('chromatic', 'Chromatic'));
+            for (const slug of builtin_tuning_slugs()) {
+                picker.appendChild(makeButton(slug, slug));
+            }
+        }
+
+        function selectTuning(slug) {
+            if (tunerState.mode === slug) return;
+            tunerState.mode = slug;
+
+            // Highlight the active picker button.
+            document.querySelectorAll('.tuning-option').forEach((btn) => {
+                btn.classList.toggle('active', btn.dataset.slug === slug);
+            });
+
+            // Rebuild the tuner instance. Pick sample rate from the live
+            // AudioContext if running; otherwise default to 48k. The tuner
+            // is rebuilt below as part of the mic restart anyway.
+            const sr = audioState.ctx?.sampleRate ?? 48_000;
+            tunerState.sampleRate = sr;
+            tunerState.tuner?.free?.();
+            tunerState.tuner = slug === 'chromatic'
+                ? WebTuner.new_chromatic(sr)
+                : WebTuner.new_for_strings(slug, sr);
+
+            renderStringRows();
+        }
+
+        function renderStringRows() {
+            const container = el('strings');
+            container.textContent = '';
+            tunerState.rowsByLabel.clear();
+
+            const buildRow = (label, targetText) => {
+                const row = document.createElement('div');
+                row.className = 'string-row';
+
+                const head = document.createElement('div');
+                head.className = 'string-row-head';
+                const name = document.createElement('span');
+                name.className = 'name';
+                name.textContent = label;
+                const target = document.createElement('span');
+                target.className = 'target';
+                target.textContent = targetText;
+                head.appendChild(name);
+                head.appendChild(target);
+
+                const bar = document.createElement('div');
+                bar.className = 'cents-bar';
+                const cursor = document.createElement('div');
+                cursor.className = 'cents-bar-cursor';
+                bar.appendChild(cursor);
+
+                const foot = document.createElement('div');
+                foot.className = 'string-row-foot';
+                const detected = document.createElement('span');
+                detected.className = 'detected';
+                detected.textContent = '—';
+                const status = document.createElement('span');
+                status.className = 'status';
+                status.textContent = 'listening…';
+                foot.appendChild(detected);
+                foot.appendChild(status);
+
+                row.appendChild(head);
+                row.appendChild(bar);
+                row.appendChild(foot);
+                return row;
+            };
+
+            if (tunerState.mode === 'chromatic') {
+                // Chromatic mode: single placeholder row, label updated
+                // dynamically as readings arrive (since we don't know
+                // which note they'll be ahead of time).
+                const row = buildRow('—', 'nearest-note tuner');
+                row.dataset.chromaticPlaceholder = '1';
+                container.appendChild(row);
+                tunerState.rowsByLabel.set('__chromatic__', row);
+            } else {
+                // String mode: one row per string in the tuning, rendered
+                // up-front. WebTuner exposes the open-string labels + Hz so
+                // the row headers populate immediately even without audio.
+                const info = tunerState.tuner.strings_info();
+                for (const s of info) {
+                    const row = buildRow(s.label, `${s.open_hz.toFixed(2)} Hz`);
+                    container.appendChild(row);
+                    tunerState.rowsByLabel.set(s.label, row);
+                }
+            }
+        }
+
+        function applyReadings(readings) {
+            for (const r of readings) {
+                let row;
+                if (tunerState.mode === 'chromatic') {
+                    // Chromatic mode reuses the single row; reading.label is
+                    // the detected note name (`A4`, `C#3`, …). Update head.
+                    row = tunerState.rowsByLabel.get('__chromatic__');
+                    if (row) {
+                        row.querySelector('.name').textContent = r.label;
+                        row.querySelector('.target').textContent = `${r.target_hz.toFixed(2)} Hz`;
+                    }
+                } else {
+                    row = tunerState.rowsByLabel.get(r.label);
+                }
+                if (!row) continue;
+                updateRow(row, r);
+            }
+            // Drop the "is-active" highlight after a beat so the brief flash
+            // doesn't stick on the last-detected row forever.
+            setTimeout(() => {
+                document.querySelectorAll('.string-row.is-active')
+                    .forEach((el) => el.classList.remove('is-active'));
+            }, 600);
+        }
+
+        function updateRow(row, r) {
+            const absCents = Math.abs(r.cents);
+            const isTuned = absCents < TUNED_CENTS;
+            const isClose = absCents < CLOSE_CENTS;
+
+            row.classList.add('has-reading', 'is-active');
+            row.classList.toggle('is-tuned', isTuned);
+            row.classList.toggle('is-close', !isTuned && isClose);
+            row.classList.toggle('is-off', !isClose);
+
+            // Map cents to a horizontal position on the bar. ±CENTS_FULL_SCALE
+            // covers the full bar; clamp so cents past the scale park the
+            // cursor at the edge instead of escaping.
+            const clamped = Math.max(-CENTS_FULL_SCALE, Math.min(CENTS_FULL_SCALE, r.cents));
+            const pct = 50 + (clamped / CENTS_FULL_SCALE) * 50;
+            row.querySelector('.cents-bar-cursor').style.left = pct + '%';
+
+            const detected = row.querySelector('.detected');
+            detected.textContent = `${r.detected_hz.toFixed(2)} Hz`;
+
+            const status = row.querySelector('.status');
+            if (isTuned) {
+                status.textContent = `${r.cents >= 0 ? '+' : ''}${r.cents.toFixed(1)}¢ — in tune`;
+            } else {
+                const direction = r.cents > 0 ? '↓ tune down' : '↑ tune up';
+                status.textContent =
+                    `${r.cents >= 0 ? '+' : ''}${r.cents.toFixed(1)}¢ — ${direction}`;
+            }
+        }
+
+        // ----------------------------------------------------------------
         // Live microphone capture via Web Audio
         // ----------------------------------------------------------------
         //
-        // Held-state singleton: at most one AudioContext + one MediaStream is
-        // active at a time. Re-clicking "Start mic" while it's already running
-        // is a no-op via the running flag in the click handler.
+        // Held-state singleton: at most one AudioContext + one MediaStream
+        // active at a time. Re-clicking "Start mic" while it's already
+        // running is a no-op via the running flag in the click handler.
         const audioState = {
             running: false,
             ctx: null,       // AudioContext
-            stream: null,    // MediaStream from getUserMedia (kept so we can stop tracks on shutdown)
+            stream: null,    // MediaStream from getUserMedia
             node: null,      // AudioWorkletNode
             source: null,    // MediaStreamSource
         };
 
         async function startMic() {
-            el('pitch-hint').textContent = 'requesting microphone…';
-            // getUserMedia must be called from a user gesture (autoplay
-            // policy). The mic-btn click is that gesture; if we ever wire
-            // auto-start, we'll need a "tap to enable" first-screen for iOS.
+            el('tuner-hint').textContent = 'requesting microphone…';
             const stream = await navigator.mediaDevices.getUserMedia({
                 audio: {
                     // Disable browser preprocessing — pitch detection wants
@@ -555,25 +860,27 @@
                 },
             });
             const ctx = new (window.AudioContext || window.webkitAudioContext)();
-            // AudioWorklet module loading is async; must complete before
-            // we can `new AudioWorkletNode(ctx, 'pitch-processor')`.
             await ctx.audioWorklet.addModule('audio-worklet.js');
+
+            // Rebuild the WebTuner against the context's actual sample rate
+            // (44.1k or 48k depending on hardware). YIN's frequency math
+            // depends on the sample rate so this matters — feeding a 48k
+            // tuner with 44.1k samples would show every note ~80 cents flat.
+            const sr = ctx.sampleRate;
+            tunerState.sampleRate = sr;
+            tunerState.tuner?.free?.();
+            tunerState.tuner = tunerState.mode === 'chromatic'
+                ? WebTuner.new_chromatic(sr)
+                : WebTuner.new_for_strings(tunerState.mode, sr);
 
             const source = ctx.createMediaStreamSource(stream);
             const node = new AudioWorkletNode(ctx, 'pitch-processor');
 
             node.port.onmessage = (e) => {
-                // Worklet posts a Float32Array of FRAME samples; ctx.sampleRate
-                // is the rate the audio thread is running at (usually 44100
-                // or 48000 depending on the device).
-                const hz = detect_pitch(e.data, ctx.sampleRate);
-                if (hz === undefined) {
-                    el('pitch-hz').textContent = '—';
-                    el('pitch-hint').textContent = 'listening… (no pitch yet)';
-                } else {
-                    el('pitch-hz').textContent = hz.toFixed(2) + ' Hz';
-                    el('pitch-hint').textContent = 'listening… (' + Math.round(ctx.sampleRate) + ' Hz mic)';
-                }
+                if (!tunerState.tuner) return;
+                tunerState.tuner.feed(e.data);
+                const readings = tunerState.tuner.take_readings();
+                if (readings.length > 0) applyReadings(readings);
             };
 
             // Connect source → worklet, but DON'T connect worklet → destination.
@@ -588,7 +895,7 @@
             audioState.source = source;
 
             el('mic-btn').textContent = 'Stop mic';
-            el('pitch-hint').textContent = 'listening…';
+            el('tuner-hint').textContent = `listening… (${Math.round(sr)} Hz mic)`;
         }
 
         function stopMic() {
@@ -607,6 +914,7 @@
             audioState.node = null;
             audioState.source = null;
             el('mic-btn').textContent = 'Start mic';
+            el('tuner-hint').textContent = 'mic stopped';
         }
 
         // If the user navigates away from the tuner screen, stop the mic so
