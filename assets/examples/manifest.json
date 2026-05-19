@@ -1,0 +1,17 @@
+{
+  "//": "Manifest of bundled .alphatex examples. Same files used by the CLI and the browser GUI; the GUI fetches them via this manifest because browsers have no directory-listing API for static-served files. CLI/Tauri can read the directory directly OR follow the same manifest.",
+  "examples": [
+    {
+      "id": "twinkle-twinkle-uke",
+      "title": "Twinkle Twinkle Little Star",
+      "path": "twinkle-twinkle-uke.alphatex",
+      "tuning": "standard-ukulele"
+    },
+    {
+      "id": "cripple-creek-banjo",
+      "title": "Cripple Creek",
+      "path": "cripple-creek-banjo.alphatex",
+      "tuning": "standard-banjo"
+    }
+  ]
+}
