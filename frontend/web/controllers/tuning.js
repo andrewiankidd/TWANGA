@@ -26,12 +26,46 @@ import {
     builtin_tuning_slugs,
     preset_display_name,
     builtin_preset_entry,
+    midi_from_name,
     WebTuner,
 } from '../pkg/twanga_web.js';
 
 import { loadUserTunings, userTuningBySlug } from '../lib/user-tunings.js';
 
 const MAX_CAPO = 12;
+
+/// Find a registry slug (built-in or user) whose open-string MIDI
+/// list matches the given note names. Used by Playback to pre-load
+/// the loaded file's tuning into its controller, so the picker
+/// reflects what was recorded rather than silently transposing.
+///
+/// Matches by MIDI list (not by name string) so reentrant / drone
+/// annotations on registry tunings don't prevent a match — the
+/// alphaTex `\tuning` line carries canonical names without
+/// annotations, but the registry's `PresetString.name` can include
+/// `g4 (reentrant)` etc.
+///
+/// Returns the slug if exactly one match is found, the first match
+/// otherwise (built-ins precede user tunings). Returns `null` for
+/// unparseable names or when no registry tuning matches the
+/// string count + pitch list.
+export function matchRegistrySlugForTuningNames(names) {
+    if (!Array.isArray(names) || names.length === 0) return null;
+    const fileMidi = names.map((n) => midi_from_name(n));
+    if (fileMidi.some((m) => m == null)) return null;
+
+    for (const slug of builtin_tuning_slugs()) {
+        const entry = builtin_preset_entry(slug);
+        if (!entry || !Array.isArray(entry.strings)) continue;
+        if (entry.strings.length !== fileMidi.length) continue;
+        if (entry.strings.every((s, i) => s.midi === fileMidi[i])) return slug;
+    }
+    for (const u of loadUserTunings()) {
+        if (!Array.isArray(u.strings) || u.strings.length !== fileMidi.length) continue;
+        if (u.strings.every((s, i) => s.midi === fileMidi[i])) return u.slug;
+    }
+    return null;
+}
 
 /// Display name for a slug, falling back through the same lookup
 /// chain the original ad-hoc copies used: chromatic → built-in →
@@ -357,6 +391,44 @@ export function makeTuningController(opts) {
         },
         /// Change the active tuning programmatically. Fires `onChange`.
         select,
+        /// Apply a CLI-syntax capo spec — `""` / `"0"` clears, `"3"`
+        /// goes uniform, `"0,2,2,2,2,2"` goes per-string. Per-string
+        /// specs whose length doesn't match the active tuning's
+        /// string count are ignored (same length-validation `Capo::parse`
+        /// does on the Rust side). Returns true if applied. Used by
+        /// Playback to pre-load the file's embedded capo on load.
+        setCapo(spec) {
+            if (!state.enabled || !state.mode || state.mode === 'chromatic') return false;
+            if (typeof spec !== 'string') return false;
+            const trimmed = spec.trim();
+            if (trimmed === '' || trimmed === '0') {
+                state.capo = 0;
+                state.capoMode = 'uniform';
+                state.capoSpec = state.baseLabels.map(() => 0);
+                updateCapoDisplay();
+                renderPerStringCapo();
+                savePersisted();
+                onChange?.();
+                return true;
+            }
+            if (trimmed.includes(',')) {
+                const parts = trimmed.split(',').map((s) => Number.parseInt(s.trim(), 10));
+                if (parts.length !== state.baseLabels.length) return false;
+                if (parts.some((v) => !Number.isFinite(v) || v < 0 || v > MAX_CAPO)) return false;
+                state.capoMode = 'per-string';
+                state.capoSpec = parts;
+            } else {
+                const n = Number.parseInt(trimmed, 10);
+                if (!Number.isFinite(n) || n < 0 || n > MAX_CAPO) return false;
+                state.capoMode = 'uniform';
+                state.capo = n;
+            }
+            updateCapoDisplay();
+            renderPerStringCapo();
+            savePersisted();
+            onChange?.();
+            return true;
+        },
         /// Disable / re-enable all inputs (used by Recorder while
         /// recording so the user can't swap mid-take).
         setEnabled(enabled) {

@@ -1437,7 +1437,12 @@
             addUserTuningEntry,
             deleteUserTuning,
         } from './lib/user-tunings.js';
-        import { makeTuningController, fullName, shortName } from './controllers/tuning.js';
+        import {
+            makeTuningController,
+            fullName,
+            shortName,
+            matchRegistrySlugForTuningNames,
+        } from './controllers/tuning.js';
         import * as library from './lib/library.js';
 
         function el(id) { return document.getElementById(id); }
@@ -3344,12 +3349,26 @@
                     includeChromatic: false,
                     onChange: () => playbackRecomputeTransposition(),
                 });
-                // Default to the first available tuning if the controller
-                // didn't already have a saved choice (i.e. first-visit user).
-                if (!playbackState.tuning.getMode()) {
-                    const builtins = builtin_tuning_slugs();
-                    if (builtins.length) playbackState.tuning.select(builtins[0]);
-                }
+            }
+
+            // Prefer the file's tuning if it matches a registry entry —
+            // loading e.g. a uke tab while the controller is on guitar
+            // would otherwise silently transpose. Falls back to the
+            // controller's restored state (or first built-in for first-
+            // visit users) if no match is found; the "Skipped:" preamble
+            // surfaces any drops on the resulting transpose.
+            const fileSlug = matchRegistrySlugForTuningNames(parsed.tuning_names());
+            if (fileSlug) {
+                playbackState.tuning.select(fileSlug);
+                // File's embedded capo (from the `\subtitle ; capo=<spec>`
+                // convention) is only applied when the tuning matched.
+                // A capo spec for the wrong string count would be
+                // rejected by `setCapo` anyway.
+                const fileCapo = parsed.capo_spec();
+                if (fileCapo) playbackState.tuning.setCapo(fileCapo);
+            } else if (!playbackState.tuning.getMode()) {
+                const builtins = builtin_tuning_slugs();
+                if (builtins.length) playbackState.tuning.select(builtins[0]);
             }
 
             // Header
