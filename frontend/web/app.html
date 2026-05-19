@@ -558,20 +558,69 @@
 
         /* "Define a new tuning" inline form. Same shape as the CLI's
            `twanga tunings add` flow: name → strings (one per row, A4-style
-           pitch names) → save. Slug is auto-derived from the name. */
+           pitch names) → save. Slug is auto-derived from the name.
+           Collapsed by default behind a native `<details>` expando — the
+           Tunings list is the primary content on this screen; the
+           define-new form is a secondary affordance most visits don't
+           need. */
         .add-tuning-form {
             background: var(--card);
             border: 1px solid var(--border);
             border-radius: var(--radius);
-            padding: 1rem 1.2rem;
-            display: flex;
-            flex-direction: column;
-            gap: 0.7rem;
+            padding: 0;
         }
-        .add-tuning-form h3 {
-            margin: 0;
-            font-size: 1rem;
+        .add-tuning-form > summary {
+            padding: 0.7rem 1rem;
+            cursor: pointer;
+            font-weight: 700;
             color: var(--primary);
+            font-size: 1rem;
+            list-style: none;       /* hide default disclosure triangle (Firefox) */
+            user-select: none;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        .add-tuning-form > summary::-webkit-details-marker {
+            display: none;          /* hide default disclosure triangle (Chromium / Safari) */
+        }
+        .add-tuning-form > summary::before {
+            content: '+';
+            display: inline-block;
+            font-family: monospace;
+            font-size: 1.1rem;
+            line-height: 1;
+            color: var(--highlight);
+            transition: transform 0.15s ease-out;
+        }
+        .add-tuning-form[open] > summary::before {
+            content: '−';
+        }
+        .add-tuning-form > summary:hover {
+            color: var(--highlight);
+        }
+        /* Body of the expando — only visible while [open]. The padding +
+           gap match the old non-expando layout so opening it looks
+           identical to the previous always-on form. */
+        .add-tuning-form > .form-field,
+        .add-tuning-form > .form-row,
+        .add-tuning-form > .form-error,
+        .add-tuning-form > .form-ok {
+            margin-left: 1rem;
+            margin-right: 1rem;
+        }
+        .add-tuning-form[open] > .form-field:first-of-type {
+            margin-top: 0.3rem;
+        }
+        .add-tuning-form[open] {
+            padding-bottom: 0.9rem;
+        }
+        .add-tuning-form > .form-field {
+            margin-bottom: 0.6rem;
+        }
+        .add-tuning-form > .form-error,
+        .add-tuning-form > .form-ok {
+            margin-top: 0.4rem;
         }
         .form-field {
             display: flex;
@@ -1367,8 +1416,8 @@
             </p>
             <div class="tuning-list" id="tuning-list"></div>
 
-            <div class="add-tuning-form" id="add-tuning-form">
-                <h3>Define a new tuning</h3>
+            <details class="add-tuning-form" id="add-tuning-form">
+                <summary>Define a new tuning</summary>
                 <div class="form-field">
                     <label for="new-tuning-name">Display name</label>
                     <input
@@ -1394,7 +1443,7 @@
                 </div>
                 <div class="form-error" id="new-tuning-error"></div>
                 <div class="form-ok" id="new-tuning-ok"></div>
-            </div>
+            </details>
         </section>
     </main>
 
