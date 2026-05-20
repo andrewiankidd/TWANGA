@@ -13,6 +13,17 @@ class TabRenderer {
             cellWidth: 30,
             cellHeight: 30,
             labelWidth: 56,
+            // Interactive mode — when true, cells become clickable (with a
+            // pointer cursor + hover halo) and an extra header row on top
+            // gets per-column click targets. Editor uses this to drive
+            // cell-by-cell edits without forking the renderer. Playback +
+            // Record leave it false and get a read-only view.
+            interactive: false,
+            onCellClick: null,        // (stringIdx, colIdx, event) — left-click
+            onCellContext: null,      // (stringIdx, colIdx, event) — right-click
+            onCellDblClick: null,     // (stringIdx, colIdx, event) — double-click
+            onColHeaderClick: null,   // (colIdx, event)
+            selectedColumn: -1,       // column index to highlight (-1 = none)
             ...options,
         };
         this.score = null;
@@ -79,6 +90,16 @@ class TabRenderer {
         this._positionPlayhead();
     }
 
+    /// Update interactive-mode options (selected column, click handlers)
+    /// without rebuilding the whole renderer. The editor calls this when
+    /// the selection changes so the highlight follows clicks. Triggers a
+    /// rebuild because cell styling depends on `selectedColumn` and the
+    /// listener set is wired per-cell at build time.
+    setInteractiveOptions(opts) {
+        Object.assign(this.options, opts);
+        if (this.score) this._rebuild();
+    }
+
     destroy() {
         this.root.remove();
     }
@@ -92,12 +113,56 @@ class TabRenderer {
         const { tuning, columns, columnsPerBar } = this.score;
         const strings = tuning?.strings ?? [];
         const numCols = columns.length;
-        const { cellWidth, cellHeight, labelWidth } = this.options;
+        const { cellWidth, cellHeight, labelWidth, interactive, selectedColumn } = this.options;
 
         // Grid layout: first column for labels, then one per tab column.
+        // In interactive mode we reserve grid row 1 for the column-index
+        // header (clickable to select a column for insert/delete ops);
+        // string rows shift down by 1 in that case. The playhead math
+        // doesn't care about row counts — it spans full height — so no
+        // changes are needed there.
+        const headerRows = interactive ? 1 : 0;
+        const headerRowHeight = Math.round(cellHeight * 0.6);
         this.grid.style.gridTemplateColumns =
             `${labelWidth}px repeat(${numCols}, ${cellWidth}px)`;
-        this.grid.style.gridTemplateRows = `repeat(${strings.length}, ${cellHeight}px)`;
+        this.grid.style.gridTemplateRows =
+            (headerRows ? `${headerRowHeight}px ` : '') +
+            `repeat(${strings.length}, ${cellHeight}px)`;
+
+        if (interactive) {
+            // Top-left corner of the header row (empty cell over the
+            // string labels). Placeholder so the grid lines up.
+            const corner = document.createElement('div');
+            Object.assign(corner.style, {
+                gridColumn: '1',
+                gridRow: '1',
+            });
+            this.grid.appendChild(corner);
+
+            for (let c = 0; c < numCols; c++) {
+                const head = document.createElement('div');
+                head.textContent = String(c + 1);
+                const isSel = c === selectedColumn;
+                Object.assign(head.style, {
+                    gridColumn: `${c + 2}`,
+                    gridRow: '1',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: '0.7rem',
+                    color: isSel ? 'var(--highlight)' : 'var(--muted)',
+                    borderBottom: isSel
+                        ? '1px solid var(--highlight)'
+                        : '1px solid var(--border)',
+                    cursor: 'pointer',
+                    userSelect: 'none',
+                });
+                head.addEventListener('click', (e) => {
+                    this.options.onColHeaderClick?.(c, e);
+                });
+                this.grid.appendChild(head);
+            }
+        }
 
         for (let s = 0; s < strings.length; s++) {
             // String label on the left of the row.
@@ -105,7 +170,7 @@ class TabRenderer {
             label.textContent = strings[s].name;
             Object.assign(label.style, {
                 gridColumn: '1',
-                gridRow: `${s + 1}`,
+                gridRow: `${s + 1 + headerRows}`,
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'flex-end',
@@ -121,9 +186,10 @@ class TabRenderer {
                 const fret = columns[c]?.[s];
                 cell.textContent = fret == null ? '—' : String(fret);
                 const onBar = columnsPerBar > 0 && c > 0 && c % columnsPerBar === 0;
+                const isSelCol = interactive && c === selectedColumn;
                 Object.assign(cell.style, {
                     gridColumn: `${c + 2}`,
-                    gridRow: `${s + 1}`,
+                    gridRow: `${s + 1 + headerRows}`,
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
@@ -131,7 +197,22 @@ class TabRenderer {
                     fontSize: fret == null ? '0.8rem' : '0.95rem',
                     fontWeight: fret == null ? '400' : '700',
                     borderLeft: onBar ? '1px solid var(--border)' : 'none',
+                    background: isSelCol ? 'rgba(212, 154, 74, 0.08)' : 'transparent',
+                    cursor: interactive ? 'pointer' : 'default',
+                    userSelect: interactive ? 'none' : 'auto',
                 });
+                if (interactive) {
+                    cell.addEventListener('click', (e) => {
+                        this.options.onCellClick?.(s, c, e);
+                    });
+                    cell.addEventListener('contextmenu', (e) => {
+                        e.preventDefault();
+                        this.options.onCellContext?.(s, c, e);
+                    });
+                    cell.addEventListener('dblclick', (e) => {
+                        this.options.onCellDblClick?.(s, c, e);
+                    });
+                }
                 this.grid.appendChild(cell);
             }
         }

@@ -12,6 +12,7 @@
 //   list()           -> [{ id, title, source, createdAt, lastBackedUpAt }]
 //   load(id)         -> { id, title, source, alphatex, ... }
 //   save({title, alphatex, source}) -> id
+//   update({id, title, alphatex})   -> in-place overwrite (no bundled)
 //   delete(id)
 //   markDownloaded(id, when?)  -> sets lastBackedUpAt
 //
@@ -203,6 +204,39 @@ export async function save({ title, alphatex, source = 'user' }) {
     const id = await tx('readwrite', (store) => reqAsPromise(store.add(row)));
     _notify({ type: 'save', id });
     return id;
+}
+
+/// Overwrite an existing user tab. Bundled examples are read-only —
+/// throws if `id` is a `bundled:*` string. The Editor screen calls this
+/// when the user saves edits to a recording in place; "save as new"
+/// goes through `save({...})` instead.
+export async function update({ id, title, alphatex }) {
+    if (typeof id === 'string' && id.startsWith('bundled:')) {
+        throw new Error('bundled examples are read-only; use save() for a new copy');
+    }
+    if (typeof alphatex !== 'string' || alphatex.length === 0) {
+        throw new Error('update: alphatex content is required');
+    }
+    await tx('readwrite', (store) => new Promise((resolve, reject) => {
+        const getReq = store.get(id);
+        getReq.onsuccess = () => {
+            const row = getReq.result;
+            if (!row) {
+                reject(new Error(`tab id ${id} not found`));
+                return;
+            }
+            if (typeof title === 'string') row.title = title.trim();
+            row.alphatex = alphatex;
+            // Editing invalidates any prior backed-up state — the file
+            // on disk no longer matches what's in IDB.
+            row.lastBackedUpAt = null;
+            const putReq = store.put(row);
+            putReq.onsuccess = () => resolve();
+            putReq.onerror = () => reject(putReq.error);
+        };
+        getReq.onerror = () => reject(getReq.error);
+    }));
+    _notify({ type: 'save', id });
 }
 
 /// Remove a user tab by id. Bundled examples are protected — calling

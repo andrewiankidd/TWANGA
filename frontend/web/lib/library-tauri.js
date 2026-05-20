@@ -19,6 +19,7 @@ const NOT_READY = 'Tauri library backend not yet implemented';
 export async function list() { throw new Error(NOT_READY); }
 export async function load(_id) { throw new Error(NOT_READY); }
 export async function save(_entry) { throw new Error(NOT_READY); }
+export async function update(_entry) { throw new Error(NOT_READY); }
 export async function deleteTab(_id) { throw new Error(NOT_READY); }
 export async function markDownloaded(_id, _when) { /* no-op: filesystem persistence is automatic */ }
 export async function requestPersistence() { return true; /* filesystem is always persistent */ }

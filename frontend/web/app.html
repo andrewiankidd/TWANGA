@@ -1116,6 +1116,56 @@
             color: var(--err);
         }
 
+        /* Editor — the column-grid IS the Tab renderer (with
+           `interactive: true`), so most of the grid styling lives in
+           the renderer itself. These rules just lay out the surrounding
+           controls and the dirty-state pill. */
+        .editor-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+            align-items: center;
+            margin: 0.5rem 0 1rem;
+        }
+        .editor-actions .editor-col-info {
+            color: var(--muted);
+            font-size: 0.8rem;
+            margin-left: auto;
+        }
+        .editor-meta-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.8rem;
+            align-items: center;
+            margin: 0.5rem 0;
+        }
+        .editor-meta-row label {
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+            color: var(--muted);
+            font-size: 0.85rem;
+        }
+        .editor-meta-row input[type="text"],
+        .editor-meta-row input[type="number"] {
+            background: var(--background);
+            border: 1px solid var(--border);
+            color: var(--text);
+            border-radius: 3px;
+            padding: 0.3rem 0.5rem;
+            font-family: inherit;
+        }
+        .editor-meta-row input[type="text"] { min-width: 14em; }
+        .editor-dirty-pill {
+            display: inline-block;
+            padding: 0.1rem 0.5rem;
+            background: var(--warn);
+            color: var(--secondary);
+            border-radius: 8px;
+            font-size: 0.75rem;
+            font-weight: 700;
+        }
+
         .coming-soon {
             background: var(--card);
             border: 1px solid var(--border);
@@ -1180,6 +1230,10 @@
                 <button class="menu-btn" data-screen="playback">
                     <span class="title">Playback</span>
                     <span class="desc">Load a tab, play along, wait / loop / transpose</span>
+                </button>
+                <button class="menu-btn" data-screen="editor">
+                    <span class="title">Editor</span>
+                    <span class="desc">Tweak recordings cell-by-cell, save back to your library</span>
                 </button>
                 <button class="menu-btn" data-screen="tunings">
                     <span class="title">Tunings</span>
@@ -1516,6 +1570,85 @@
                 <div class="form-ok" id="new-tuning-ok"></div>
             </details>
         </section>
+
+        <!-- Editor screen — first-cut post-capture tab editor. Library
+             list reuses the same backend as Playback (`./lib/library.js`)
+             so bundled examples + user recordings appear here too. Per-tab
+             edit view: title input + BPM display + an editable grid of
+             cells (rows = strings, cols = score columns) with insert /
+             delete column buttons. Save overwrites user recordings in
+             place; "Save as new" always appends a fresh IDB row (the
+             only path for editing bundled examples since they're
+             read-only). -->
+        <section id="screen-editor" class="screen">
+            <div class="back-row">
+                <button class="back-btn" data-back>← Menu</button>
+            </div>
+            <h2>Editor</h2>
+            <p class="subtitle">
+                Open a recording from your library and tweak it cell-by-cell.
+                Save back in place, or save the edits as a new copy.
+            </p>
+
+            <div class="browser-storage-banner">
+                <strong>Browser storage warning.</strong>
+                Same storage as Playback — edits to user recordings stay in
+                IndexedDB. The desktop app reads from the filesystem
+                directly and skips this warning.
+            </div>
+
+            <!-- LIBRARY VIEW -->
+            <div id="editor-library-view">
+                <div class="tab-library" id="editor-library-list"></div>
+                <p class="tuner-hint" id="editor-library-hint">
+                    Pick a tab to edit. Bundled examples are read-only —
+                    you'll save edits as a new copy.
+                </p>
+            </div>
+
+            <!-- EDIT VIEW -->
+            <div id="editor-edit-view" hidden>
+                <div class="back-row">
+                    <button class="back-btn" id="editor-back-to-library-btn">← Library</button>
+                </div>
+
+                <div class="editor-meta-row">
+                    <label>
+                        Title
+                        <input type="text" id="editor-title-input" maxlength="80">
+                    </label>
+                    <label>
+                        BPM
+                        <input type="number" id="editor-bpm-input" min="20" max="400" step="1" value="120">
+                    </label>
+                    <span class="editor-dirty-pill" id="editor-dirty-pill" hidden>unsaved</span>
+                </div>
+                <p class="tuner-hint" id="editor-info-hint">—</p>
+                <p class="tuner-hint">
+                    <strong>Click</strong> a cell to bump the fret up (empty → 0 → 1 → …);
+                    <strong>right-click</strong> to bump down (0 → empty);
+                    <strong>double-click</strong> to type a number directly;
+                    <strong>click a column number</strong> to select it for insert / delete.
+                </p>
+
+                <div class="renderer-host" id="editor-renderer-host"></div>
+
+                <div class="editor-actions">
+                    <button class="action secondary" id="editor-insert-col-btn">Insert column after</button>
+                    <button class="action secondary" id="editor-delete-col-btn">Delete column</button>
+                    <button class="action secondary" id="editor-clear-col-btn">Clear column</button>
+                    <span class="editor-col-info" id="editor-col-info">no column selected</span>
+                </div>
+
+                <div class="row">
+                    <button class="action" id="editor-save-btn">Save</button>
+                    <button class="action secondary" id="editor-save-as-new-btn">Save as new</button>
+                    <button class="action secondary" id="editor-revert-btn">Revert</button>
+                </div>
+                <div class="form-error" id="editor-error" hidden></div>
+                <div class="form-ok" id="editor-ok" hidden></div>
+            </div>
+        </section>
     </main>
 
     <footer>
@@ -1749,6 +1882,12 @@
             // IndexedDB; per-tab view re-uses the renderer + tuning
             // controller infrastructure.
             initPlayback();
+
+            // Editor screen — same library backend as Playback, but
+            // opens recordings into a per-cell grid editor that
+            // round-trips back through `serialize_recording` (the same
+            // path the recorder uses on save).
+            initEditor();
 
             // Menu navigation.
             document.querySelectorAll('[data-screen]').forEach((btn) => {
@@ -4195,6 +4334,505 @@
                 if (Math.abs(cents) < WAIT_MATCH_CENTS) return true;
             }
             return false;
+        }
+
+        // ----------------------------------------------------------------
+        // EDITOR (post-capture, cell-level alphaTex editing)
+        // ----------------------------------------------------------------
+        //
+        // Loads tabs from the same `./lib/library.js` backend as Playback.
+        // Per-tab edit view holds an in-memory column grid (rows = strings,
+        // cols = columns) that the user mutates cell-by-cell; saving re-
+        // serializes through `serialize_recording` and either overwrites
+        // the source IDB row (user recordings) or appends a new one
+        // (bundled examples + explicit "Save as new").
+        //
+        // Tuning + capo are read-only in this first cut: the editor
+        // preserves whatever the file originally had. Transposing a tab
+        // to a different instrument lives in Playback; doing it again
+        // here would just duplicate logic.
+        const editorState = {
+            tabId: null,            // current source id (string for bundled, int for user)
+            source: null,           // 'bundled' | 'user' | 'imported'
+            title: '',
+            bpm: 120,
+            resolutionDenom: 8,
+            tuningEntry: null,      // PresetEntry-shaped { slug, name, strings:[{name,midi},...] }
+            capoSpec: '',
+            columns: [],            // [[fret|null x stringCount] per column]
+            originalSnapshot: null, // for Revert; deep-copied at load time
+            selectedCol: -1,
+            dirty: false,
+            renderer: null,         // active Tab renderer instance (interactive: true)
+        };
+
+        function initEditor() {
+            renderEditorLibrary();
+            wireEditorEditView();
+            library.subscribe(() => {
+                if (!el('screen-editor').classList.contains('active')) return;
+                if (!el('editor-library-view').hidden) renderEditorLibrary();
+            });
+            // Refresh the library list whenever the user navigates to the
+            // screen — bundled manifest is cache-forever, but user IDB
+            // rows might have been added in the Recorder since last visit.
+            window.addEventListener('hashchange', () => {
+                if (location.hash === '#editor' && !el('editor-edit-view').hidden === false) {
+                    renderEditorLibrary();
+                }
+            });
+        }
+
+        /// Lazy-init the Tab renderer in interactive mode. Bound to the
+        /// editor's renderer-host div; cleared + re-created if the user
+        /// loads a different tab (cheaper than tracking column-count
+        /// reflows). Click bindings forward to `editorState`-mutating
+        /// helpers; the renderer is otherwise the same instance Playback
+        /// uses, just with `interactive: true`.
+        function editorEnsureRenderer() {
+            const host = el('editor-renderer-host');
+            if (editorState.renderer) {
+                try { editorState.renderer.destroy(); }
+                catch (e) { console.warn('editor renderer destroy failed', e); }
+                editorState.renderer = null;
+            }
+            host.replaceChildren();
+            const plugin = rendererRegistry.get('twanga.tab');
+            if (!plugin) {
+                console.error('twanga.tab renderer not registered');
+                return;
+            }
+            editorState.renderer = plugin.create(host, {
+                interactive: true,
+                selectedColumn: editorState.selectedCol,
+                onCellClick: (s, c) => editorBumpCell(s, c, +1),
+                onCellContext: (s, c) => editorBumpCell(s, c, -1),
+                onCellDblClick: (s, c, e) => editorPromptCell(s, c, e),
+                onColHeaderClick: (c) => {
+                    editorState.selectedCol = c;
+                    editorState.renderer.setInteractiveOptions({ selectedColumn: c });
+                    editorUpdateColInfo();
+                },
+            });
+        }
+
+        /// Push the current `editorState.columns` into the renderer as a
+        /// score. Mirrors `playbackPushScoreToRenderer` shape so the same
+        /// renderer can ingest it; the editor doesn't have a tempo /
+        /// bar-count concept beyond what's stored in state.
+        function editorPushScore() {
+            if (!editorState.renderer || !editorState.tuningEntry) return;
+            const resolutionDenom = editorState.resolutionDenom || 8;
+            editorState.renderer.setScore({
+                tempo: editorState.bpm,
+                resolutionDenom,
+                columnsPerBar: resolutionDenom,
+                tuning: {
+                    name: editorState.tuningEntry.name,
+                    strings: editorState.tuningEntry.strings,
+                },
+                capoSpec: editorState.capoSpec ?? '',
+                columns: editorState.columns,
+            });
+            editorState.renderer.setInteractiveOptions({
+                selectedColumn: editorState.selectedCol,
+            });
+        }
+
+        /// Left-click / right-click handler — left = +1, right = -1. Empty
+        /// + delta=+1 becomes fret 0 (the most common open-string note).
+        /// Decrementing below 0 clears the cell. There's no upper cap —
+        /// extended-range / theoretical instruments can have arbitrarily
+        /// many frets and the alphaTex format doesn't care.
+        function editorBumpCell(stringIdx, colIdx, delta) {
+            if (colIdx < 0 || colIdx >= editorState.columns.length) return;
+            editorState.selectedCol = colIdx;
+            const cur = editorState.columns[colIdx][stringIdx];
+            let next;
+            if (cur == null) {
+                next = delta > 0 ? 0 : null;
+            } else {
+                const candidate = cur + delta;
+                next = candidate < 0 ? null : candidate;
+            }
+            if (next !== cur) {
+                editorState.columns[colIdx][stringIdx] = next;
+                editorUpdateDirty(true);
+            }
+            editorPushScore();
+            editorUpdateColInfo();
+        }
+
+        /// Double-click handler — opens a prompt for direct fret entry.
+        /// Plain blocking `prompt()` is fine here: this is a power-user
+        /// path ("set fret 17 without 17 clicks"), and a floating input
+        /// over a renderer-controlled cell would be more code than it's
+        /// worth for first cut. Empty / `x` / `-` clears the cell.
+        function editorPromptCell(stringIdx, colIdx, _event) {
+            if (colIdx < 0 || colIdx >= editorState.columns.length) return;
+            editorState.selectedCol = colIdx;
+            const cur = editorState.columns[colIdx][stringIdx];
+            const raw = window.prompt(
+                `Fret for string ${stringIdx + 1}, column ${colIdx + 1} (blank / x to clear):`,
+                cur == null ? '' : String(cur),
+            );
+            if (raw == null) {
+                editorPushScore();
+                editorUpdateColInfo();
+                return; // cancelled
+            }
+            const trimmed = raw.trim();
+            let next;
+            if (trimmed === '' || trimmed.toLowerCase() === 'x' || trimmed === '-') {
+                next = null;
+            } else {
+                const n = Number.parseInt(trimmed, 10);
+                if (!Number.isInteger(n) || n < 0) {
+                    // Bad input: keep current value.
+                    editorPushScore();
+                    editorUpdateColInfo();
+                    return;
+                }
+                next = n;
+            }
+            if (next !== cur) {
+                editorState.columns[colIdx][stringIdx] = next;
+                editorUpdateDirty(true);
+            }
+            editorPushScore();
+            editorUpdateColInfo();
+        }
+
+        async function renderEditorLibrary() {
+            const list = el('editor-library-list');
+            list.replaceChildren();
+            let entries;
+            try { entries = await library.list(); }
+            catch (e) {
+                console.warn('editor library.list failed', e);
+                entries = [];
+            }
+            if (entries.length === 0) {
+                const empty = document.createElement('div');
+                empty.className = 'empty-state';
+                empty.textContent =
+                    'No tabs yet — record one in the Recorder, or drop a .alphatex on the Playback screen first.';
+                list.appendChild(empty);
+                return;
+            }
+            for (const entry of entries) {
+                list.appendChild(renderEditorLibraryRow(entry));
+            }
+        }
+
+        function renderEditorLibraryRow(entry) {
+            const row = document.createElement('div');
+            row.className = 'tab-library-row';
+
+            const info = document.createElement('div');
+            info.className = 'info';
+            const title = document.createElement('div');
+            title.className = 'title';
+            title.textContent = entry.title;
+            info.appendChild(title);
+            const meta = document.createElement('div');
+            meta.className = 'meta';
+            const src = document.createElement('span');
+            src.textContent = entry.source;
+            meta.appendChild(src);
+            if (entry.source === 'bundled') {
+                const ro = document.createElement('span');
+                ro.className = 'backup-tag is-stale';
+                ro.textContent = 'read-only';
+                meta.appendChild(ro);
+            }
+            info.appendChild(meta);
+            row.appendChild(info);
+
+            const actions = document.createElement('div');
+            actions.className = 'actions';
+            const editBtn = document.createElement('button');
+            editBtn.className = 'primary';
+            editBtn.type = 'button';
+            editBtn.textContent = 'Edit';
+            editBtn.addEventListener('click', () => editorLoad(entry.id));
+            actions.appendChild(editBtn);
+            row.appendChild(actions);
+            return row;
+        }
+
+        async function editorLoad(id) {
+            let entry;
+            try { entry = await library.load(id); }
+            catch (e) {
+                showToast({ message: `Editor: load failed — ${e?.message ?? e}`, actions: [] });
+                return;
+            }
+            let parsed;
+            try { parsed = parse_alphatex(entry.alphatex); }
+            catch (e) {
+                showToast({ message: `Editor: parse failed — ${e}`, actions: [] });
+                return;
+            }
+
+            const tuningNames = parsed.tuning_names();
+            // Try to match the file's tuning against the registry so the
+            // serialized output keeps the right slug + display name. Fall
+            // back to a synthetic ad-hoc PresetEntry derived from the
+            // note names so we can still round-trip files whose tunings
+            // we don't recognise.
+            const slug = matchRegistrySlugForTuningNames(tuningNames);
+            let tuningEntry;
+            if (slug) {
+                try { tuningEntry = builtin_preset_entry(slug); }
+                catch { tuningEntry = userTuningBySlug(slug); }
+            }
+            if (!tuningEntry) {
+                tuningEntry = {
+                    slug: 'editor-adhoc',
+                    name: tuningNames.join(' '),
+                    strings: tuningNames.map((n) => ({
+                        name: n,
+                        midi: midi_from_name(n) ?? 0,
+                    })),
+                };
+            }
+
+            const stringCount = tuningEntry.strings.length;
+            const firstCol = parsed.column_at(0);
+            const resolutionDenom = firstCol?.duration_denom || 8;
+            const columns = [];
+            for (let i = 0; i < parsed.columns_count(); i++) {
+                const col = parsed.column_at(i);
+                const row = new Array(stringCount).fill(null);
+                for (const [str1, fret] of (col?.hits ?? [])) {
+                    const idx = str1 - 1;
+                    if (idx >= 0 && idx < stringCount) row[idx] = fret;
+                }
+                columns.push(row);
+            }
+            // Capture tempo + capo before releasing the parsed handle.
+            const tempo = parsed.tempo();
+            const capoSpec = parsed.capo_spec();
+            parsed.free?.();
+
+            editorState.tabId = entry.id;
+            editorState.source = entry.source;
+            editorState.title = entry.title;
+            editorState.bpm = tempo;
+            editorState.capoSpec = capoSpec;
+            editorState.resolutionDenom = resolutionDenom;
+            editorState.tuningEntry = tuningEntry;
+            editorState.columns = columns;
+            editorState.originalSnapshot = JSON.stringify({
+                title: entry.title,
+                bpm: editorState.bpm,
+                resolutionDenom,
+                columns,
+            });
+            editorState.selectedCol = columns.length > 0 ? 0 : -1;
+            editorState.dirty = false;
+
+            el('editor-title-input').value = entry.title;
+            el('editor-bpm-input').value = String(editorState.bpm);
+            const hintBits = [
+                `${tuningEntry.name}`,
+                `${stringCount} strings`,
+                `1/${resolutionDenom}`,
+            ];
+            if (editorState.capoSpec) hintBits.push(`capo ${editorState.capoSpec}`);
+            if (entry.source === 'bundled') hintBits.push('bundled (saves as new)');
+            el('editor-info-hint').textContent = hintBits.join(' · ');
+
+            el('editor-library-view').hidden = true;
+            el('editor-edit-view').hidden = false;
+            el('editor-error').hidden = true;
+            el('editor-ok').hidden = true;
+            editorEnsureRenderer();
+            editorPushScore();
+            editorUpdateDirty(false);
+            editorUpdateColInfo();
+        }
+
+        function editorUnload() {
+            editorState.tabId = null;
+            editorState.columns = [];
+            editorState.tuningEntry = null;
+            editorState.originalSnapshot = null;
+            editorState.selectedCol = -1;
+            editorState.dirty = false;
+            if (editorState.renderer) {
+                try { editorState.renderer.destroy(); }
+                catch (e) { console.warn('editor renderer destroy failed', e); }
+                editorState.renderer = null;
+            }
+            el('editor-edit-view').hidden = true;
+            el('editor-library-view').hidden = false;
+            renderEditorLibrary();
+        }
+
+        function editorUpdateDirty(flag) {
+            editorState.dirty = flag;
+            el('editor-dirty-pill').hidden = !flag;
+        }
+
+        function editorUpdateColInfo() {
+            const total = editorState.columns.length;
+            const sel = editorState.selectedCol;
+            if (sel < 0 || total === 0) {
+                el('editor-col-info').textContent = `${total} column${total === 1 ? '' : 's'}`;
+            } else {
+                el('editor-col-info').textContent =
+                    `col ${sel + 1} / ${total}`;
+            }
+        }
+
+        function editorInsertColAfter() {
+            const stringCount = editorState.tuningEntry?.strings.length ?? 0;
+            if (stringCount === 0) return;
+            const blank = new Array(stringCount).fill(null);
+            const insertAt = editorState.selectedCol >= 0
+                ? editorState.selectedCol + 1
+                : editorState.columns.length;
+            editorState.columns.splice(insertAt, 0, blank);
+            editorState.selectedCol = insertAt;
+            editorUpdateDirty(true);
+            editorPushScore();
+            editorUpdateColInfo();
+        }
+
+        function editorDeleteCol() {
+            if (editorState.selectedCol < 0) return;
+            if (editorState.columns.length === 0) return;
+            editorState.columns.splice(editorState.selectedCol, 1);
+            if (editorState.selectedCol >= editorState.columns.length) {
+                editorState.selectedCol = editorState.columns.length - 1;
+            }
+            editorUpdateDirty(true);
+            editorPushScore();
+            editorUpdateColInfo();
+        }
+
+        function editorClearCol() {
+            const c = editorState.selectedCol;
+            if (c < 0 || c >= editorState.columns.length) return;
+            const stringCount = editorState.tuningEntry?.strings.length ?? 0;
+            editorState.columns[c] = new Array(stringCount).fill(null);
+            editorUpdateDirty(true);
+            editorPushScore();
+            editorUpdateColInfo();
+        }
+
+        function editorRevert() {
+            if (!editorState.originalSnapshot) return;
+            if (editorState.dirty && !confirm('Discard your edits and revert to the saved version?')) {
+                return;
+            }
+            const snap = JSON.parse(editorState.originalSnapshot);
+            editorState.title = snap.title;
+            editorState.bpm = snap.bpm;
+            editorState.resolutionDenom = snap.resolutionDenom;
+            editorState.columns = snap.columns;
+            editorState.selectedCol = snap.columns.length > 0 ? 0 : -1;
+            el('editor-title-input').value = snap.title;
+            el('editor-bpm-input').value = String(snap.bpm);
+            editorUpdateDirty(false);
+            el('editor-error').hidden = true;
+            el('editor-ok').hidden = true;
+            editorPushScore();
+            editorUpdateColInfo();
+        }
+
+        function editorSerializeCurrent() {
+            const title = el('editor-title-input').value.trim();
+            const bpmRaw = Number.parseInt(el('editor-bpm-input').value, 10);
+            const bpm = Number.isInteger(bpmRaw) && bpmRaw >= 20 && bpmRaw <= 400
+                ? bpmRaw
+                : editorState.bpm;
+            return {
+                title,
+                bpm,
+                alphatex: serialize_recording(
+                    editorState.tuningEntry,
+                    editorState.capoSpec ?? '',
+                    bpm,
+                    editorState.resolutionDenom,
+                    editorState.columns,
+                    title || null,
+                ),
+            };
+        }
+
+        async function editorSave({ asNew } = {}) {
+            let payload;
+            try { payload = editorSerializeCurrent(); }
+            catch (e) {
+                el('editor-error').hidden = false;
+                el('editor-error').textContent = `Couldn't serialize: ${e?.message ?? e}`;
+                return;
+            }
+            const isBundled = typeof editorState.tabId === 'string'
+                && editorState.tabId.startsWith('bundled:');
+            try {
+                if (asNew || isBundled) {
+                    const newId = await library.save({
+                        title: payload.title || editorState.title,
+                        alphatex: payload.alphatex,
+                        source: isBundled ? 'imported' : 'user',
+                    });
+                    editorState.tabId = newId;
+                    editorState.source = isBundled ? 'imported' : 'user';
+                } else {
+                    await library.update({
+                        id: editorState.tabId,
+                        title: payload.title,
+                        alphatex: payload.alphatex,
+                    });
+                }
+            } catch (e) {
+                el('editor-error').hidden = false;
+                el('editor-error').textContent = `Save failed: ${e?.message ?? e}`;
+                return;
+            }
+
+            // Update the in-memory snapshot so Revert returns to *this*
+            // state, and so subsequent edits read as dirty again.
+            editorState.bpm = payload.bpm;
+            editorState.title = payload.title;
+            editorState.originalSnapshot = JSON.stringify({
+                title: payload.title,
+                bpm: payload.bpm,
+                resolutionDenom: editorState.resolutionDenom,
+                columns: editorState.columns,
+            });
+            editorUpdateDirty(false);
+            const okBox = el('editor-ok');
+            okBox.hidden = false;
+            okBox.textContent = (asNew || isBundled)
+                ? 'Saved as new copy in your library.'
+                : 'Saved.';
+            el('editor-error').hidden = true;
+        }
+
+        function wireEditorEditView() {
+            el('editor-back-to-library-btn').addEventListener('click', editorUnload);
+            el('editor-insert-col-btn').addEventListener('click', editorInsertColAfter);
+            el('editor-delete-col-btn').addEventListener('click', editorDeleteCol);
+            el('editor-clear-col-btn').addEventListener('click', editorClearCol);
+            el('editor-save-btn').addEventListener('click', () => editorSave({ asNew: false }));
+            el('editor-save-as-new-btn').addEventListener('click', () => editorSave({ asNew: true }));
+            el('editor-revert-btn').addEventListener('click', editorRevert);
+            el('editor-title-input').addEventListener('input', () => {
+                if (el('editor-title-input').value !== editorState.title) {
+                    editorUpdateDirty(true);
+                }
+            });
+            el('editor-bpm-input').addEventListener('input', () => {
+                const n = Number.parseInt(el('editor-bpm-input').value, 10);
+                if (Number.isInteger(n) && n !== editorState.bpm) {
+                    editorUpdateDirty(true);
+                }
+            });
         }
 
         main().catch((e) => {

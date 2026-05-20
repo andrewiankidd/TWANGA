@@ -21,7 +21,7 @@
 | Recorder + Playback QoL pass across CLI + GUI — title prompt on record, duration display, "couldn't fit on fretboard" indicator, metronome on record, pre-roll / count-in, pause / resume | done |
 | Shared `makeTuningController` widget consumed by Tuner + Recorder + Playback (closes the duplication backlog item) | done |
 | Custom CLI subcommand `twanga tunings remove` for parity with the GUI's delete button | done |
-| Tab editor (GUI-first) — post-capture cell-level editing of recordings with alphaTex round-trip | next |
+| Tab editor (GUI-first) — post-capture cell-level editing of recordings with alphaTex round-trip | done |
 | Bidirectional sync of `$CONFIG/twanga/tunings.toml` ↔ `localStorage` via a Tauri command | deferred (Tauri work paused while we prove things on web) |
 | Tauri filesystem backend for the browser tab library — `library-tauri.js` reads `$CONFIG/twanga/recordings/` once the matching Tauri commands land in `twanga-app` | deferred (Tauri work paused while we prove things on web) |
 | Chord trainer with polyphonic *verification* (not transcription) | follows |

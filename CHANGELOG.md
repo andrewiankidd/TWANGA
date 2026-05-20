@@ -10,6 +10,27 @@ dated section.
 
 ### Added
 
+- **Tab editor — first cut.** New `#editor` screen lets you open
+  any recording from the library and edit it directly on the
+  same Tab renderer Playback uses, just with `interactive: true`:
+  **left-click** a cell to bump the fret up (empty → 0 → 1 → 2 …
+  unbounded), **right-click** to bump it back down (0 → empty),
+  **double-click** to type a number directly. Click a column
+  index to select it for the Insert / Delete / Clear column
+  buttons. Title + BPM are editable inline; tuning + capo are
+  preserved from the source file (transposing belongs in
+  Playback, not here). User recordings save back in place via the
+  new `library.update({id, title, alphatex})`; bundled examples
+  are read-only and always route through "Save as new".
+  Round-trips through the same `serialize_recording` path the
+  Recorder uses on save, so the Editor's output is bit-for-bit
+  indistinguishable from a fresh recording with the same notes.
+  Required a small extension to the Tab renderer
+  (`interactive` / `onCellClick` / `onCellContext` /
+  `onCellDblClick` / `onColHeaderClick` / `selectedColumn`); the
+  same Tab plugin shape now serves Recorder + Playback (read-only)
+  AND Editor (interactive), with the plugin file unaware of who's
+  consuming it.
 - **Mic-level meter on Playback (wait mode)** — same diagnostic
   surface the Recorder already had: a small `RMS → dB` bar that
   appears while the mic is live, and a "no signal" hint after 2 s
