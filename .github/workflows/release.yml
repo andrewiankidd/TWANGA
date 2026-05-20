@@ -254,6 +254,26 @@ jobs:
         working-directory: crates/twanga-app
         run: cargo tauri build --bundles ${{ matrix.bundles }} --target ${{ matrix.tauri_target }}
 
+      - name: 🔏 Verify macOS ad-hoc signature
+        if: matrix.friendly == 'macos'
+        # Belt-and-braces: tauri.conf.json's bundle.macOS.signingIdentity
+        # = "-" should have made cargo tauri build ad-hoc sign the .app
+        # during the bundle step (which is critical because the .dmg
+        # wraps the signed .app — signing AFTER the build would leave
+        # the DMG copy unsigned). This step verifies the signature
+        # exists and re-signs if it somehow didn't.
+        run: |
+          set -e
+          bundle_root="target/${{ matrix.tauri_target }}/release/bundle"
+          for app in "$bundle_root"/macos/*.app; do
+              if ! codesign --verify --deep --strict "$app" 2>/dev/null; then
+                  echo "::warning::no signature on $app — applying ad-hoc fallback"
+                  codesign --force --deep --sign - "$app"
+              fi
+              codesign --verify --deep --strict "$app"
+              echo "verified: $app"
+          done
+
       - name: 📁 Stage Tauri installers + portable bundles
         shell: bash
         run: |
@@ -400,11 +420,18 @@ jobs:
           NDK_HOME: ${{ env.ANDROID_NDK_ROOT }}
         run: cargo tauri android init
 
-      - name: 🏗️ Build Android APK
+      - name: 🏗️ Build Android APK (debug-signed)
         working-directory: crates/twanga-app
         env:
           NDK_HOME: ${{ env.ANDROID_NDK_ROOT }}
-        run: cargo tauri android build --apk
+        # `--debug` builds with Android's auto-generated debug keystore.
+        # Without it, cargo tauri android build defaults to release
+        # mode and produces an UNSIGNED APK that Android refuses to
+        # install ("package appears to be invalid"). Debug-signed is
+        # fine for sideloading and dev distribution; switching to a
+        # real release keystore is a future step that needs the cert
+        # + password in repo secrets.
+        run: cargo tauri android build --apk --debug
 
       - name: 🏷️ Resolve tag + artifact name
         id: meta
@@ -689,6 +716,29 @@ jobs:
             artefacts across every platform (CLI binaries, Tauri
             desktop installers, Android APK, iOS sim build). For
             stable versioned downloads, use the `v*` tagged releases.
+
+            ### macOS — first launch
+            Apps aren't notarised yet (Apple Developer ID, $99/yr,
+            not yet wired). On first launch macOS will say
+            "TWANGA cannot be opened because Apple cannot check
+            it for malicious software". Two ways to allow it:
+
+            - **System Settings** → Privacy & Security → scroll to
+              the "Security" section → click **"Open Anyway"** next
+              to the TWANGA notice → confirm.
+            - **Terminal** (faster): `xattr -d com.apple.quarantine /Applications/TWANGA.app`
+
+            ### Android — sideloading
+            APKs are debug-signed (Tauri auto-generated keystore) so
+            they're installable but unsuitable for the Play Store.
+            Enable "Install unknown apps" for your downloader before
+            opening the APK.
+
+            ### iOS
+            Simulator-build only until proper signing is wired
+            (requires Apple Developer Program). The `.app.tar.gz`
+            extracts to a `.app` that can be dragged into the
+            iOS Simulator app in Xcode.
 
             Built: ${{ github.event.head_commit.timestamp }}
           files: dist/*
