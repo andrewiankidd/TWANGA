@@ -332,12 +332,37 @@ jobs:
                   # in the DMG IS the portable form — drag-and-drop to
                   # /Applications or anywhere else. tar.gz preserves the
                   # executable bit + the bundle's internal structure.
+                  # MACOS-README.txt rides along inside the tarball with
+                  # Gatekeeper workaround instructions, since users who
+                  # download via a deep link never see the release notes.
                   app_dir="${bundle_root}/macos"
                   app="$(find "$app_dir" -maxdepth 1 -type d -name '*.app' | head -n 1 || true)"
                   if [ -n "$app" ]; then
+                      cp crates/twanga-app/dist/MACOS-README.txt "$app_dir/README-FIRST.txt"
                       tar -czf "dist-desktop/twanga-desktop-macos-portable.app.tar.gz" \
-                          -C "$(dirname "$app")" "$(basename "$app")"
-                      echo "  $(basename "$app") → twanga-desktop-macos-portable.app.tar.gz"
+                          -C "$app_dir" \
+                          "$(basename "$app")" \
+                          "README-FIRST.txt"
+                      echo "  $(basename "$app") + README-FIRST.txt → twanga-desktop-macos-portable.app.tar.gz"
+                  fi
+
+                  # Inject the same README into the DMG window so users
+                  # see it on mount. Tauri's bundler builds a read-only
+                  # DMG containing the .app and an Applications symlink;
+                  # we convert it to read-write, mount, drop the README
+                  # in, unmount, and re-compress back to UDZO. All
+                  # standard macOS-bundled tooling (hdiutil), no extra
+                  # installs.
+                  dmg="dist-desktop/twanga-desktop-macos-setup.dmg"
+                  if [ -f "$dmg" ]; then
+                      hdiutil convert "$dmg" -format UDRW -ov -o /tmp/twanga-rw.dmg
+                      mkdir -p /tmp/dmg-mount
+                      hdiutil attach -nobrowse -mountpoint /tmp/dmg-mount /tmp/twanga-rw.dmg
+                      cp crates/twanga-app/dist/MACOS-README.txt /tmp/dmg-mount/README-FIRST.txt
+                      hdiutil detach /tmp/dmg-mount
+                      hdiutil convert /tmp/twanga-rw.dmg -format UDZO -ov -o "$dmg"
+                      rm -f /tmp/twanga-rw.dmg
+                      echo "  README-FIRST.txt injected into $dmg"
                   fi
                   ;;
               linux)
