@@ -110,10 +110,18 @@ class TabRenderer {
             this.playheadEl.style.display = 'none';
             return;
         }
-        const { tuning, columns, columnsPerBar } = this.score;
+        const { tuning, columns, columnsPerBar, capoSpec } = this.score;
         const strings = tuning?.strings ?? [];
         const numCols = columns.length;
         const { cellWidth, cellHeight, labelWidth, interactive, selectedColumn } = this.options;
+
+        // Parse the score's capo spec into per-string offsets so we can
+        // annotate the string labels. Empty / "0" spec → no annotation
+        // (cheap path). Mirrors twanga-core's Capo::parse: "3" = uniform
+        // 3 on every string, "0,2,2,2,2,2" = per-string, partial. The
+        // CLI shows the same info in its score header.
+        const capoOffsets = parseCapoForLabels(capoSpec, strings.length);
+        const hasCapo = capoOffsets.some((n) => n > 0);
 
         // Grid layout: first column for labels, then one per tab column.
         // In interactive mode we reserve grid row 1 for the column-index
@@ -164,13 +172,57 @@ class TabRenderer {
             }
         }
 
+        // Optional "capo: N" / "capo: [...]" badge in the top-left
+        // corner (over the string-label column, where the column-index
+        // header doesn't apply). Only shown when there's actually a
+        // capo set; mirrors the CLI's "Capo:" header line.
+        if (hasCapo) {
+            const badge = document.createElement('div');
+            badge.textContent = capoBadgeText(capoSpec);
+            Object.assign(badge.style, {
+                gridColumn: '1',
+                gridRow: headerRows ? '1' : '1 / 1',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'flex-end',
+                paddingRight: '0.5rem',
+                color: 'var(--highlight)',
+                fontWeight: '700',
+                fontSize: '0.65rem',
+                letterSpacing: '0.5px',
+                textTransform: 'uppercase',
+            });
+            // In interactive mode the header row above the string rows is
+            // already a row in the grid; reuse row 1 (replaces the empty
+            // corner placeholder set above). In non-interactive mode there
+            // IS no header row, so we insert a leading row purely for the
+            // badge by tweaking the template-rows below the fact:
+            if (!headerRows) {
+                const newRows = `${Math.round(cellHeight * 0.7)}px repeat(${strings.length}, ${cellHeight}px)`;
+                this.grid.style.gridTemplateRows = newRows;
+            }
+            this.grid.appendChild(badge);
+        }
+        // String rows shift down by 1 if we added the (read-only) capo
+        // badge row. Interactive mode's existing header row already
+        // accounted for the offset.
+        const stringRowOffset = headerRows + (hasCapo && !headerRows ? 1 : 0);
+
         for (let s = 0; s < strings.length; s++) {
-            // String label on the left of the row.
+            // String label on the left of the row, with optional "+N"
+            // capo annotation when that string is fretted up by the
+            // capo. Per-string offsets handle drop-D-style partial
+            // capos correctly.
             const label = document.createElement('div');
-            label.textContent = strings[s].name;
+            const off = capoOffsets[s] ?? 0;
+            const baseName = strings[s].name;
+            label.textContent = off > 0 ? `${baseName} +${off}` : baseName;
+            label.title = off > 0
+                ? `String ${s + 1} (${baseName}), capo +${off} semitones`
+                : `String ${s + 1} (${baseName})`;
             Object.assign(label.style, {
                 gridColumn: '1',
-                gridRow: `${s + 1 + headerRows}`,
+                gridRow: `${s + 1 + stringRowOffset}`,
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'flex-end',
@@ -189,7 +241,7 @@ class TabRenderer {
                 const isSelCol = interactive && c === selectedColumn;
                 Object.assign(cell.style, {
                     gridColumn: `${c + 2}`,
-                    gridRow: `${s + 1 + headerRows}`,
+                    gridRow: `${s + 1 + stringRowOffset}`,
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
@@ -244,6 +296,40 @@ class TabRenderer {
             });
         }
     }
+}
+
+/// Parse a Capo spec string ("" / "3" / "0,2,2,2,2,2") into a
+/// per-string offset array. Mirrors twanga-core's Capo::parse but
+/// in JS so the renderer is self-contained (no extra WASM call per
+/// rebuild). Returns an array of length `stringCount`, padded with
+/// zeros if the spec is shorter.
+function parseCapoForLabels(spec, stringCount) {
+    if (!spec || stringCount === 0) return new Array(stringCount).fill(0);
+    if (spec.includes(',')) {
+        const parts = spec.split(',').map((s) => {
+            const n = Number.parseInt(s.trim(), 10);
+            return Number.isFinite(n) ? n : 0;
+        });
+        const out = new Array(stringCount).fill(0);
+        for (let i = 0; i < Math.min(parts.length, stringCount); i++) {
+            out[i] = parts[i];
+        }
+        return out;
+    }
+    const n = Number.parseInt(spec, 10);
+    if (!Number.isFinite(n) || n <= 0) return new Array(stringCount).fill(0);
+    return new Array(stringCount).fill(n);
+}
+
+/// Short text label for the top-left capo badge. "capo 3" for a
+/// uniform capo, "capo [0,2,2,2,2,2]" for a partial. Same human
+/// shape as the CLI's "Capo:" header line, minus the "(uniform)"
+/// / "(partial)" tag (the per-string `+N` annotations already make
+/// that obvious in the GUI).
+function capoBadgeText(spec) {
+    if (!spec) return '';
+    if (spec.includes(',')) return `capo [${spec}]`;
+    return `capo ${spec}`;
 }
 
 export default {

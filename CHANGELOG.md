@@ -10,6 +10,51 @@ dated section.
 
 ### Added
 
+- **Octave-shift transpose mode** (CLI + GUI, full parity). When
+  re-tuning a tab onto a different instrument, notes that don't
+  fit on the target's fretboard can now be retried at
+  progressively wider ±12-semitone offsets before being dropped.
+  Standard cross-instrument convention (TuxGuitar / MuseScore
+  behaviour). Fixes the banjo→ukulele case where bass drones like
+  A3/B3/G3 used to disappear; with octave-shift they now play as
+  A4/B4/G4 on the uke body.
+
+  - CLI: new `--transpose-mode <drop|octave-shift>` on
+    `twanga play`. Defaults to `drop` (the historical behaviour);
+    the header line surfaces the active mode (`Transposed: ...
+    [octave-shift]`).
+  - GUI: dropdown on the Playback screen below the tuning picker.
+    Persists to `localStorage` with the rest of the playback
+    settings. Re-runs the transpose immediately so the "Skipped:"
+    count and the renderer reflect the rescued notes.
+  - Backend: new `TransposeMode` enum on
+    `twanga_tabs::alphatex` with a `transpose_to_with_mode` entry
+    point; the existing `transpose_to_with_report` keeps its
+    signature and delegates with `Drop`. WASM bindings updated
+    on both `transpose_to` and `transpose_to_dropped_notes` —
+    new optional string param accepting `"drop"` or
+    `"octave-shift"`; unknown values fall back to `"drop"`. 4
+    new cargo tests cover the up-shift, down-shift, in-range,
+    and unrescuable cases.
+
+- **Visual capo indicator on the renderers (GUI + CLI).** Per-
+  string capo offset is now surfaced wherever the user looks:
+
+  - **GUI Tab renderer**: when `score.capoSpec` is non-empty,
+    each string label suffixes a `+N` annotation (so a drop-D
+    capo on a guitar reads `D4 +2 / A3 / D3 / G3 +2 / B3 +2 /
+    E4 +2`), and a small `capo N` / `capo [...]` badge appears
+    in the corner above the string labels. Works in both
+    read-only mode (Recorder / Playback) and `interactive: true`
+    mode (Editor).
+  - **GUI Highway renderer**: same `+N` suffix on the lane
+    labels so the playing surface tells the same story as the
+    Tab view.
+  - **CLI `twanga play`**: row labels in the scrolling tab body
+    now read `D4 +2 | ...` for affected strings. The score
+    header line still prints `Capo: N (uniform)` / `Capo: [...]
+    (partial)` as before, so the two work together.
+
 - **Last-session resume on Playback.** Saved per-tab to a new
   `localStorage` map (`twanga-playback-resume-v1`); the most-recent
   bookmark surfaces as a banner above the library list on screen

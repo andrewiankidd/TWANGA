@@ -101,6 +101,9 @@ class HighwayRenderer {
 
         if (!this.score) return;
         const strings = this.score.tuning?.strings ?? [];
+        // Per-string capo offsets so we can suffix the lane labels
+        // (same convention as the Tab renderer).
+        const capoOffsets = parseCapoForLabels(this.score.capoSpec, strings.length);
 
         for (let s = 0; s < strings.length; s++) {
             const lane = document.createElement('div');
@@ -115,8 +118,12 @@ class HighwayRenderer {
             });
 
             // String label pinned to the bottom of the lane, centred.
+            // Suffix with "+N" when the capo raises this string.
+            const off = capoOffsets[s] ?? 0;
             const label = document.createElement('div');
-            label.textContent = strings[s].name;
+            label.textContent = off > 0
+                ? `${strings[s].name} +${off}`
+                : strings[s].name;
             Object.assign(label.style, {
                 position: 'absolute',
                 left: '0',
@@ -181,6 +188,30 @@ class HighwayRenderer {
             el.style.opacity = visible ? '1' : '0';
         }
     }
+}
+
+/// Parse a Capo spec string into per-string offsets. Duplicates the
+/// helper in `tab.js` because the two built-in renderers don't share
+/// a module today; if more renderers ever need it, hoist into a tiny
+/// `render/capo.js` shared util. Same behaviour as `Capo::parse` in
+/// twanga-core: empty / "0" → zeros, "3" → uniform 3, "0,2,2,2,2,2" →
+/// per-string.
+function parseCapoForLabels(spec, stringCount) {
+    if (!spec || stringCount === 0) return new Array(stringCount).fill(0);
+    if (spec.includes(',')) {
+        const parts = spec.split(',').map((s) => {
+            const n = Number.parseInt(s.trim(), 10);
+            return Number.isFinite(n) ? n : 0;
+        });
+        const out = new Array(stringCount).fill(0);
+        for (let i = 0; i < Math.min(parts.length, stringCount); i++) {
+            out[i] = parts[i];
+        }
+        return out;
+    }
+    const n = Number.parseInt(spec, 10);
+    if (!Number.isFinite(n) || n <= 0) return new Array(stringCount).fill(0);
+    return new Array(stringCount).fill(n);
 }
 
 export default {

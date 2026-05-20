@@ -59,10 +59,22 @@ enum Command {
         /// Re-tune the tab to a different instrument's tuning. Notes are
         /// transposed by absolute pitch — e.g. play a uke tab on banjo with
         /// `--tuning standard-banjo`. Notes outside the target instrument's
-        /// playable range are silently dropped. Omit or pass `--tuning` with
-        /// no value to be prompted.
+        /// playable range are silently dropped (use `--transpose-mode
+        /// octave-shift` to retry them at ±octaves first). Omit or pass
+        /// `--tuning` with no value to be prompted.
         #[arg(long, num_args = 0..=1, default_missing_value = "")]
         tuning: Option<String>,
+        /// How to handle notes that don't fit on the target tuning's
+        /// fretboard during `--tuning` transposition. `drop` (default)
+        /// silently omits them and reports a "Skipped:" pre-flight
+        /// summary; `octave-shift` retries each unreachable note at
+        /// progressively wider ±12-semitone offsets before giving up.
+        /// `octave-shift` is the standard cross-instrument convention
+        /// (TuxGuitar / MuseScore behaviour) — preserves melodic
+        /// contour at the cost of register. Particularly relevant for
+        /// banjo→ukulele where bass drone notes would otherwise vanish.
+        #[arg(long, value_parser = ["drop", "octave-shift"], default_value = "drop")]
+        transpose_mode: String,
         /// Override the tempo from the file (BPM). Omit or pass `--bpm` with
         /// no value to keep the file's tempo (no prompt — there's already a
         /// sensible default from the file).
@@ -1194,6 +1206,7 @@ fn main() -> Result<()> {
         Command::Play {
             path,
             tuning,
+            transpose_mode,
             bpm,
             no_metronome,
             wait,
@@ -1212,10 +1225,15 @@ fn main() -> Result<()> {
             let tuning = resolve_play_tuning(tuning, &parsed)?;
             let bpm = resolve_bpm_override(bpm)?;
             let pre_roll = resolve_pre_roll(pre_roll)?;
+            let transpose_mode = match transpose_mode.as_str() {
+                "octave-shift" => alphatex::TransposeMode::OctaveShift,
+                _ => alphatex::TransposeMode::Drop,
+            };
             run_playback(
                 path,
                 parsed,
                 tuning,
+                transpose_mode,
                 bpm,
                 !no_metronome,
                 wait,
@@ -1260,6 +1278,7 @@ fn run_playback(
     path: PathBuf,
     parsed: ParsedTab,
     tuning_override: Option<String>,
+    transpose_mode: alphatex::TransposeMode,
     bpm_override: Option<u32>,
     metronome: bool,
     wait: bool,
@@ -1281,7 +1300,7 @@ fn run_playback(
                 known_slugs().join(", ")
             )
         })?;
-        parsed.transpose_to_with_report(&target, MAX_FRET)
+        parsed.transpose_to_with_mode(&target, MAX_FRET, transpose_mode)
     } else {
         (parsed, Vec::new())
     };
@@ -1344,7 +1363,26 @@ fn run_playback(
         (None, Vec::new())
     };
 
-    let name_width = tab.tuning_names.iter().map(|n| n.len()).max().unwrap_or(0);
+    // Per-string capo offset annotation suffix for each row label
+    // (e.g. " +3" for a capo at fret 3). Empty string for strings
+    // not affected by the capo. Computed once up-front because the
+    // capo doesn't change during a playback session.
+    let capo_suffixes: Vec<String> = (0..tab.tuning_names.len())
+        .map(|i| {
+            let off = header_capo
+                .as_ref()
+                .and_then(|c| c.offsets.get(i).copied())
+                .unwrap_or(0);
+            if off > 0 { format!(" +{off}") } else { String::new() }
+        })
+        .collect();
+    let labels: Vec<String> = tab
+        .tuning_names
+        .iter()
+        .enumerate()
+        .map(|(i, name)| format!("{name}{}", capo_suffixes[i]))
+        .collect();
+    let name_width = labels.iter().map(|l| l.len()).max().unwrap_or(0);
 
     eprintln!("Playback:   {}", path.display());
     if let Some(title) = tab.title.as_deref() {
@@ -1356,7 +1394,14 @@ fn run_playback(
         eprintln!("Subtitle:   {subtitle}");
     }
     if let Some(name) = tuning_override.as_deref() {
-        eprintln!("Transposed: {name} ({})", tab.tuning_names.join(" "));
+        let mode_suffix = match transpose_mode {
+            alphatex::TransposeMode::OctaveShift => "  [octave-shift]",
+            alphatex::TransposeMode::Drop => "",
+        };
+        eprintln!(
+            "Transposed: {name} ({}){mode_suffix}",
+            tab.tuning_names.join(" ")
+        );
     } else {
         eprintln!("Tuning:     {} (from file)", tab.tuning_names.join(" "));
     }
@@ -1465,6 +1510,7 @@ fn run_playback(
             let total_secs = (loop_end - loop_start) as u64 * ms_per_col as u64 / 1000;
             let rows = render_playback_rows(
                 &tab,
+                &labels,
                 col_idx,
                 PLAYBACK_WINDOW_COLS,
                 name_width,
@@ -1546,6 +1592,7 @@ fn parse_loop_spec(spec: Option<&str>, total: usize) -> Result<(usize, usize, bo
 /// `[col / total]` progress + `M:SS / M:SS` elapsed line.
 fn render_playback_rows(
     tab: &ParsedTab,
+    labels: &[String],
     current_col: usize,
     window_cols: usize,
     name_width: usize,
@@ -1557,7 +1604,7 @@ fn render_playback_rows(
     let end = (start + window_cols).min(tab.columns.len());
 
     let mut rows = Vec::with_capacity(tab.tuning_names.len() + 1);
-    for (string_idx, name) in tab.tuning_names.iter().enumerate() {
+    for (string_idx, label) in labels.iter().enumerate() {
         let mut content = String::new();
         for col_idx in start..end {
             let c = char_for_column(&tab.columns[col_idx], string_idx);
@@ -1569,7 +1616,7 @@ fn render_playback_rows(
                 content.push(c);
             }
         }
-        let padded = format!("{:<width$}", name, width = name_width);
+        let padded = format!("{:<width$}", label, width = name_width);
         rows.push(format!("{padded} | {content}"));
     }
 

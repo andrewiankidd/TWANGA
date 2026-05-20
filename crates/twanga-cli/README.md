@@ -45,7 +45,8 @@ Load an `.alphatex` file, scroll a cursor through it at the file's (or overridde
 | Flag | Description |
 |------|-------------|
 | `path` (positional) | Path to a `.alphatex` file. |
-| `--tuning <slug>` | Re-tune the tab to a different instrument. Notes are transposed by absolute pitch — e.g. play `twinkle-twinkle-uke.alphatex` on a banjo with `--tuning standard-banjo`. Pitches the target can't reach (within fret 0–20) are silently dropped. |
+| `--tuning <slug>` | Re-tune the tab to a different instrument. Notes are transposed by absolute pitch — e.g. play `twinkle-twinkle-uke.alphatex` on a banjo with `--tuning standard-banjo`. Pitches the target can't reach (within fret 0–20) are dropped (or shifted; see `--transpose-mode`). |
+| `--transpose-mode <drop\|octave-shift>` | What to do with notes that don't fit on the target tuning during `--tuning` transposition. `drop` (default) silently omits them and reports a "Skipped:" pre-flight summary. `octave-shift` retries each unreachable note at ±12-semitone offsets before giving up — the standard TuxGuitar / MuseScore convention. Particularly relevant for banjo→ukulele where bass drones would otherwise vanish. |
 | `--capo <spec>` | Capo applied to the tab's tuning for wait-mode pitch comparison. Precedence: `--capo` wins; otherwise falls back to whatever the file embedded in its `\subtitle` field. |
 | `--bpm <N>` | Override the tempo from the file. |
 | `--no-metronome` | Silence the click (default is on). |

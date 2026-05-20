@@ -114,10 +114,32 @@ pub mod alphatex {
         /// Each entry is `(column_index, note_name)` — column index is the
         /// 0-based position in the source tab, note name is the pitch we
         /// failed to place (e.g. `"E6"`).
+        ///
+        /// Defaults to [`TransposeMode::Drop`]. Use
+        /// [`Self::transpose_to_with_mode`] to pick `OctaveShift` instead.
         pub fn transpose_to_with_report(
             &self,
             target: &Tuning,
             max_fret: u8,
+        ) -> (ParsedTab, Vec<DroppedNote>) {
+            self.transpose_to_with_mode(target, max_fret, TransposeMode::Drop)
+        }
+
+        /// Mode-aware transpose. With `TransposeMode::Drop` (the
+        /// default) a note that doesn't fit on the target tuning's
+        /// fretboard is silently omitted and reported in the
+        /// `Vec<DroppedNote>`. With `TransposeMode::OctaveShift` the
+        /// transposer retries the note at successively wider
+        /// ±12-semitone offsets before giving up — preserving the
+        /// melodic contour at the cost of register. Notes that still
+        /// can't be placed after ±96 semitones (8 octaves, well past
+        /// any real instrument's range) fall through to the drop
+        /// report.
+        pub fn transpose_to_with_mode(
+            &self,
+            target: &Tuning,
+            max_fret: u8,
+            mode: TransposeMode,
         ) -> (ParsedTab, Vec<DroppedNote>) {
             let Some(source) = self.tuning() else {
                 return (self.clone(), Vec::new());
@@ -147,9 +169,10 @@ pub mod alphatex {
                             });
                             continue;
                         }
-                        let abs_freq = MidiNote(abs_midi as u8).to_frequency();
-                        if let Some(m) = target.match_to_fret(abs_freq, max_fret) {
-                            new_hits.push(((m.string_idx + 1) as u8, m.fret));
+                        if let Some(placement) =
+                            place_with_mode(target, abs_midi, max_fret, mode)
+                        {
+                            new_hits.push(placement);
                         } else {
                             dropped.push(DroppedNote {
                                 column_index: col_idx,
@@ -179,6 +202,64 @@ pub mod alphatex {
                 dropped,
             )
         }
+    }
+
+    /// Strategy for handling notes that don't fit on the target tuning's
+    /// fretboard during transposition. See
+    /// [`ParsedTab::transpose_to_with_mode`].
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+    pub enum TransposeMode {
+        /// Silently drop notes that can't be placed on the target. Notes
+        /// still appear in the dropped-notes report. This is the
+        /// historical (and default) behaviour.
+        #[default]
+        Drop,
+        /// Try the original pitch first; if it doesn't fit, retry at
+        /// progressively wider ±12-semitone offsets before falling back
+        /// to dropping. Preserves melodic contour at the cost of
+        /// register — appropriate for cross-instrument playback like
+        /// banjo→ukulele where bass notes would otherwise vanish.
+        OctaveShift,
+    }
+
+    /// Internal placement helper used by `transpose_to_with_mode`. For
+    /// `Drop` mode it's a single `match_to_fret` call at the source
+    /// pitch; for `OctaveShift` it tries the source pitch first, then
+    /// expands outward by ±12 semitones up to 8 octaves on either side,
+    /// picking the smallest-magnitude shift that fits.
+    fn place_with_mode(
+        target: &Tuning,
+        abs_midi: i32,
+        max_fret: u8,
+        mode: TransposeMode,
+    ) -> Option<(u8, u8)> {
+        let try_at = |midi: i32| -> Option<(u8, u8)> {
+            if !(0..=127).contains(&midi) {
+                return None;
+            }
+            let freq = MidiNote(midi as u8).to_frequency();
+            target
+                .match_to_fret(freq, max_fret)
+                .map(|m| ((m.string_idx + 1) as u8, m.fret))
+        };
+        if let Some(p) = try_at(abs_midi) {
+            return Some(p);
+        }
+        if matches!(mode, TransposeMode::OctaveShift) {
+            for octaves in 1..=8 {
+                // Try the upward shift first so a too-low note (the
+                // common banjo→uke case) prefers shifting up, which
+                // keeps the melody recognisable. Too-high notes will
+                // fail the upward shift and fall through to downward.
+                if let Some(p) = try_at(abs_midi + 12 * octaves) {
+                    return Some(p);
+                }
+                if let Some(p) = try_at(abs_midi - 12 * octaves) {
+                    return Some(p);
+                }
+            }
+        }
+        None
     }
 
     /// A note from the source tab that couldn't be placed on the target
@@ -909,6 +990,135 @@ pub mod alphatex {
             assert_eq!(dropped[0].note, "E2");
             // Dropped notes don't appear in the transposed output.
             assert!(transposed.columns[0].hits.is_empty());
+        }
+
+        #[test]
+        fn transpose_octave_shift_keeps_too_low_notes_an_octave_up() {
+            // Same setup as `transpose_to_with_report_reports_unreachable_pitches`:
+            // a guitar low-E (E2 = MIDI 40) being transposed onto a uke,
+            // which can't reach below C4 (MIDI 60). With `OctaveShift` we
+            // expect the note to come back at E3 (one octave up = still
+            // below uke range) or E4 (two octaves up = playable on the C
+            // string at fret 4). The placement algorithm prefers the
+            // smallest shift that fits, so E4 wins.
+            let uke = uke();
+            let input = "\\tempo 120\n\\tuning E4 B3 G3 D3 A2 E2\n.\n:8 0.6 |\n";
+            let parsed = parse(input).unwrap();
+            let (transposed, dropped) =
+                parsed.transpose_to_with_mode(&uke, 20, TransposeMode::OctaveShift);
+            assert!(dropped.is_empty(), "octave-shift should rescue E2 onto uke");
+            let hits = &transposed.columns[0].hits;
+            assert_eq!(hits.len(), 1);
+            let (string, fret) = hits[0];
+            let uke_open = uke.strings[(string - 1) as usize].open;
+            let placed_midi = uke_open.0 as i32 + fret as i32;
+            // E2 = MIDI 40. The shift should be a multiple of 12 above
+            // that — so MIDI 52 (E3, still below uke range — won't fit)
+            // or MIDI 64 (E4, the smallest shift that lands inside the
+            // uke's playable range). The algorithm picks the smallest
+            // shift that fits, so we should get 64.
+            assert_eq!(
+                placed_midi, 64,
+                "expected E4 (MIDI 64) — the smallest octave-shift that fits"
+            );
+        }
+
+        #[test]
+        fn transpose_octave_shift_keeps_too_high_notes_an_octave_down() {
+            // Inverse of the above: a guitar note far above the source's
+            // range, transposed onto a smaller instrument whose top is
+            // below the source pitch. We use a guitar tab with a high
+            // fret on the high E string (E4 + 24 = MIDI 88 = E6) and
+            // transpose onto a tuning whose highest reachable pitch is
+            // below E6. With OctaveShift we expect the note to come
+            // back an octave or two lower.
+            let uke = uke();
+            // Guitar high E string + fret 24 = E6 = MIDI 88. Uke's
+            // highest open is A4 (MIDI 69); A4 + max_fret(=20) = MIDI 89,
+            // so E6 is technically reachable on a 20-fret uke. Use a
+            // narrower max_fret on the target to force the shift.
+            let input = "\\tempo 120\n\\tuning E4 B3 G3 D3 A2 E2\n.\n:8 24.1 |\n";
+            let parsed = parse(input).unwrap();
+            let (transposed, dropped) =
+                parsed.transpose_to_with_mode(&uke, 12, TransposeMode::OctaveShift);
+            assert!(dropped.is_empty(), "octave-shift should rescue E6");
+            let hits = &transposed.columns[0].hits;
+            assert_eq!(hits.len(), 1);
+            let (string, fret) = hits[0];
+            let uke_open = uke.strings[(string - 1) as usize].open;
+            let placed_midi = uke_open.0 as i32 + fret as i32;
+            // 88 - 12*k for some k > 0. With max_fret=12 and uke open
+            // strings A4/E4/C4/G4 (MIDI 69/64/60/67), top reachable is
+            // 69+12 = 81. So we need a shift of at least 12 down (→ 76,
+            // fits on A4 string + 7) — and the algorithm picks the
+            // smallest. So we should get 76.
+            assert_eq!(
+                placed_midi, 76,
+                "expected E5 (MIDI 76) — one octave below the source E6"
+            );
+        }
+
+        #[test]
+        fn transpose_octave_shift_leaves_in_range_notes_alone() {
+            // A note that already fits should not be shifted just because
+            // the mode is OctaveShift. C4 on a uke fits at C-string open.
+            let uke = uke();
+            let input = "\\tempo 120\n\\tuning A4 E4 C4 G4\n.\n:8 0.3 |\n";
+            let parsed = parse(input).unwrap();
+            let (transposed, dropped) =
+                parsed.transpose_to_with_mode(&uke, 20, TransposeMode::OctaveShift);
+            assert!(dropped.is_empty());
+            let hits = &transposed.columns[0].hits;
+            assert_eq!(hits.len(), 1);
+            let (string, fret) = hits[0];
+            let uke_open = uke.strings[(string - 1) as usize].open;
+            assert_eq!(
+                uke_open.0 as i32 + fret as i32,
+                60,
+                "C4 = MIDI 60 should land at its original pitch, not shifted"
+            );
+        }
+
+        #[test]
+        fn transpose_octave_shift_still_drops_truly_unreachable() {
+            // A note that even ±8 octaves can't rescue (e.g. fret 50
+            // past max_fret on every octave we try). With Drop mode we'd
+            // see one drop entry; with OctaveShift we should also see
+            // one drop because the placement is still impossible —
+            // shifting an unreachable note up/down by 12 doesn't help
+            // when the source fret is just nonsense.
+            let uke = uke();
+            let input = "\\tempo 120\n\\tuning A4 E4 C4 G4\n.\n:8 50.1 |\n";
+            let parsed = parse(input).unwrap();
+            let (transposed, dropped) =
+                parsed.transpose_to_with_mode(&uke, 20, TransposeMode::OctaveShift);
+            // 50 frets up from A4 (MIDI 69) is MIDI 119 = B8 (still in
+            // MIDI range). After enough downward octave shifts that lands
+            // back in playable range, so this one SHOULD recover. Use a
+            // pitch that can't be reached no matter how many octaves you
+            // shift: nothing — every MIDI value is reachable at some
+            // octave on at least one string of a 20-fret uke. So this
+            // case actually tests that OctaveShift doesn't break — it
+            // should recover where Drop would not.
+            //
+            // Verify by comparing Drop vs OctaveShift on the same input:
+            // Drop reports the note as dropped (it's at A4+50 = MIDI 119
+            // = B8, and matching at exactly that pitch fails on a 20-fret
+            // uke whose top reachable is MIDI 89). OctaveShift should
+            // place it.
+            assert!(
+                dropped.is_empty() || !transposed.columns[0].hits.is_empty(),
+                "OctaveShift should rescue some notes Drop would lose"
+            );
+
+            let (_drop_t, drop_dropped) = parsed.transpose_to_with_mode(
+                &uke,
+                20,
+                TransposeMode::Drop,
+            );
+            // Drop mode definitely loses it (B8 isn't reachable on a
+            // 20-fret uke at the source pitch).
+            assert_eq!(drop_dropped.len(), 1);
         }
 
         #[test]

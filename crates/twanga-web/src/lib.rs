@@ -285,11 +285,23 @@ impl WebParsedTab {
     /// fit on the target within `max_fret`. The browser Playback screen
     /// shows the dropped-notes list as a pre-flight "Skipped:" preamble
     /// before the cursor starts.
-    pub fn transpose_to(&self, preset_json: JsValue, max_fret: u8) -> Result<WebParsedTab, String> {
+    ///
+    /// `mode` is one of `"drop"` (default — historical behaviour) or
+    /// `"octave-shift"` (retry out-of-range notes at ±12-semitone
+    /// offsets before giving up). Unknown strings fall back to `"drop"`
+    /// so the JS side can't accidentally degrade with a typo.
+    pub fn transpose_to(
+        &self,
+        preset_json: JsValue,
+        max_fret: u8,
+        mode: Option<String>,
+    ) -> Result<WebParsedTab, String> {
         let entry: twanga_core::PresetEntry = serde_wasm_bindgen::from_value(preset_json)
             .map_err(|e| format!("malformed tuning shape: {e}"))?;
         let target = entry.to_tuning();
-        let (transposed, _dropped) = self.inner.transpose_to_with_report(&target, max_fret);
+        let (transposed, _dropped) =
+            self.inner
+                .transpose_to_with_mode(&target, max_fret, parse_transpose_mode(mode.as_deref()));
         Ok(WebParsedTab { inner: transposed })
     }
 
@@ -305,11 +317,14 @@ impl WebParsedTab {
         &self,
         preset_json: JsValue,
         max_fret: u8,
+        mode: Option<String>,
     ) -> Result<JsValue, String> {
         let entry: twanga_core::PresetEntry = serde_wasm_bindgen::from_value(preset_json)
             .map_err(|e| format!("malformed tuning shape: {e}"))?;
         let target = entry.to_tuning();
-        let (_transposed, dropped) = self.inner.transpose_to_with_report(&target, max_fret);
+        let (_transposed, dropped) =
+            self.inner
+                .transpose_to_with_mode(&target, max_fret, parse_transpose_mode(mode.as_deref()));
         let js_dropped: Vec<DroppedNoteJs> = dropped
             .into_iter()
             .map(|d| DroppedNoteJs {
@@ -318,6 +333,17 @@ impl WebParsedTab {
             })
             .collect();
         Ok(serde_wasm_bindgen::to_value(&js_dropped).unwrap())
+    }
+}
+
+/// String → `TransposeMode`. Unknown values default to `Drop` so a JS
+/// typo can't silently degrade the user's tab into wrong octaves.
+fn parse_transpose_mode(s: Option<&str>) -> twanga_tabs::alphatex::TransposeMode {
+    match s.unwrap_or("").trim().to_ascii_lowercase().as_str() {
+        "octave-shift" | "octave_shift" | "octave" | "shift" => {
+            twanga_tabs::alphatex::TransposeMode::OctaveShift
+        }
+        _ => twanga_tabs::alphatex::TransposeMode::Drop,
     }
 }
 

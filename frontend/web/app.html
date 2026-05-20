@@ -219,6 +219,28 @@
         .picker-hint a:hover {
             text-decoration: underline;
         }
+        /* Transpose-mode dropdown sits between the tuning picker and
+           the active-tuning row on Playback. Only relevant when the
+           user has chosen a different tuning than the file's. */
+        .transpose-mode-row {
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+            margin: 0 0 1rem 0.3rem;
+        }
+        .transpose-mode-row .transpose-mode-label {
+            color: var(--muted);
+            font-size: 0.85rem;
+        }
+        .transpose-mode-row select {
+            background: var(--background);
+            border: 1px solid var(--border);
+            color: var(--text);
+            border-radius: 4px;
+            padding: 0.3rem 0.6rem;
+            font-family: inherit;
+            font-size: 0.85rem;
+        }
         .tuning-option {
             background: var(--card);
             border: 1px solid var(--border);
@@ -1533,6 +1555,13 @@
                 <p class="picker-hint">
                     Re-tune to play this tab on a different instrument. Notes that can't fit on the target are listed below.
                 </p>
+                <div class="transpose-mode-row">
+                    <label for="playback-transpose-mode" class="transpose-mode-label">When a note doesn't fit:</label>
+                    <select id="playback-transpose-mode">
+                        <option value="drop">Drop unreachable notes</option>
+                        <option value="octave-shift">Shift to nearest octave</option>
+                    </select>
+                </div>
 
                 <div class="active-tuning-row">
                     <div class="active-tuning-name" id="playback-active-tuning-name">—</div>
@@ -3576,6 +3605,7 @@
             metronome: true,
             preRoll: 4,
             wait: false,
+            transposeMode: 'drop',  // 'drop' | 'octave-shift' — matches the WASM enum string
             bpmOverride: null,      // null = use loaded tab's tempo
 
             // Ephemeral engine state
@@ -3762,6 +3792,9 @@
             playbackState.preRoll = Number.isInteger(saved.preRoll) && saved.preRoll >= 0 && saved.preRoll <= 16
                 ? saved.preRoll : 4;
             playbackState.wait = saved.wait === true;
+            playbackState.transposeMode = saved.transposeMode === 'octave-shift'
+                ? 'octave-shift'
+                : 'drop';
         }
 
         function playbackSaveToStorage() {
@@ -3770,6 +3803,7 @@
                     metronome: playbackState.metronome,
                     preRoll: playbackState.preRoll,
                     wait: playbackState.wait,
+                    transposeMode: playbackState.transposeMode,
                 }));
             } catch (e) {
                 console.warn('playback localStorage write failed', e);
@@ -4039,12 +4073,13 @@
             const tuning = playbackState.tuning;
             const entry = tuning?.getPresetEntry();
             const src = playbackState.loadedTab.parsed;
+            const mode = playbackState.transposeMode || 'drop';
             let transposed = src;
             let dropped = [];
             if (entry) {
                 try {
-                    transposed = src.transpose_to(entry, MAX_FRET);
-                    const droppedJs = src.transpose_to_dropped_notes(entry, MAX_FRET);
+                    transposed = src.transpose_to(entry, MAX_FRET, mode);
+                    const droppedJs = src.transpose_to_dropped_notes(entry, MAX_FRET, mode);
                     dropped = Array.isArray(droppedJs) ? droppedJs : [];
                 } catch (e) {
                     console.warn('transpose failed', e);
@@ -4248,9 +4283,24 @@
             const metToggle = el('playback-metronome-toggle');
             const prInput = el('playback-preroll-input');
             const waitToggle = el('playback-wait-toggle');
+            const transposeMode = el('playback-transpose-mode');
 
             metToggle.checked = playbackState.metronome;
             prInput.value = String(playbackState.preRoll);
+            transposeMode.value = playbackState.transposeMode;
+            transposeMode.addEventListener('change', () => {
+                if (playbackState.isPlaying) {
+                    transposeMode.value = playbackState.transposeMode;
+                    return;
+                }
+                playbackState.transposeMode =
+                    transposeMode.value === 'octave-shift' ? 'octave-shift' : 'drop';
+                playbackSaveToStorage();
+                // Re-run the transpose immediately so the user sees the
+                // new "Skipped:" count + the renderer reflects the
+                // rescued notes.
+                playbackRecomputeTransposition();
+            });
             waitToggle.checked = playbackState.wait;
 
             const clampInt = (raw, min, max, fallback) => {
