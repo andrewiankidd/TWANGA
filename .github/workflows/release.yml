@@ -363,17 +363,22 @@ jobs:
         run: |
           mkdir -p dist
           # cargo tauri android build drops APKs under the project's gen
-          # dir. Pull whatever was produced.
+          # dir. Pull whatever was produced; fail honestly if nothing
+          # was — the upload's `if-no-files-found: error` would catch it
+          # anyway but an explicit message here is clearer in the logs.
           find crates/twanga-app/gen/android -type f -name '*.apk' -print -exec cp {} dist/ \;
-          ls -lh dist/ || true
+          ls -lh dist/
+          if ! ls dist/*.apk >/dev/null 2>&1; then
+              echo "::error::Android build produced no .apk — failing job."
+              exit 1
+          fi
 
       - name: ⬆️ Upload Android artifact
         uses: actions/upload-artifact@v4
-        if: always()
         with:
           name: ${{ steps.meta.outputs.archive }}
           path: dist/*
-          if-no-files-found: warn
+          if-no-files-found: error
 
   # ─────────────────────────────────────────────────────────────────────
   # iOS build — best-effort. Without an Apple Developer team ID and a
@@ -425,10 +430,13 @@ jobs:
         working-directory: crates/twanga-app
         # No signing config yet, so production .ipa packaging will fail
         # — we build for the simulator target instead, which doesn't
-        # need a provisioning profile. The `|| true` swallows failure
-        # so this job is purely "did it compile?" validation; the
-        # continue-on-error at the job level catches the rest.
-        run: cargo tauri ios build --target aarch64-apple-ios-sim || true
+        # need a provisioning profile. The build is allowed to fail at
+        # the job level via `continue-on-error: true` (Mobile is best-
+        # effort right now), but we no longer paper over failures with
+        # `|| true` — if the step fails, the job shows red and the next
+        # steps that depend on the .app being present will skip via
+        # GHA's default "on failure, skip" behaviour.
+        run: cargo tauri ios build --target aarch64-apple-ios-sim
 
       - name: 🏷️ Resolve tag + artifact name
         id: meta
@@ -451,22 +459,32 @@ jobs:
       - name: 📁 Stage iOS artefacts
         run: |
           mkdir -p dist
-          # Whatever the build produced — .ipa if we got that far,
-          # .app bundle from the simulator otherwise, .xcarchive at
-          # worst — pack it for inspection.
-          find crates/twanga-app/gen/apple -type f \( -name '*.ipa' -o -name '*.app.tar.gz' \) -print -exec cp {} dist/ \; 2>/dev/null || true
-          if [ -d crates/twanga-app/gen/apple/build ]; then
-            tar -czf dist/twanga-ios-build.tar.gz -C crates/twanga-app/gen/apple build || true
+          # cargo tauri ios build --target aarch64-apple-ios-sim drops a
+          # `TWANGA.app` *directory* under gen/apple/build/... — we tar
+          # each .app bundle since GH artifact uploads handle files, not
+          # directories cleanly. If the build step failed there will be
+          # no .app to find, and the empty dist/ trips `error` on the
+          # upload below — which is the honest signal we want.
+          found=0
+          while IFS= read -r app; do
+              name="$(basename "$app" .app)"
+              tar -czf "dist/${name}.app.tar.gz" -C "$(dirname "$app")" "$(basename "$app")"
+              found=1
+          done < <(find crates/twanga-app/gen/apple/build -type d -name '*.app' 2>/dev/null)
+          # Also try to pick up any .ipa if signing somehow worked.
+          find crates/twanga-app/gen/apple -type f -name '*.ipa' -exec cp {} dist/ \; 2>/dev/null || true
+          ls -lh dist/
+          if [ "$found" = "0" ] && ! ls dist/*.ipa >/dev/null 2>&1; then
+              echo "::error::iOS build produced no .app or .ipa — failing job."
+              exit 1
           fi
-          ls -lh dist/ || true
 
       - name: ⬆️ Upload iOS artifact
         uses: actions/upload-artifact@v4
-        if: always()
         with:
           name: ${{ steps.meta.outputs.archive }}
           path: dist/*
-          if-no-files-found: warn
+          if-no-files-found: error
 
   # ─────────────────────────────────────────────────────────────────────
   # Two aggregators, gated by trigger:
