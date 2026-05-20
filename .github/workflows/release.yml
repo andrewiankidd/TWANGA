@@ -449,6 +449,48 @@ jobs:
           NDK_HOME: ${{ env.ANDROID_NDK_ROOT }}
         run: cargo tauri android init
 
+      - name: 🩹 Patch generated Android project (icons + permissions)
+        working-directory: crates/twanga-app
+        # `cargo tauri android init` re-generates gen/android/ from
+        # scratch every CI run (the directory is gitignored), so any
+        # manual changes to the Gradle project, AndroidManifest.xml,
+        # or launcher icons have to be re-applied here. Two patches:
+        #
+        # 1. Launcher icons — Tauri auto-generates ic_launcher.png at
+        #    each mipmap density from the icon list in tauri.conf.json,
+        #    but our source icon.png is 512×512 (below Tauri's
+        #    recommended 1024×1024), so the auto-generated icons come
+        #    out a bit blurry. icons/android/ already contains a hand-
+        #    tuned set; rsync them over the auto-generated ones.
+        #
+        # 2. Microphone permissions — without RECORD_AUDIO, the
+        #    WebView's getUserMedia() call fails silently and Android
+        #    Settings → App Info doesn't even show a mic toggle.
+        #    Without the additional MODIFY_AUDIO_SETTINGS permission
+        #    Android's audio subsystem refuses to hand the mic to the
+        #    WebView even after the user grants RECORD_AUDIO (see
+        #    tauri-apps/tauri#10846 — multiple users confirmed this
+        #    is necessary on Tauri 2). Tauri 2 has no tauri.conf.json
+        #    field for app-level Android manifest permissions; the
+        #    standard fix in the issue tracker is to edit
+        #    AndroidManifest.xml directly. Our setup keeps gen/
+        #    gitignored, so we patch via sed instead.
+        run: |
+          set -e
+          # Icons: rsync (not cp) so existing density-bucket
+          # directories merge rather than nest.
+          rsync -a icons/android/ gen/android/app/src/main/res/
+
+          # Permissions: insert two <uses-permission> lines before
+          # the <application> tag in the generated manifest.
+          manifest=gen/android/app/src/main/AndroidManifest.xml
+          sed -i '/<application /i\
+              <uses-permission android:name="android.permission.RECORD_AUDIO" />\
+              <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />' "$manifest"
+
+          echo "--- AndroidManifest.xml (post-patch) ---"
+          cat "$manifest"
+
       - name: 🏗️ Build Android APK (debug-signed)
         working-directory: crates/twanga-app
         env:
