@@ -1,7 +1,16 @@
 name: Release
 
+# Three trigger paths:
+#   - push to main         → build everything, no draft release (CI-style "does it still build?")
+#   - push to v* tag       → build everything AND create a draft GH Release
+#   - workflow_dispatch    → manual run; create a draft release with the input tag
+#
+# The build matrix runs on all three; the `release` aggregator at the
+# bottom is gated on tag/dispatch so a regular commit doesn't litter the
+# Releases page with one draft per push.
 on:
   push:
+    branches: [main]
     tags:
       - 'v*'
   workflow_dispatch:
@@ -9,6 +18,14 @@ on:
       tag:
         description: 'Release tag (e.g. v0.1.0). Must already exist or be valid for a fresh draft.'
         required: true
+
+# Per-ref concurrency. Group keyed on github.ref so main pushes share a
+# bucket (newer commit cancels the older in-flight run, avoids stacking
+# 10-job matrix runs while iterating) and each tag gets its own bucket
+# (one tag = one release build, never cancel itself).
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   CARGO_TERM_COLOR: always
@@ -88,8 +105,15 @@ jobs:
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             tag="${{ inputs.tag }}"
-          else
+          elif [[ "$GITHUB_REF" == refs/tags/* ]]; then
             tag="${GITHUB_REF#refs/tags/}"
+          else
+            # Main-branch push — synthesise a label from the short SHA so
+            # artifact filenames + the archive root dir stay sane. The
+            # rolling `latest-main` release uses these as its uploaded
+            # files regardless of this label; the label is just for the
+            # archive's internal staging dir.
+            tag="main-$(echo "$GITHUB_SHA" | cut -c1-7)"
           fi
           # `staged` keeps the version + triple visible inside the archive
           # (extracted dir tells you which release + which CPU you grabbed);
@@ -234,8 +258,15 @@ jobs:
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             tag="${{ inputs.tag }}"
-          else
+          elif [[ "$GITHUB_REF" == refs/tags/* ]]; then
             tag="${GITHUB_REF#refs/tags/}"
+          else
+            # Main-branch push — synthesise a label from the short SHA so
+            # artifact filenames + the archive root dir stay sane. The
+            # rolling `latest-main` release uses these as its uploaded
+            # files regardless of this label; the label is just for the
+            # archive's internal staging dir.
+            tag="main-$(echo "$GITHUB_SHA" | cut -c1-7)"
           fi
           archive="twanga-desktop-${{ matrix.friendly }}"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
@@ -341,8 +372,15 @@ jobs:
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             tag="${{ inputs.tag }}"
-          else
+          elif [[ "$GITHUB_REF" == refs/tags/* ]]; then
             tag="${GITHUB_REF#refs/tags/}"
+          else
+            # Main-branch push — synthesise a label from the short SHA so
+            # artifact filenames + the archive root dir stay sane. The
+            # rolling `latest-main` release uses these as its uploaded
+            # files regardless of this label; the label is just for the
+            # archive's internal staging dir.
+            tag="main-$(echo "$GITHUB_SHA" | cut -c1-7)"
           fi
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "archive=twanga-android" >> "$GITHUB_OUTPUT"
@@ -423,8 +461,15 @@ jobs:
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             tag="${{ inputs.tag }}"
-          else
+          elif [[ "$GITHUB_REF" == refs/tags/* ]]; then
             tag="${GITHUB_REF#refs/tags/}"
+          else
+            # Main-branch push — synthesise a label from the short SHA so
+            # artifact filenames + the archive root dir stay sane. The
+            # rolling `latest-main` release uses these as its uploaded
+            # files regardless of this label; the label is just for the
+            # archive's internal staging dir.
+            tag="main-$(echo "$GITHUB_SHA" | cut -c1-7)"
           fi
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "archive=twanga-ios" >> "$GITHUB_OUTPUT"
@@ -450,13 +495,27 @@ jobs:
           if-no-files-found: warn
 
   # ─────────────────────────────────────────────────────────────────────
-  # Aggregator: pulls every successful artefact into one draft GitHub
-  # Release. Mobile is intentionally NOT in `needs` so a flaky Android
-  # / iOS run doesn't block the CLI + desktop release going out — those
-  # artefacts just won't be attached this time around.
+  # Two aggregators, gated by trigger:
+  #
+  #   release-tag      — fires on `v*` tag push or workflow_dispatch.
+  #                      Creates a draft, versioned GH Release named after
+  #                      the tag, ready to be reviewed + published.
+  #
+  #   release-rolling  — fires on every push to main. Refreshes a single
+  #                      `latest-main` pre-release with the freshly-built
+  #                      artefacts. Marked prerelease + make_latest:false
+  #                      so it doesn't displace the "Latest" badge on the
+  #                      Releases page (that stays pinned to the most
+  #                      recent versioned tag).
+  #
+  # Both depend only on CLI + Desktop builds so a flaky Android / iOS run
+  # doesn't block the release going out — those artefacts just won't be
+  # attached this time around.
   # ─────────────────────────────────────────────────────────────────────
-  release:
-    name: 🎁 Publish draft release
+
+  release-tag:
+    name: 🎁 Publish draft release (tag)
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
     needs: [build-cli, build-desktop]
     runs-on: ubuntu-latest
     permissions:
@@ -488,4 +547,60 @@ jobs:
           name: TWANGA ${{ steps.meta.outputs.tag }}
           draft: true
           generate_release_notes: true
+          files: dist/*
+
+  release-rolling:
+    name: 🔄 Refresh latest-main release
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [build-cli, build-desktop]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: ⬇️ Checkout
+        uses: actions/checkout@v4
+
+      - name: ⬇️ Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: 🧹 Delete previous latest-main release + tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          # softprops/action-gh-release@v2 updates the release in place
+          # when the tag already exists, but it does NOT move the git tag
+          # itself to the new commit. Easiest correct semantics: delete
+          # the release + tag, then recreate against the current commit.
+          # Both branches are idempotent (|| true) so a fresh repo where
+          # neither exists yet doesn't fail the job.
+          gh release delete latest-main --yes --cleanup-tag --repo "${{ github.repository }}" || true
+
+      - name: 🔄 Publish rolling latest-main release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest-main
+          name: 'Latest main build'
+          # Pre-release + make_latest:false belt-and-braces so this
+          # doesn't displace the "Latest release" badge on the Releases
+          # page (that stays pinned to the most recent v* tag).
+          prerelease: true
+          make_latest: 'false'
+          # Not a draft — should be immediately downloadable; the whole
+          # point of latest-main is "always-fresh artefacts from the
+          # tip of main".
+          draft: false
+          target_commitish: ${{ github.sha }}
+          body: |
+            Auto-built from `main` at commit `${{ github.sha }}`.
+
+            Each push to main refreshes this release with fresh
+            artefacts across every platform (CLI binaries, Tauri
+            desktop installers, Android APK, iOS sim build). For
+            stable versioned downloads, use the `v*` tagged releases.
+
+            Built: ${{ github.event.head_commit.timestamp }}
           files: dist/*
