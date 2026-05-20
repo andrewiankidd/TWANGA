@@ -83,11 +83,12 @@ jobs:
       # `twanga docs <slug>` subcommand. The viewer fetches them via
       # `assets/docs/<slug>.md` relative to the deploy root, so copy
       # them into the bundle here. The CLI embeds the same files
-      # directly via `include_str!` at build time.
+      # directly via `include_str!` at build time. Keep the
+      # destination name (`docs/`) in sync with the equivalent step in
+      # release.yml.
       - name: Bundle per-feature docs into the site
         run: |
-          mkdir -p frontend/web/assets/docs
-          cp docs/features/*.md frontend/web/assets/docs/
+          cp -r docs/features frontend/web/assets/docs
           ls -lh frontend/web/assets/docs/
 
       - uses: actions/configure-pages@v5

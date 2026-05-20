@@ -248,8 +248,7 @@ jobs:
           mkdir -p frontend/web/assets
           cp -r assets/examples frontend/web/assets/
           cp -r assets/patterns frontend/web/assets/
-          mkdir -p frontend/web/assets/docs
-          cp docs/features/*.md frontend/web/assets/docs/
+          cp -r docs/features frontend/web/assets/docs
 
       - name: 📦 Install tauri-cli
         run: cargo install tauri-cli --version '^2' --locked
@@ -439,8 +438,7 @@ jobs:
           mkdir -p frontend/web/assets
           cp -r assets/examples frontend/web/assets/
           cp -r assets/patterns frontend/web/assets/
-          mkdir -p frontend/web/assets/docs
-          cp docs/features/*.md frontend/web/assets/docs/
+          cp -r docs/features frontend/web/assets/docs
 
       - name: 📦 Install tauri-cli
         run: cargo install tauri-cli --version '^2' --locked
@@ -553,8 +551,7 @@ jobs:
           mkdir -p frontend/web/assets
           cp -r assets/examples frontend/web/assets/
           cp -r assets/patterns frontend/web/assets/
-          mkdir -p frontend/web/assets/docs
-          cp docs/features/*.md frontend/web/assets/docs/
+          cp -r docs/features frontend/web/assets/docs
 
       - name: 📦 Install tauri-cli
         run: cargo install tauri-cli --version '^2' --locked
