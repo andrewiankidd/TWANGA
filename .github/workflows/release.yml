@@ -146,7 +146,11 @@ jobs:
           staged="twanga-${tag}-${{ matrix.friendly }}"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "staged=$staged" >> "$GITHUB_OUTPUT"
-          echo "cli_archive=twanga-${{ matrix.friendly }}" >> "$GITHUB_OUTPUT"
+          # Artifact names follow `twanga-{component}-{platform}.{ext}`
+          # so the Releases page sorts naturally and a glance tells you
+          # which file is what. The extension carries portable-vs-
+          # installer.
+          echo "cli_archive=twanga-cli-${{ matrix.friendly }}" >> "$GITHUB_OUTPUT"
           echo "desktop_archive=twanga-desktop-${{ matrix.friendly }}" >> "$GITHUB_OUTPUT"
 
       # ── CLI build + pack ────────────────────────────────────────────
@@ -250,18 +254,35 @@ jobs:
         shell: bash
         run: |
           # cargo tauri build drops the bundles under
-          # `target/{triple}/release/bundle/<format>/<file>`. We pull
-          # whatever was produced (matrix.bundles may include several
-          # formats) into a single per-platform staging dir.
+          # `target/{triple}/release/bundle/<format>/<file>` with
+          # Tauri-default names like `TWANGA_0.1.0_x64_en-US.msi`. We
+          # rename them to `twanga-desktop-{platform}.{ext}` so a
+          # glance at the Releases page tells you which file is what.
+          # `-setup.exe` for the Windows NSIS variant since it sits
+          # next to the MSI and needs distinguishing.
           mkdir -p dist-desktop
           bundle_root="target/${{ matrix.tauri_target }}/release/bundle"
+          friendly="${{ matrix.friendly }}"
           if [ -d "$bundle_root" ]; then
-            # Flatten one level — we want the installer files themselves,
-            # not the per-format subdirs.
-            find "$bundle_root" -type f \( -name '*.msi' -o -name '*.exe' \
+            while IFS= read -r src; do
+              base="$(basename "$src")"
+              case "$base" in
+                  *.msi)         dst="twanga-desktop-${friendly}.msi" ;;
+                  *-setup.exe|*-Setup.exe)
+                                 dst="twanga-desktop-${friendly}-setup.exe" ;;
+                  *.exe)         dst="twanga-desktop-${friendly}-setup.exe" ;;
+                  *.dmg)         dst="twanga-desktop-${friendly}.dmg" ;;
+                  *.app.tar.gz)  dst="twanga-desktop-${friendly}.app.tar.gz" ;;
+                  *.deb)         dst="twanga-desktop-${friendly}.deb" ;;
+                  *.AppImage)    dst="twanga-desktop-${friendly}.AppImage" ;;
+                  *.rpm)         dst="twanga-desktop-${friendly}.rpm" ;;
+                  *)             dst="$base" ;;
+              esac
+              cp "$src" "dist-desktop/${dst}"
+              echo "  $base → $dst"
+            done < <(find "$bundle_root" -type f \( -name '*.msi' -o -name '*.exe' \
                 -o -name '*.dmg' -o -name '*.app.tar.gz' \
-                -o -name '*.deb' -o -name '*.AppImage' -o -name '*.rpm' \
-                \) -print -exec cp {} dist-desktop/ \;
+                -o -name '*.deb' -o -name '*.AppImage' -o -name '*.rpm' \) )
           fi
           ls -lh dist-desktop/ || true
 
@@ -357,21 +378,33 @@ jobs:
             tag="main-$(echo "$GITHUB_SHA" | cut -c1-7)"
           fi
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
-          echo "archive=twanga-android" >> "$GITHUB_OUTPUT"
+          echo "archive=twanga-mobile-android" >> "$GITHUB_OUTPUT"
 
       - name: 📁 Stage APKs
         run: |
           mkdir -p dist
-          # cargo tauri android build drops APKs under the project's gen
-          # dir. Pull whatever was produced; fail honestly if nothing
-          # was — the upload's `if-no-files-found: error` would catch it
-          # anyway but an explicit message here is clearer in the logs.
-          find crates/twanga-app/gen/android -type f -name '*.apk' -print -exec cp {} dist/ \;
-          ls -lh dist/
-          if ! ls dist/*.apk >/dev/null 2>&1; then
+          # cargo tauri android build drops APKs under the project's
+          # gen/ dir with internal names like
+          # `app-universal-release-unsigned.apk`. Rename to the same
+          # `twanga-mobile-android.apk` shape the other components use
+          # so the Releases page is skimmable. If there are multiple
+          # APKs (per-arch + universal), the universal one wins.
+          src_apks=()
+          while IFS= read -r apk; do
+              src_apks+=("$apk")
+          done < <(find crates/twanga-app/gen/android -type f -name '*.apk')
+          if [ ${#src_apks[@]} -eq 0 ]; then
               echo "::error::Android build produced no .apk — failing job."
               exit 1
           fi
+          # Prefer a universal APK if present, otherwise take the first.
+          chosen=""
+          for apk in "${src_apks[@]}"; do
+              case "$apk" in *universal*) chosen="$apk"; break ;; esac
+          done
+          [ -z "$chosen" ] && chosen="${src_apks[0]}"
+          cp "$chosen" "dist/twanga-mobile-android.apk"
+          ls -lh dist/
 
       - name: ⬆️ Upload Android artifact
         uses: actions/upload-artifact@v4
@@ -454,27 +487,34 @@ jobs:
             tag="main-$(echo "$GITHUB_SHA" | cut -c1-7)"
           fi
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
-          echo "archive=twanga-ios" >> "$GITHUB_OUTPUT"
+          echo "archive=twanga-mobile-ios" >> "$GITHUB_OUTPUT"
 
       - name: 📁 Stage iOS artefacts
         run: |
           mkdir -p dist
           # cargo tauri ios build --target aarch64-apple-ios-sim drops a
           # `TWANGA.app` *directory* under gen/apple/build/... — we tar
-          # each .app bundle since GH artifact uploads handle files, not
-          # directories cleanly. If the build step failed there will be
-          # no .app to find, and the empty dist/ trips `error` on the
-          # upload below — which is the honest signal we want.
+          # the .app bundle (single file for GH artifact upload). Once
+          # signing is wired we'll prefer the .ipa. Naming follows the
+          # same `twanga-mobile-{platform}.{ext}` shape as the rest of
+          # the release.
           found=0
           while IFS= read -r app; do
-              name="$(basename "$app" .app)"
-              tar -czf "dist/${name}.app.tar.gz" -C "$(dirname "$app")" "$(basename "$app")"
-              found=1
+              # Only stage the *first* .app — there's typically just one
+              # (TWANGA.app), and naming would conflict otherwise.
+              if [ "$found" = "0" ]; then
+                  tar -czf "dist/twanga-mobile-ios-simulator.app.tar.gz" \
+                      -C "$(dirname "$app")" "$(basename "$app")"
+                  found=1
+              fi
           done < <(find crates/twanga-app/gen/apple/build -type d -name '*.app' 2>/dev/null)
-          # Also try to pick up any .ipa if signing somehow worked.
-          find crates/twanga-app/gen/apple -type f -name '*.ipa' -exec cp {} dist/ \; 2>/dev/null || true
+          # Pick up an .ipa if a signed build somehow produced one.
+          ipa="$(find crates/twanga-app/gen/apple -type f -name '*.ipa' | head -n 1 || true)"
+          if [ -n "$ipa" ]; then
+              cp "$ipa" "dist/twanga-mobile-ios.ipa"
+          fi
           ls -lh dist/
-          if [ "$found" = "0" ] && ! ls dist/*.ipa >/dev/null 2>&1; then
+          if [ "$found" = "0" ] && [ -z "$ipa" ]; then
               echo "::error::iOS build produced no .app or .ipa — failing job."
               exit 1
           fi
