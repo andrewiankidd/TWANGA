@@ -32,6 +32,7 @@ in one place.
 | Patterns | `#patterns` | [features/patterns.md](features/patterns.md) |
 | Tab editor | `#editor` | [features/editor.md](features/editor.md) |
 | Tunings | `#tunings` | [features/tunings.md](features/tunings.md) |
+| Hardware | (setup guide — `#docs/hardware`) | [features/hardware.md](features/hardware.md) |
 | Docs | `#docs` | (the per-feature pages above, rendered inline) |
 
 ## Running it

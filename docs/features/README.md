@@ -12,6 +12,7 @@ the docs to enforce it too.
 | [Patterns](patterns.md) | Bundled rhythm + picking drills (clawhammer, rolls, strums, guitar fingerpicking). |
 | [Tab editor](editor.md) | Post-capture cell-level edits to recordings. |
 | [Tunings](tunings.md) | Built-in + user-defined tuning registry. |
+| [Hardware](hardware.md) | Audio-input setup — mics, instrument cables, interfaces, latency. |
 
 For a higher-level intro see the [CLI overview](../CLI.md) or
 [GUI overview](../GUI.md). The per-flag CLI reference lives in

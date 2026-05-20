@@ -10,6 +10,23 @@ dated section.
 
 ### Added
 
+- **New Hardware setup guide** at
+  [`docs/features/hardware.md`](docs/features/hardware.md). Cross-
+  cutting reference page (not really a feature, but lives in the
+  same per-page directory so the in-app docs viewer picks it up
+  automatically) describing every realistic way to get sound into
+  TWANGA: built-in mic, external USB mic, instrument-to-USB cable,
+  proper audio interface, acoustic-pickup paths. Includes a
+  latency / cost / quality comparison table up front, browser-vs-
+  CLI latency notes, and pointers to `twanga devices` for
+  verification. Wired through every slug-tracking spot: Rust
+  `DOCS_PAGES` (with new `include_str!`), JS `DOCS_FEATURES`, the
+  features index README, and both `CLI.md` / `GUI.md` hub tables.
+  The Rust sync-point test (`slug_set_matches_expected_features`)
+  was updated so the new slug is the canonical expected set.
+  Renders correctly in both the in-app docs viewer (`#docs/hardware`
+  card on the index) and via `twanga docs hardware`.
+
 - **Release workflow builds all platforms.** `.github/workflows/release.yml`
   grew three new build jobs on top of the existing CLI matrix:
   - **`build-desktop`** — `cargo tauri build` per OS, producing

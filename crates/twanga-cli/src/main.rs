@@ -1563,6 +1563,7 @@ const DOC_PLAYBACK: &str = include_str!("../../../docs/features/playback.md");
 const DOC_PATTERNS: &str = include_str!("../../../docs/features/patterns.md");
 const DOC_EDITOR: &str = include_str!("../../../docs/features/editor.md");
 const DOC_TUNINGS: &str = include_str!("../../../docs/features/tunings.md");
+const DOC_HARDWARE: &str = include_str!("../../../docs/features/hardware.md");
 
 /// Slug → embedded markdown body. Order here is the listing order shown
 /// to the user when they run `twanga docs` with no arg.
@@ -1592,6 +1593,11 @@ const DOCS_PAGES: &[(&str, &str, &str)] = &[
         "tunings",
         "Built-in + user-defined tuning registry.",
         DOC_TUNINGS,
+    ),
+    (
+        "hardware",
+        "Audio-input setup guide — mics, instrument cables, interfaces.",
+        DOC_HARDWARE,
     ),
 ];
 
@@ -2725,7 +2731,7 @@ mod docs_tests {
     #[test]
     fn slug_set_matches_expected_features() {
         let expected = [
-            "tuner", "recorder", "playback", "patterns", "editor", "tunings",
+            "tuner", "recorder", "playback", "patterns", "editor", "tunings", "hardware",
         ];
         let actual: Vec<&str> = DOCS_PAGES.iter().map(|(s, _, _)| *s).collect();
         assert_eq!(

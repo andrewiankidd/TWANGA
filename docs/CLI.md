@@ -43,6 +43,7 @@ counterpart in one place.
 | Patterns | `twanga patterns <list\|play\|path>` | [features/patterns.md](features/patterns.md) |
 | Tab editor | `twanga edit <path> <set\|clear\|clear-col\|insert-col\|delete-col\|title\|bpm>` | [features/editor.md](features/editor.md) |
 | Tunings | `twanga tunings <list\|path\|add\|remove>` | [features/tunings.md](features/tunings.md) |
+| Hardware | (setup guide — `twanga docs hardware`) | [features/hardware.md](features/hardware.md) |
 | Docs | `twanga docs [feature]` | The per-feature pages above, printed to stdout for `glow` / `mdcat` / `bat -l md`. |
 
 Bare `twanga` with no subcommand prints the splash banner + the standard
