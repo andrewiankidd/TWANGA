@@ -250,40 +250,80 @@ jobs:
         working-directory: crates/twanga-app
         run: cargo tauri build --bundles ${{ matrix.bundles }} --target ${{ matrix.tauri_target }}
 
-      - name: 📁 Stage Tauri installers
+      - name: 📁 Stage Tauri installers + portable bundles
         shell: bash
         run: |
-          # cargo tauri build drops the bundles under
-          # `target/{triple}/release/bundle/<format>/<file>` with
-          # Tauri-default names like `TWANGA_0.1.0_x64_en-US.msi`. We
-          # rename them to `twanga-desktop-{platform}.{ext}` so a
-          # glance at the Releases page tells you which file is what.
-          # `-setup.exe` for the Windows NSIS variant since it sits
-          # next to the MSI and needs distinguishing.
+          # Two-pass naming: every installer gets `-setup` in the name
+          # for consistency (so .msi and .exe sit next to each other
+          # under twanga-desktop-windows-setup.{msi,exe} rather than
+          # leaving the .msi looking like a portable binary). The raw
+          # unpacked artefacts cargo tauri build already produces are
+          # repacked alongside as `-portable` for users who don't want
+          # to run an installer.
+          #
+          # Layout per platform:
+          #   Windows: setup.msi + setup.exe (NSIS) + portable.zip
+          #   Linux:   setup.deb + portable.AppImage
+          #   macOS:   setup.dmg + portable.app.tar.gz
           mkdir -p dist-desktop
           bundle_root="target/${{ matrix.tauri_target }}/release/bundle"
+          release_root="target/${{ matrix.tauri_target }}/release"
           friendly="${{ matrix.friendly }}"
+
+          # ── Pass 1: bundled installers, renamed with -setup ─────────
           if [ -d "$bundle_root" ]; then
             while IFS= read -r src; do
               base="$(basename "$src")"
               case "$base" in
-                  *.msi)         dst="twanga-desktop-${friendly}.msi" ;;
-                  *-setup.exe|*-Setup.exe)
-                                 dst="twanga-desktop-${friendly}-setup.exe" ;;
+                  *.msi)         dst="twanga-desktop-${friendly}-setup.msi" ;;
                   *.exe)         dst="twanga-desktop-${friendly}-setup.exe" ;;
-                  *.dmg)         dst="twanga-desktop-${friendly}.dmg" ;;
-                  *.app.tar.gz)  dst="twanga-desktop-${friendly}.app.tar.gz" ;;
-                  *.deb)         dst="twanga-desktop-${friendly}.deb" ;;
-                  *.AppImage)    dst="twanga-desktop-${friendly}.AppImage" ;;
-                  *.rpm)         dst="twanga-desktop-${friendly}.rpm" ;;
+                  *.dmg)         dst="twanga-desktop-${friendly}-setup.dmg" ;;
+                  *.deb)         dst="twanga-desktop-${friendly}-setup.deb" ;;
+                  *.rpm)         dst="twanga-desktop-${friendly}-setup.rpm" ;;
+                  # AppImage is portable by design — name accordingly so
+                  # it sits in the portable column on the Releases page.
+                  *.AppImage)    dst="twanga-desktop-${friendly}-portable.AppImage" ;;
                   *)             dst="$base" ;;
               esac
               cp "$src" "dist-desktop/${dst}"
               echo "  $base → $dst"
             done < <(find "$bundle_root" -type f \( -name '*.msi' -o -name '*.exe' \
-                -o -name '*.dmg' -o -name '*.app.tar.gz' \
-                -o -name '*.deb' -o -name '*.AppImage' -o -name '*.rpm' \) )
+                -o -name '*.dmg' -o -name '*.deb' -o -name '*.AppImage' -o -name '*.rpm' \) )
           fi
+
+          # ── Pass 2: portable variants from the unpacked release output
+          case "$friendly" in
+              windows)
+                  # The raw GUI binary lives alongside `bundle/`. Wrap it
+                  # in a tiny zip with README + licenses for context.
+                  stage="dist-desktop-portable/twanga-desktop"
+                  mkdir -p "$stage"
+                  cp "${release_root}/twanga-app.exe" "$stage/"
+                  cp README.md LICENSE-MIT LICENSE-APACHE "$stage/"
+                  (cd dist-desktop-portable && \
+                      powershell -Command "Compress-Archive -Path twanga-desktop -DestinationPath ../dist-desktop/twanga-desktop-windows-portable.zip")
+                  ;;
+              macos)
+                  # The .app bundle Tauri produces *before* it wraps it
+                  # in the DMG IS the portable form — drag-and-drop to
+                  # /Applications or anywhere else. tar.gz preserves the
+                  # executable bit + the bundle's internal structure.
+                  app_dir="${bundle_root}/macos"
+                  app="$(find "$app_dir" -maxdepth 1 -type d -name '*.app' | head -n 1 || true)"
+                  if [ -n "$app" ]; then
+                      tar -czf "dist-desktop/twanga-desktop-macos-portable.app.tar.gz" \
+                          -C "$(dirname "$app")" "$(basename "$app")"
+                      echo "  $(basename "$app") → twanga-desktop-macos-portable.app.tar.gz"
+                  fi
+                  ;;
+              linux)
+                  # AppImage already covered by the rename above — there's
+                  # nothing further to do here. The raw ELF binary would
+                  # need libwebkit2gtk-4.1 on the host so it's not really
+                  # "portable"; AppImage is the right shape.
+                  :
+                  ;;
+          esac
           ls -lh dist-desktop/ || true
 
       - name: ⬆️ Upload Desktop artifact
