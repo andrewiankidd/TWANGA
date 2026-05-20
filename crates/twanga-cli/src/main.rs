@@ -158,6 +158,19 @@ enum TuningsAction {
     Path,
     /// Define a new tuning interactively and save it to the user config.
     Add,
+    /// Remove a user-defined tuning by slug. Built-in tunings can't be
+    /// removed (they're compiled into the binary). Omit `--slug` to be
+    /// prompted with a menu of user tunings.
+    Remove {
+        /// Slug of the user tuning to remove. Omit or pass `--slug` with no
+        /// value to pick interactively from the user tunings on disk.
+        #[arg(long, num_args = 0..=1, default_missing_value = "")]
+        slug: Option<String>,
+        /// Skip the "delete '<slug>'? (y/N)" confirmation prompt. Useful
+        /// for scripts; interactive users should leave this off.
+        #[arg(long)]
+        force: bool,
+    },
 }
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -249,6 +262,79 @@ fn run_tunings_add() -> Result<()> {
     eprintln!();
     eprintln!("Saved '{slug}' to {}", path.display());
     eprintln!("It will appear in the tune/record/play menus from now on.");
+    Ok(())
+}
+
+/// `twanga tunings remove [--slug <slug>] [--force]` — closes the
+/// reverse-parity gap with the GUI's delete button on user-tunings
+/// rows. Built-in tunings are compiled into the binary and can't be
+/// "removed"; the helper rejects those upfront.
+fn run_tunings_remove(slug_arg: Option<String>, force: bool) -> Result<()> {
+    let user_entries = tunings::load_user_tunings()?;
+    if user_entries.is_empty() {
+        eprintln!("No user-defined tunings to remove.");
+        eprintln!("(Run `twanga tunings add` to create one, or `twanga tunings list`");
+        eprintln!("to see what's available — built-in tunings can't be removed.)");
+        return Ok(());
+    }
+
+    // Resolve the target slug: explicit `--slug X` wins; otherwise prompt
+    // with a menu of user tunings. The three-form flag pattern means
+    // omitting `--slug` entirely also lands here (interactive default).
+    let slug = match flag_value(&slug_arg) {
+        Some(s) => s.to_string(),
+        None => {
+            let labels: Vec<String> = user_entries
+                .iter()
+                .map(|e| format!("{} — {}", e.slug, e.name))
+                .collect();
+            let label_refs: Vec<&str> = labels.iter().map(String::as_str).collect();
+            let idx = twanga_tui::select("Which user tuning to remove?", &label_refs)?;
+            user_entries[idx].slug.clone()
+        }
+    };
+
+    // Pre-flight validation so the user sees a clear error before the
+    // confirmation prompt (rather than the prompt + then a failure).
+    if Tuning::builtin_slugs().contains(&slug.as_str()) {
+        return Err(anyhow!(
+            "'{slug}' is a built-in preset — built-ins can't be removed \
+             (they're compiled into the binary). Pick a user-defined slug \
+             from `twanga tunings list`."
+        ));
+    }
+    let target = user_entries
+        .iter()
+        .find(|e| e.slug == slug)
+        .ok_or_else(|| {
+            let available: Vec<String> = user_entries.iter().map(|e| e.slug.clone()).collect();
+            anyhow!(
+                "no user tuning with slug '{slug}'. Available: {}",
+                available.join(", ")
+            )
+        })?;
+
+    if !force {
+        eprintln!("About to remove user tuning:");
+        eprintln!("  slug: {}", target.slug);
+        eprintln!("  name: {}", target.name);
+        let pitches: Vec<String> = target.strings.iter().map(|s| s.name.clone()).collect();
+        eprintln!("  strings: {}", pitches.join(" "));
+        let confirmed: bool = twanga_tui::prompt_parsed("Delete? (y/N)", false, |s| {
+            match s.trim().to_lowercase().as_str() {
+                "" | "n" | "no" => Ok(false),
+                "y" | "yes" => Ok(true),
+                other => Err(format!("expected y/yes or n/no, got '{other}'")),
+            }
+        })?;
+        if !confirmed {
+            eprintln!("Cancelled — '{}' kept.", target.slug);
+            return Ok(());
+        }
+    }
+
+    let path = tunings::remove_user_tuning(&slug)?;
+    eprintln!("Removed '{slug}' from {}.", path.display());
     Ok(())
 }
 
@@ -1135,6 +1221,7 @@ fn main() -> Result<()> {
             TuningsAction::List => run_tunings_list()?,
             TuningsAction::Path => run_tunings_path()?,
             TuningsAction::Add => run_tunings_add()?,
+            TuningsAction::Remove { slug, force } => run_tunings_remove(slug, force)?,
         },
     }
     Ok(())

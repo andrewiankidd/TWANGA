@@ -77,6 +77,7 @@ User-defined tunings live at the platform config dir (`$CONFIG/twanga/tunings.to
 | `twanga tunings list` | Print built-in + user-defined tunings with origin tags. |
 | `twanga tunings path` | Print the absolute path to the user file (whether it exists yet or not). |
 | `twanga tunings add` | Interactive flow: number of strings → per-string open pitch → display name → auto-slug. Saves to the user file, rejects slugs that collide with built-ins. |
+| `twanga tunings remove [--slug <slug>] [--force]` | Delete a user-defined tuning from the user file. Pass `--slug` to skip the menu; pass `--force` to skip the confirmation prompt (useful in scripts). Built-in tunings are compiled into the binary and can't be removed. |
 
 ### `devices` — list audio input devices
 

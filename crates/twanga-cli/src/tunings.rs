@@ -110,6 +110,36 @@ pub fn add_user_tuning(entry: PresetEntry) -> Result<PathBuf> {
     add_user_tuning_at(&path, entry)
 }
 
+/// Remove a user-defined tuning by slug. Refuses to "remove" built-in
+/// slugs — they're compiled into the binary and aren't actually in the
+/// user file. Returns `Ok(path)` on success so the caller can log the
+/// affected file; `Err` if the slug isn't in the user file at all.
+pub fn remove_user_tuning_at(path: &Path, slug: &str) -> Result<PathBuf> {
+    if Tuning::builtin_slugs().contains(&slug) {
+        return Err(anyhow!(
+            "'{slug}' is a built-in preset — built-ins can't be removed (they're compiled in)"
+        ));
+    }
+    let mut entries = load_user_tunings_at(path)?;
+    let before = entries.len();
+    entries.retain(|e| e.slug != slug);
+    if entries.len() == before {
+        return Err(anyhow!(
+            "no user tuning with slug '{slug}' found at {}",
+            path.display()
+        ));
+    }
+    save_user_tunings_at(path, &entries)?;
+    Ok(path.to_path_buf())
+}
+
+/// Production wrapper: remove a user tuning from the platform's config dir.
+pub fn remove_user_tuning(slug: &str) -> Result<PathBuf> {
+    let path = user_tunings_path()
+        .ok_or_else(|| anyhow!("no user config directory available on this platform"))?;
+    remove_user_tuning_at(&path, slug)
+}
+
 /// Merged registry view: built-in presets first (in registry order), then any
 /// user-defined tunings whose slugs don't collide with a built-in. Used by
 /// the tune/record/play menus so the menu surface is "everything I can play."
@@ -266,5 +296,49 @@ mod tests {
         let known = all_known_tunings();
         assert!(known.iter().any(|k| k.slug == "standard-guitar"));
         assert!(known.iter().filter(|k| k.origin == Origin::Builtin).count() >= 3);
+    }
+
+    #[test]
+    fn remove_user_tuning_drops_matching_entry() {
+        let path = scratch_path("remove_basic");
+        let first = sample_user_entry();
+        let second = PresetEntry {
+            slug: "open-c-guitar-test".into(),
+            name: "Open C Guitar (test fixture)".into(),
+            strings: vec![PresetString {
+                name: "C2".into(),
+                midi: 36,
+            }],
+        };
+        add_user_tuning_at(&path, first.clone()).expect("first add");
+        add_user_tuning_at(&path, second.clone()).expect("second add");
+
+        remove_user_tuning_at(&path, "open-d-guitar-test").expect("remove");
+        let remaining = load_user_tunings_at(&path).expect("load after remove");
+        assert_eq!(remaining, vec![second]);
+    }
+
+    #[test]
+    fn remove_user_tuning_refuses_builtin_slug() {
+        let path = scratch_path("remove_builtin");
+        let err = remove_user_tuning_at(&path, "standard-ukulele")
+            .expect_err("built-ins can't be removed");
+        assert!(
+            err.to_string().contains("built-in"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn remove_user_tuning_errors_on_unknown_slug() {
+        let path = scratch_path("remove_unknown");
+        // Empty file (no user tunings yet). Attempting to remove anything
+        // should error rather than silently succeed.
+        let err = remove_user_tuning_at(&path, "open-d-guitar-test")
+            .expect_err("missing slug should fail");
+        assert!(
+            err.to_string().contains("no user tuning"),
+            "unexpected error: {err}"
+        );
     }
 }

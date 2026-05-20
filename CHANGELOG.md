@@ -10,6 +10,29 @@ dated section.
 
 ### Added
 
+- **Mic-level meter on Playback (wait mode)** — same diagnostic
+  surface the Recorder already had: a small `RMS → dB` bar that
+  appears while the mic is live, and a "no signal" hint after 2 s
+  of no audio chunks (catches suspended `AudioContext` / OS-level
+  mute). Extracted into a shared `controllers/mic-meter.js` factory
+  (`makeMicMeter({...})`) so the Recorder + Playback share one
+  implementation — same pattern as `makeTuningController`.
+- **`twanga tunings remove`** — closes the last reverse-parity gap
+  with the GUI (which has had a per-row Delete button on user
+  tunings since the Tunings screen shipped). Usage:
+  - `twanga tunings remove` → interactive menu of user tunings,
+    confirmation prompt before delete.
+  - `twanga tunings remove --slug open-d-guitar` → skips the
+    menu but still asks for confirmation.
+  - `twanga tunings remove --slug open-d-guitar --force` →
+    skips both prompts (scripts).
+
+  Built-in tunings are compiled into the binary and rejected
+  upfront — same posture as the GUI, which hides Delete on
+  built-in rows. New `tunings::remove_user_tuning_at(path, slug)`
+  helper backs the subcommand with 3 cargo tests covering the
+  happy path, the built-in-rejection case, and the unknown-slug
+  case.
 - **Cross-tab library sync** via `BroadcastChannel`. When the
   user records in one browser tab and has another open on the
   Playback library, the second tab refreshes its list

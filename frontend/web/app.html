@@ -1449,6 +1449,19 @@
                 <div class="form-error" id="playback-skipped-notes" hidden></div>
                 <div class="renderer-host" id="playback-renderer-host"></div>
 
+                <!-- Mic-level meter — only visible during wait-mode playback
+                     (when we open a mic to listen for the next note). Same
+                     diagnostic role as the recorder's: surfaces "no signal"
+                     so the user can distinguish a missed pitch match from
+                     a dead input. -->
+                <div class="mic-meter" id="playback-mic-meter" hidden>
+                    <span class="mic-meter-label">mic</span>
+                    <div class="mic-meter-bar">
+                        <div class="mic-meter-fill" id="playback-mic-meter-fill"></div>
+                    </div>
+                    <span class="mic-meter-db" id="playback-mic-meter-db">—</span>
+                </div>
+
                 <p class="tuner-hint" id="playback-hint">click Play to start</p>
 
                 <div class="row">
@@ -1565,6 +1578,7 @@
             shortName,
             matchRegistrySlugForTuningNames,
         } from './controllers/tuning.js';
+        import { makeMicMeter } from './controllers/mic-meter.js';
         import * as library from './lib/library.js';
 
         function el(id) { return document.getElementById(id); }
@@ -2592,9 +2606,7 @@
             droppedCount: 0,        // pitches that couldn't reach any fret within MAX_FRET
             tickHandle: null,
             chromaticTuner: null,   // WebTuner in chromatic mode, fed by mic
-            micLevel: 0,            // RMS of the most recent audio chunk (for the meter)
-            micLastSampleAt: 0,     // performance.now() of the last onSamples callback (0 = none yet)
-            micRafHandle: null,     // requestAnimationFrame id for the meter draw loop
+            micMeter: null,         // shared mic-meter controller (see ./controllers/mic-meter.js)
 
             rendererController: null,
         };
@@ -2882,17 +2894,10 @@
                 const liveSr = await micSession.start({
                     consumerName: 'recorder',
                     onSamples: (samples) => {
-                        // Mic-level RMS for the diagnostic meter. Cheap
-                        // (~4096 multiply-adds per call at ~12 Hz). Done
-                        // *before* feeding the tuner so the meter still
-                        // animates during pre-roll even though the score
-                        // doesn't.
-                        let sum = 0;
-                        for (let i = 0; i < samples.length; i++) {
-                            sum += samples[i] * samples[i];
-                        }
-                        recState.micLevel = Math.sqrt(sum / samples.length);
-                        recState.micLastSampleAt = performance.now();
+                        // Feed the shared meter *before* the tuner so it
+                        // still animates during pre-roll even though the
+                        // score isn't accepting hits yet.
+                        recState.micMeter?.feed(samples);
 
                         if (!recState.chromaticTuner) return;
                         // Always feed the tuner — keeps its internal buffer
@@ -3002,64 +3007,24 @@
             recUpdateDurationHint();
         }
 
-        /// Show + animate the mic-level meter. RMS is computed inside the
-        /// mic `onSamples` callback (~12 Hz at 4096-sample frames / 48 kHz);
-        /// this RAF loop just paints the latest value at display rate and
-        /// surfaces a "no signal" diagnostic if onSamples hasn't fired
-        /// recently. Stops when the mic session goes away.
+        /// Show + animate the mic-level meter via the shared controller
+        /// (see ./controllers/mic-meter.js). The meter auto-hides when
+        /// the mic session moves to a different consumer.
         function recStartMicMeter() {
-            const meter = el('recorder-mic-meter');
-            const fill = el('recorder-mic-meter-fill');
-            const dbEl = el('recorder-mic-meter-db');
-            meter.hidden = false;
-            recState.micLevel = 0;
-            recState.micLastSampleAt = 0;
-            const start = performance.now();
-
-            const tick = () => {
-                if (micSession.consumerName !== 'recorder') {
-                    meter.hidden = true;
-                    recState.micRafHandle = null;
-                    return;
-                }
-                const now = performance.now();
-                const sinceSample = recState.micLastSampleAt > 0
-                    ? now - recState.micLastSampleAt
-                    : now - start;
-                const rms = recState.micLevel ?? 0;
-                // Map RMS → dB. -60 dB is a reasonable noise floor for an
-                // unprocessed mic input; clamp anything quieter to
-                // "silent" so the meter doesn't jiggle on room tone.
-                const dB = rms > 1e-6 ? 20 * Math.log10(rms) : -Infinity;
-                const pct = !isFinite(dB)
-                    ? 0
-                    : Math.max(0, Math.min(100, (dB + 60) * (100 / 60)));
-                fill.style.width = `${pct}%`;
-                if (recState.micLastSampleAt === 0 && sinceSample > 2000) {
-                    // No audio chunks have arrived 2 s after mic start —
-                    // the AudioContext is probably suspended (macOS / Safari
-                    // autoplay-policy quirk) or the OS-level input is muted.
-                    dbEl.textContent = 'no signal';
-                    meter.classList.add('is-silent');
-                } else if (!isFinite(dB)) {
-                    dbEl.textContent = '—';
-                    meter.classList.remove('is-silent');
-                } else {
-                    dbEl.textContent = `${dB.toFixed(1)} dB`;
-                    meter.classList.remove('is-silent');
-                }
-                recState.micRafHandle = requestAnimationFrame(tick);
-            };
-            recState.micRafHandle = requestAnimationFrame(tick);
+            if (!recState.micMeter) {
+                recState.micMeter = makeMicMeter({
+                    meterId: 'recorder-mic-meter',
+                    fillId: 'recorder-mic-meter-fill',
+                    dbId: 'recorder-mic-meter-db',
+                    consumerName: 'recorder',
+                    getActiveConsumer: () => micSession.consumerName,
+                });
+            }
+            recState.micMeter.start();
         }
 
         function recStopMicMeter() {
-            if (recState.micRafHandle) {
-                cancelAnimationFrame(recState.micRafHandle);
-                recState.micRafHandle = null;
-            }
-            el('recorder-mic-meter').hidden = true;
-            el('recorder-mic-meter').classList.remove('is-silent');
+            recState.micMeter?.stop();
         }
 
         function recTick() {
@@ -3366,6 +3331,7 @@
             tickHandle: null,
             chromaticTuner: null,   // WebTuner for wait-mode pitch detection
             waitingForCol: -1,      // column index whose note we're waiting for (-1 = not waiting)
+            micMeter: null,         // shared mic-meter controller (see ./controllers/mic-meter.js)
         };
 
         function initPlayback() {
@@ -4009,6 +3975,10 @@
                     const liveSr = await micSession.start({
                         consumerName: 'playback',
                         onSamples: (samples) => {
+                            // Feed the meter first so it animates even
+                            // during pre-roll / between expected notes.
+                            playbackState.micMeter?.feed(samples);
+
                             const t = playbackState.chromaticTuner;
                             if (!t) return;
                             t.feed(samples);
@@ -4029,9 +3999,22 @@
                         playbackState.chromaticTuner.free?.();
                         playbackState.chromaticTuner = WebTuner.new_chromatic(liveSr);
                     }
+                    // Mic is live — show the meter so the user has a
+                    // diagnostic signal (same role as on the recorder).
+                    if (!playbackState.micMeter) {
+                        playbackState.micMeter = makeMicMeter({
+                            meterId: 'playback-mic-meter',
+                            fillId: 'playback-mic-meter-fill',
+                            dbId: 'playback-mic-meter-db',
+                            consumerName: 'playback',
+                            getActiveConsumer: () => micSession.consumerName,
+                        });
+                    }
+                    playbackState.micMeter.start();
                 } catch (err) {
                     playbackState.chromaticTuner?.free?.();
                     playbackState.chromaticTuner = null;
+                    playbackState.micMeter?.stop();
                     playbackState.tuning?.setEnabled(true);
                     el('playback-play-btn').disabled = false;
                     el('playback-pause-btn').disabled = true;
@@ -4104,6 +4087,7 @@
             if (micSession.consumerName === 'playback') micSession.stop();
             playbackState.chromaticTuner?.free?.();
             playbackState.chromaticTuner = null;
+            playbackState.micMeter?.stop();
 
             playbackState.tuning?.setEnabled(true);
             playbackState.currentCol = 0;
