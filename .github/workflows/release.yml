@@ -36,12 +36,21 @@ env:
 
 jobs:
   # ─────────────────────────────────────────────────────────────────────
-  # CLI binary builds — one zip/tarball per platform, just `twanga` itself
-  # plus README + bundled examples. The smaller of the two artefact
-  # families released on every tag.
+  # Per-platform build — produces BOTH the CLI archive and the Tauri
+  # desktop installer in a single job. Combined because `cargo tauri
+  # build` already compiles the entire workspace (it pulls in twanga-cli
+  # via the workspace), so running `cargo build -p twanga-cli` in the
+  # same job is nearly free thanks to incremental compilation. Saves a
+  # whole duplicate toolchain install + cache restore per platform
+  # versus splitting into two jobs.
+  #
+  # Each job uploads two artifact names (`twanga-${friendly}` for the
+  # CLI archive, `twanga-desktop-${friendly}` for the installers), which
+  # the aggregator's `download-artifact` step pulls together via
+  # `merge-multiple: true`.
   # ─────────────────────────────────────────────────────────────────────
-  build-cli:
-    name: 📦 CLI ${{ matrix.name }}
+  build-platform:
+    name: 🏗️ Build ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -56,50 +65,54 @@ jobs:
             os: windows-latest
             archive: zip
             bin: twanga.exe
+            bundles: 'msi,nsis'
             friendly: windows
           - name: 'Linux 🐧'
             target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
             archive: tar.gz
             bin: twanga
+            bundles: 'deb,appimage'
             friendly: linux
           - name: 'macOS Intel 🍎'
             target: x86_64-apple-darwin
             os: macos-13
             archive: tar.gz
             bin: twanga
+            bundles: 'dmg'
             friendly: macos-intel
           - name: 'macOS Apple Silicon 🍏'
             target: aarch64-apple-darwin
             os: macos-latest
             archive: tar.gz
             bin: twanga
+            bundles: 'dmg'
             friendly: macos-apple-silicon
 
     steps:
       - name: ⬇️ Checkout
         uses: actions/checkout@v4
 
-      - name: 🔊 Install audio deps (Linux)
+      - name: 🔧 Install Linux deps (audio + Tauri)
         if: runner.os == 'Linux'
         run: |
+          # libasound2-dev is needed by twanga-audio (CLI); the rest are
+          # Tauri's GTK/WebKit prereqs. Combined into one apt-get call.
           sudo apt-get update
-          sudo apt-get install -y libasound2-dev
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libsoup-3.0-dev libssl-dev \
+              libayatana-appindicator3-dev librsvg2-dev libasound2-dev build-essential
 
-      - name: 🦀 Set up Rust
+      - name: 🦀 Set up Rust (native + wasm32)
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.target }}
+          targets: ${{ matrix.target }}, wasm32-unknown-unknown
 
       - name: 💾 Cache cargo
         uses: Swatinem/rust-cache@v2
         with:
-          key: release-cli-${{ matrix.target }}
+          key: release-${{ matrix.target }}
 
-      - name: 🏗️ Build twanga-cli
-        run: cargo build --release --target ${{ matrix.target }} -p twanga-cli
-
-      - name: 🏷️ Resolve tag + artifact name
+      - name: 🏷️ Resolve tag + artifact names
         id: meta
         shell: bash
         run: |
@@ -115,102 +128,61 @@ jobs:
             # archive's internal staging dir.
             tag="main-$(echo "$GITHUB_SHA" | cut -c1-7)"
           fi
-          # `staged` keeps the version + triple visible inside the archive
-          # (extracted dir tells you which release + which CPU you grabbed);
-          # `archive` is the stable user-facing filename (latest-download URL
-          # stays the same release-to-release).
+          # `staged` keeps the version + triple visible inside the CLI
+          # archive (extracted dir tells you which release + which CPU
+          # you grabbed). `cli_archive` + `desktop_archive` are the
+          # stable user-facing filenames (latest-download URL stays the
+          # same release-to-release).
           staged="twanga-${tag}-${{ matrix.target }}"
-          archive="twanga-${{ matrix.friendly }}"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "staged=$staged" >> "$GITHUB_OUTPUT"
-          echo "archive=$archive" >> "$GITHUB_OUTPUT"
+          echo "cli_archive=twanga-${{ matrix.friendly }}" >> "$GITHUB_OUTPUT"
+          echo "desktop_archive=twanga-desktop-${{ matrix.friendly }}" >> "$GITHUB_OUTPUT"
 
-      - name: 📁 Stage archive contents
+      # ── CLI build + pack ────────────────────────────────────────────
+      # CLI first because it's the smaller of the two and its deps are a
+      # strict subset of Tauri's — building it primes the workspace cache
+      # for the Tauri step that follows.
+
+      - name: 🏗️ Build twanga-cli
+        run: cargo build --release --target ${{ matrix.target }} -p twanga-cli
+
+      - name: 📁 Stage CLI archive contents
         shell: bash
         run: |
           staged="${{ steps.meta.outputs.staged }}"
-          dir="dist/$staged"
+          dir="dist-cli/$staged"
           mkdir -p "$dir/examples"
           cp "target/${{ matrix.target }}/release/${{ matrix.bin }}" "$dir/"
           cp README.md LICENSE-MIT LICENSE-APACHE "$dir/"
           cp assets/examples/*.alphatex "$dir/examples/"
 
-      - name: 🗜️ Pack zip
+      - name: 🗜️ Pack CLI zip
         if: matrix.archive == 'zip'
         shell: pwsh
-        working-directory: dist
-        run: Compress-Archive -Path "${{ steps.meta.outputs.staged }}" -DestinationPath "${{ steps.meta.outputs.archive }}.zip"
+        working-directory: dist-cli
+        run: Compress-Archive -Path "${{ steps.meta.outputs.staged }}" -DestinationPath "${{ steps.meta.outputs.cli_archive }}.zip"
 
-      - name: 🗜️ Pack tar.gz
+      - name: 🗜️ Pack CLI tar.gz
         if: matrix.archive == 'tar.gz'
         shell: bash
-        working-directory: dist
-        run: tar -czf "${{ steps.meta.outputs.archive }}.tar.gz" "${{ steps.meta.outputs.staged }}"
+        working-directory: dist-cli
+        run: tar -czf "${{ steps.meta.outputs.cli_archive }}.tar.gz" "${{ steps.meta.outputs.staged }}"
 
       - name: ⬆️ Upload CLI artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ steps.meta.outputs.archive }}
-          path: dist/${{ steps.meta.outputs.archive }}.${{ matrix.archive }}
+          name: ${{ steps.meta.outputs.cli_archive }}
+          path: dist-cli/${{ steps.meta.outputs.cli_archive }}.${{ matrix.archive }}
           if-no-files-found: error
 
-  # ─────────────────────────────────────────────────────────────────────
-  # Desktop Tauri installers — the native shell wrapped around the
-  # frontend bundle. `cargo tauri build` per OS produces the platform's
-  # idiomatic installer (.msi/.exe on Windows, .dmg on macOS, .deb +
-  # .AppImage on Linux). Same matrix shape as the CLI, just running a
-  # different build invocation.
-  # ─────────────────────────────────────────────────────────────────────
-  build-desktop:
-    name: 🖥️ Desktop ${{ matrix.name }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: 'Windows 🪟'
-            target: x86_64-pc-windows-msvc
-            os: windows-latest
-            bundles: 'msi,nsis'
-            friendly: windows
-          - name: 'Linux 🐧'
-            target: x86_64-unknown-linux-gnu
-            os: ubuntu-latest
-            bundles: 'deb,appimage'
-            friendly: linux
-          - name: 'macOS Intel 🍎'
-            target: x86_64-apple-darwin
-            os: macos-13
-            bundles: 'dmg'
-            friendly: macos-intel
-          - name: 'macOS Apple Silicon 🍏'
-            target: aarch64-apple-darwin
-            os: macos-latest
-            bundles: 'dmg'
-            friendly: macos-apple-silicon
+      # ── Desktop / Tauri build + pack ────────────────────────────────
+      # Reuses the same `target/` dir the CLI build just populated, so
+      # workspace deps (twanga-core, -dsp, -audio, -tabs, -tui) are
+      # already compiled. Only the Tauri-specific crates + wasm32 need
+      # fresh compilation.
 
-    steps:
-      - name: ⬇️ Checkout
-        uses: actions/checkout@v4
-
-      - name: 🔧 Install Tauri prerequisites (Linux)
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libsoup-3.0-dev libssl-dev \
-              libayatana-appindicator3-dev librsvg2-dev libasound2-dev build-essential
-
-      - name: 🦀 Set up Rust (native + wasm32)
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.target }}, wasm32-unknown-unknown
-
-      - name: 💾 Cache cargo
-        uses: Swatinem/rust-cache@v2
-        with:
-          key: release-desktop-${{ matrix.target }}
-
-      - name: 📦 Install wasm-bindgen-cli (prebuilt)
+      - name: 📦 Install wasm-bindgen-cli (prebuilt where possible)
         shell: bash
         run: |
           # Same pinned-version dance the pages.yml workflow uses — the
@@ -219,8 +191,6 @@ jobs:
           if [ "${{ runner.os }}" = "Linux" ]; then
             curl -sL "https://github.com/rustwasm/wasm-bindgen/releases/download/${WASM_BINDGEN_VERSION}/wasm-bindgen-${WASM_BINDGEN_VERSION}-x86_64-unknown-linux-musl.tar.gz" | tar xz
             sudo mv "wasm-bindgen-${WASM_BINDGEN_VERSION}-x86_64-unknown-linux-musl/wasm-bindgen" /usr/local/bin/
-          elif [ "${{ runner.os }}" = "macOS" ]; then
-            cargo install wasm-bindgen-cli --version "${WASM_BINDGEN_VERSION}" --locked
           else
             cargo install wasm-bindgen-cli --version "${WASM_BINDGEN_VERSION}" --locked
           fi
@@ -252,34 +222,14 @@ jobs:
         working-directory: crates/twanga-app
         run: cargo tauri build --bundles ${{ matrix.bundles }} --target ${{ matrix.target }}
 
-      - name: 🏷️ Resolve tag + artifact name
-        id: meta
-        shell: bash
-        run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            tag="${{ inputs.tag }}"
-          elif [[ "$GITHUB_REF" == refs/tags/* ]]; then
-            tag="${GITHUB_REF#refs/tags/}"
-          else
-            # Main-branch push — synthesise a label from the short SHA so
-            # artifact filenames + the archive root dir stay sane. The
-            # rolling `latest-main` release uses these as its uploaded
-            # files regardless of this label; the label is just for the
-            # archive's internal staging dir.
-            tag="main-$(echo "$GITHUB_SHA" | cut -c1-7)"
-          fi
-          archive="twanga-desktop-${{ matrix.friendly }}"
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
-          echo "archive=$archive" >> "$GITHUB_OUTPUT"
-
-      - name: 📁 Stage bundles
+      - name: 📁 Stage Tauri installers
         shell: bash
         run: |
           # cargo tauri build drops the bundles under
           # `target/{triple}/release/bundle/<format>/<file>`. We pull
           # whatever was produced (matrix.bundles may include several
           # formats) into a single per-platform staging dir.
-          mkdir -p dist
+          mkdir -p dist-desktop
           bundle_root="target/${{ matrix.target }}/release/bundle"
           if [ -d "$bundle_root" ]; then
             # Flatten one level — we want the installer files themselves,
@@ -287,15 +237,15 @@ jobs:
             find "$bundle_root" -type f \( -name '*.msi' -o -name '*.exe' \
                 -o -name '*.dmg' -o -name '*.app.tar.gz' \
                 -o -name '*.deb' -o -name '*.AppImage' -o -name '*.rpm' \
-                \) -print -exec cp {} dist/ \;
+                \) -print -exec cp {} dist-desktop/ \;
           fi
-          ls -lh dist/ || true
+          ls -lh dist-desktop/ || true
 
       - name: ⬆️ Upload Desktop artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ steps.meta.outputs.archive }}
-          path: dist/*
+          name: ${{ steps.meta.outputs.desktop_archive }}
+          path: dist-desktop/*
           if-no-files-found: error
 
   # ─────────────────────────────────────────────────────────────────────
@@ -508,15 +458,15 @@ jobs:
   #                      Releases page (that stays pinned to the most
   #                      recent versioned tag).
   #
-  # Both depend only on CLI + Desktop builds so a flaky Android / iOS run
-  # doesn't block the release going out — those artefacts just won't be
-  # attached this time around.
+  # Both depend only on `build-platform` (CLI + Desktop combined) so a
+  # flaky Android / iOS run doesn't block the release going out — those
+  # artefacts just won't be attached this time around.
   # ─────────────────────────────────────────────────────────────────────
 
   release-tag:
     name: 🎁 Publish draft release (tag)
     if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
-    needs: [build-cli, build-desktop]
+    needs: [build-platform]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -552,7 +502,7 @@ jobs:
   release-rolling:
     name: 🔄 Refresh latest-main release
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [build-cli, build-desktop]
+    needs: [build-platform]
     runs-on: ubuntu-latest
     permissions:
       contents: write
