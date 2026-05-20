@@ -237,15 +237,19 @@ jobs:
           wasm-bindgen --target web --out-dir frontend/web/pkg \
               target/wasm32-unknown-unknown/release/twanga_web.wasm
 
-      - name: 📁 Bundle alphaTex examples + patterns into the site
+      - name: 📁 Bundle alphaTex examples + patterns + docs into the site
         shell: bash
         run: |
           # Same step pages.yml does — the browser library fetches these
           # relative to the deploy root, Tauri bundles them into the app
-          # via `frontendDist`.
+          # via `frontendDist`. Keep this in sync with pages.yml's
+          # equivalent step + the build-android/build-ios variants below;
+          # if this list grows again, factor into a shared script.
           mkdir -p frontend/web/assets
           cp -r assets/examples frontend/web/assets/
           cp -r assets/patterns frontend/web/assets/
+          mkdir -p frontend/web/assets/docs
+          cp docs/features/*.md frontend/web/assets/docs/
 
       - name: 📦 Install tauri-cli
         run: cargo install tauri-cli --version '^2' --locked
@@ -435,6 +439,8 @@ jobs:
           mkdir -p frontend/web/assets
           cp -r assets/examples frontend/web/assets/
           cp -r assets/patterns frontend/web/assets/
+          mkdir -p frontend/web/assets/docs
+          cp docs/features/*.md frontend/web/assets/docs/
 
       - name: 📦 Install tauri-cli
         run: cargo install tauri-cli --version '^2' --locked
@@ -547,6 +553,8 @@ jobs:
           mkdir -p frontend/web/assets
           cp -r assets/examples frontend/web/assets/
           cp -r assets/patterns frontend/web/assets/
+          mkdir -p frontend/web/assets/docs
+          cp docs/features/*.md frontend/web/assets/docs/
 
       - name: 📦 Install tauri-cli
         run: cargo install tauri-cli --version '^2' --locked
