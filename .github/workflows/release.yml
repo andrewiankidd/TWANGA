@@ -60,34 +60,44 @@ jobs:
           # filename (so `releases/latest/download/twanga-windows.zip` resolves
           # the same URL release-to-release). The `target` triple is still in
           # the extracted directory name + tagged into the release notes.
+          # `friendly` is the user-facing slug; `targets` is the full set
+          # of Rust targets to install via rustup (comma-separated as
+          # dtolnay/rust-toolchain expects); `cli_target` is the single
+          # triple `cargo build -p twanga-cli` builds against; `tauri_target`
+          # is what `cargo tauri build --target ...` builds. On macOS,
+          # tauri_target = `universal-apple-darwin` produces ONE DMG that
+          # runs natively on both Intel and Apple Silicon — and the CLI
+          # build is universalised via `lipo` in the staging step. End
+          # result: three platform entries instead of four, with the
+          # macos-13 Intel runner (which has multi-hour queues now that
+          # GitHub is winding it down) dropped entirely.
           - name: 'Windows 🪟'
-            target: x86_64-pc-windows-msvc
+            cli_target: x86_64-pc-windows-msvc
+            tauri_target: x86_64-pc-windows-msvc
+            targets: 'x86_64-pc-windows-msvc'
             os: windows-latest
             archive: zip
             bin: twanga.exe
             bundles: 'msi,nsis'
             friendly: windows
           - name: 'Linux 🐧'
-            target: x86_64-unknown-linux-gnu
+            cli_target: x86_64-unknown-linux-gnu
+            tauri_target: x86_64-unknown-linux-gnu
+            targets: 'x86_64-unknown-linux-gnu'
             os: ubuntu-latest
             archive: tar.gz
             bin: twanga
             bundles: 'deb,appimage'
             friendly: linux
-          - name: 'macOS Intel 🍎'
-            target: x86_64-apple-darwin
-            os: macos-13
-            archive: tar.gz
-            bin: twanga
-            bundles: 'dmg'
-            friendly: macos-intel
-          - name: 'macOS Apple Silicon 🍏'
-            target: aarch64-apple-darwin
+          - name: 'macOS 🍎'
+            cli_target: aarch64-apple-darwin
+            tauri_target: universal-apple-darwin
+            targets: 'aarch64-apple-darwin,x86_64-apple-darwin'
             os: macos-latest
             archive: tar.gz
             bin: twanga
             bundles: 'dmg'
-            friendly: macos-apple-silicon
+            friendly: macos
 
     steps:
       - name: ⬇️ Checkout
@@ -105,12 +115,12 @@ jobs:
       - name: 🦀 Set up Rust (native + wasm32)
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.target }}, wasm32-unknown-unknown
+          targets: ${{ matrix.targets }},wasm32-unknown-unknown
 
       - name: 💾 Cache cargo
         uses: Swatinem/rust-cache@v2
         with:
-          key: release-${{ matrix.target }}
+          key: release-${{ matrix.friendly }}
 
       - name: 🏷️ Resolve tag + artifact names
         id: meta
@@ -128,12 +138,12 @@ jobs:
             # archive's internal staging dir.
             tag="main-$(echo "$GITHUB_SHA" | cut -c1-7)"
           fi
-          # `staged` keeps the version + triple visible inside the CLI
-          # archive (extracted dir tells you which release + which CPU
-          # you grabbed). `cli_archive` + `desktop_archive` are the
-          # stable user-facing filenames (latest-download URL stays the
-          # same release-to-release).
-          staged="twanga-${tag}-${{ matrix.target }}"
+          # `staged` keeps the version + platform visible inside the CLI
+          # archive (extracted dir tells you which release you grabbed).
+          # `cli_archive` + `desktop_archive` are the stable user-facing
+          # filenames (latest-download URL stays the same release-to-
+          # release).
+          staged="twanga-${tag}-${{ matrix.friendly }}"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "staged=$staged" >> "$GITHUB_OUTPUT"
           echo "cli_archive=twanga-${{ matrix.friendly }}" >> "$GITHUB_OUTPUT"
@@ -144,8 +154,12 @@ jobs:
       # strict subset of Tauri's — building it primes the workspace cache
       # for the Tauri step that follows.
 
-      - name: 🏗️ Build twanga-cli
-        run: cargo build --release --target ${{ matrix.target }} -p twanga-cli
+      - name: 🏗️ Build twanga-cli (primary target)
+        run: cargo build --release --target ${{ matrix.cli_target }} -p twanga-cli
+
+      - name: 🏗️ Build twanga-cli (macOS Intel for universal lipo)
+        if: matrix.friendly == 'macos'
+        run: cargo build --release --target x86_64-apple-darwin -p twanga-cli
 
       - name: 📁 Stage CLI archive contents
         shell: bash
@@ -153,7 +167,17 @@ jobs:
           staged="${{ steps.meta.outputs.staged }}"
           dir="dist-cli/$staged"
           mkdir -p "$dir/examples"
-          cp "target/${{ matrix.target }}/release/${{ matrix.bin }}" "$dir/"
+          if [ "${{ matrix.friendly }}" = "macos" ]; then
+            # Fuse the two single-arch binaries into one universal binary
+            # that runs natively on both Intel and Apple Silicon. macOS
+            # has shipped `lipo` since forever; no install needed.
+            lipo -create \
+                "target/aarch64-apple-darwin/release/${{ matrix.bin }}" \
+                "target/x86_64-apple-darwin/release/${{ matrix.bin }}" \
+                -output "$dir/${{ matrix.bin }}"
+          else
+            cp "target/${{ matrix.cli_target }}/release/${{ matrix.bin }}" "$dir/"
+          fi
           cp README.md LICENSE-MIT LICENSE-APACHE "$dir/"
           cp assets/examples/*.alphatex "$dir/examples/"
 
@@ -220,7 +244,7 @@ jobs:
 
       - name: 🏗️ Build Tauri bundle
         working-directory: crates/twanga-app
-        run: cargo tauri build --bundles ${{ matrix.bundles }} --target ${{ matrix.target }}
+        run: cargo tauri build --bundles ${{ matrix.bundles }} --target ${{ matrix.tauri_target }}
 
       - name: 📁 Stage Tauri installers
         shell: bash
@@ -230,7 +254,7 @@ jobs:
           # whatever was produced (matrix.bundles may include several
           # formats) into a single per-platform staging dir.
           mkdir -p dist-desktop
-          bundle_root="target/${{ matrix.target }}/release/bundle"
+          bundle_root="target/${{ matrix.tauri_target }}/release/bundle"
           if [ -d "$bundle_root" ]; then
             # Flatten one level — we want the installer files themselves,
             # not the per-format subdirs.

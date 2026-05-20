@@ -98,11 +98,13 @@ jobs:
           key: ${{ matrix.os }}
       - run: cargo test --workspace
 
-      # Frontend JS smoke tests — Node 18+'s built-in `node:test` runner,
-      # no install needed (Node is pre-provisioned on GitHub runners).
-      # Currently just `markdown.js` (the docs renderer); add more
-      # `*.test.js` files alongside the modules they cover. The glob
-      # form is portable across Node versions; passing a bare directory
-      # path tries to load it as a single module.
+      # Frontend JS smoke tests — Node's built-in `node:test` runner with
+      # glob support (added in Node 21). ubuntu-latest still defaults to
+      # Node 20, so pin a current version explicitly. Currently just
+      # `markdown.js` (the docs renderer); add more `*.test.js` files
+      # alongside the modules they cover.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
       - name: Node test (frontend JS)
         run: node --test "frontend/web/**/*.test.js"

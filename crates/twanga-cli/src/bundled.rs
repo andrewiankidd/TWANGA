@@ -170,7 +170,7 @@ pub fn scan_recordings_at(dir: &Path) -> Result<Vec<RecordingEntry>> {
             .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
         entries.push((path, mtime));
     }
-    entries.sort_by(|a, b| b.1.cmp(&a.1));
+    entries.sort_by_key(|e| std::cmp::Reverse(e.1));
     Ok(entries
         .into_iter()
         .map(|(path, _)| {

@@ -148,7 +148,7 @@ fn list_recordings_impl() -> Result<Vec<RecordingRow>> {
             modified,
         ));
     }
-    rows.sort_by(|a, b| b.1.cmp(&a.1));
+    rows.sort_by_key(|r| std::cmp::Reverse(r.1));
     Ok(rows.into_iter().map(|(r, _)| r).collect())
 }
 
