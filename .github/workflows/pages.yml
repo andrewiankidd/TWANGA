@@ -31,7 +31,7 @@ jobs:
     name: Build WASM + frontend bundle
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install Rust + wasm32 target
         uses: dtolnay/rust-toolchain@stable
