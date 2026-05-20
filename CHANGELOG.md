@@ -10,6 +10,10 @@ dated section.
 
 ### Added
 
+- **`twanga patterns` subcommand + bare-`twanga play` picker.**
+  CLI mirror of the GUI's Patterns screen + Playback library list.
+  See squashed commit message.
+
 - **Six new bundled patterns** (uke baseline + waltz, banjo reverse +
   alternating-thumb rolls, guitar boom-chick + Travis). See the
   squashed commit message.

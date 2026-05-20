@@ -1,123 +1,63 @@
 # Project status
 
-**Functional end-to-end on the CLI** *and* on the web build (which is also the
-Tauri 2 desktop shell — same `frontend/web/` bundle, two delivery paths).
+**Functional end-to-end on the CLI *and* on the web build** (which is
+also what the Tauri 2 desktop shell hosts — same `frontend/web/` bundle,
+two delivery paths). Full CLI ↔ GUI feature parity is a project invariant
+and currently holds across every shipped surface.
 
-## CLI
+For the full shipped-feature inventory + when each landed, see
+[CHANGELOG.md](../CHANGELOG.md). For what's coming, see
+[ROADMAP.md](ROADMAP.md). This page is the high-level summary.
 
-Three core flows, full tuning + capo support, recordings round-trip through
-the alphaTex format:
+## What works today
 
-- **Tuner** (`twanga tune`) — live multi-string display (per-target cents
-  indicator) or chromatic mode (snap to nearest 12-TET note). Cable hum /
-  silence are gated out.
-- **Tab recorder** (`twanga record`) — capture what you play as alphaTex,
-  saved to `recordings/<timestamp>.alphatex` with per-block fret detection.
-- **Tab playback** (`twanga play`) — scroll a cursor through a tab at tempo,
-  optional metronome click on each beat, optional "wait" practice mode that
-  pauses until you play each note, `--loop` for full or section repeats,
-  `--tuning <preset>` transposes the tab onto a different instrument.
+| Feature | CLI | GUI | Page |
+|---------|-----|-----|------|
+| **Tuner** — live pitch detection, per-string + chromatic, capo-aware | ✅ | ✅ | [features/tuner.md](features/tuner.md) |
+| **Recorder** — capture played notes as alphaTex, metronome, pre-roll, pause/resume, undo-column | ✅ | ✅ | [features/recorder.md](features/recorder.md) |
+| **Playback** — scroll cursor + metronome + wait mode + loop + transpose (drop or octave-shift) + capo | ✅ | ✅ | [features/playback.md](features/playback.md) |
+| **Patterns** — bundled rhythm + picking drills (10 across 4 groups), tree-of-difficulty | ✅ | ✅ | [features/patterns.md](features/patterns.md) |
+| **Tab editor** — post-capture cell-level edits, save back in place | (GUI-only — intentional) | ✅ | [features/editor.md](features/editor.md) |
+| **Tunings** — built-in + user-defined registry, add/remove/list | ✅ | ✅ | [features/tunings.md](features/tunings.md) |
+| **Docs** — per-feature pages embedded in the binary / bundled with the web app | ✅ (`twanga docs`) | ✅ (`#docs`) | [features/](features/) |
 
-## Web build + Tauri desktop shell
+Backed by:
 
-All four user-facing CLI surfaces have GUI counterparts at 1:1 parity.
-
-- **Tuner** — built-in + user tuning picker, uniform capo stepper, per-string
-  capo panel (for drop-D / banjo 5th-string / partial capos), live mic capture
-  via Web Audio + AudioWorklet, YIN running in WASM. Settings persist to
-  `localStorage` and round-trip cleanly when the user reloads. ✅ parity
-- **Tunings** — merged built-in + user-defined list with inline "Define a new
-  tuning" form (display name, per-string note names with live MIDI preview,
-  auto-derived kebab-case slug, full validation via the same Rust rules
-  `twanga tunings add` enforces). User tunings persist in `localStorage` under
-  the same `PresetEntry` schema the CLI writes to `$CONFIG/twanga/tunings.toml`,
-  ready for a future Tauri command to bidirectionally sync the two. ✅ parity
-- **Recorder** — full `twanga record` parity: tuning picker, capo
-  (uniform + per-string), BPM, resolution (1/4..1/32), block width, all
-  persisted to `localStorage`. Live mic → chromatic `WebTuner` →
-  `match_pitch_to_fret` against the active tuning + capo (same algorithm as the
-  CLI's recorder, same `MAX_FRET=20` ceiling). Column-by-column commits at
-  tempo, with the score fed to the active renderer plugin. Stop & Save →
-  `.alphatex` written by the same Rust `AlphaTexWriter` the CLI uses; entries
-  persist in the in-browser library (IndexedDB) and offer Download for
-  off-browser backup. ✅ parity
-- **Playback** — full `twanga play` parity. Library list combining
-  bundled examples (shipped via `assets/examples/manifest.json`) with
-  user recordings from IndexedDB; drop-zone for `.alphatex` imports.
-  Load a tab and you get the same renderer host as the Recorder, plus
-  transport controls (Play / Pause / Stop, Spacebar shortcut), wait
-  mode (mic + chromatic `WebTuner` + ±50 cents match), loop range
-  (`off` / `full` / `START:END`), BPM override (slider + reset), pre-roll
-  (count-in audible regardless of metronome flag), metronome toggle, and
-  pre-flight "Skipped:" preamble of any notes that wouldn't fit on the
-  transposed tuning. All controls use the same shared
-  `makeTuningController` factory the Tuner + Recorder use. ✅ parity
-
-## Renderer plugin system
-
-Both Recorder and Playback consume any registered renderer through a uniform
-plugin contract. Two ship by default:
-
-- **Tab** — column-grid view, one row per string, mirroring the CLI's record
-  layout.
-- **Highway** — Rocksmith-style notes-toward-you, one vertical lane per string.
-
-Both built-ins register through the *same* `registry.register(plugin)` path
-that future third-party plugins will use — no fast-lane for "core". The plugin
-object is `{ id, name, version, create(container, options) }`; the renderer
-instance implements `setScore` / `setPlayhead` / `destroy`. That's the entire
-contract. The renderer fully owns its visual layout (canvas / DOM / SVG,
-sizing, animation, colours); the host only hands over a container element and
-the score data. Future delivery mechanisms (filesystem load on Tauri desktop,
-"Load from URL", community plugin directory) all use the same registration call
-at the end.
-
-## Tuning registry
-
-Built-in presets (`standard-guitar`, `standard-banjo`, `standard-ukulele`,
-`drop-d-guitar`, `tenor-banjo`, `tenor-ukulele`) ship from a TOML file compiled
-into the binary. The same schema covers user-defined tunings stored at
-`$CONFIG/twanga/tunings.toml` (CLI) and in `localStorage` under the
-`twanga-user-tunings-v1` key (browser). Built-in slugs shadow user-defined
-ones to prevent silent overrides.
-
-## Capo
-
-Per-string semitone offsets (`Capo::offsets: Vec<i32>`) that compose with any
-tuning, built-in or custom. `--capo 3` is a uniform capo; `--capo "0,2,2,2,2,2"`
-is a partial capo (drop-D style); `--capo "3,3,3,3,0"` keeps the banjo
-5th-string drone open while capoing the body. Capo info round-trips through
-the alphaTex `\subtitle` field — `; capo=<spec>` — so a recording made with a
-capo replays without the user having to remember the value. Tuner, Recorder,
-and Playback GUIs share the same `makeTuningController` factory and so expose
-identical uniform + per-string capo controls; the per-string panel is
-collapsible behind a "Per-string" toggle so the common-case uniform stepper
-stays compact. Playback additionally auto-loads the file's embedded capo on
-tab load when the file's tuning matches a registry entry, mirroring how the
-CLI's `twanga play` falls back to the file's capo when `--capo` isn't supplied.
+- **Pitch detection** — `twanga-dsp::Tuner` (YIN), shared between CLI
+  (CPAL) and GUI (Web Audio + AudioWorklet → WASM). Identical Rust
+  implementation in both.
+- **Capo** — `twanga-core::Capo` per-string semitone offsets, composes
+  with any tuning. Round-trips through the alphaTex `\subtitle` field
+  so recordings replay with their capo without manual reentry.
+- **alphaTex** — own parser + serializer in `twanga-tabs`. Used as the
+  on-disk format on CLI and the in-IDB blob format in the GUI; same
+  bytes either way.
+- **Renderer plugin system** — `frontend/web/render/` with a stable
+  `{ id, name, version, create() }` contract. Two built-ins ship
+  (Tab + Highway); future third-party plugins register through the
+  same path. The Editor uses an `interactive: true` variant of the
+  Tab renderer, so the editor's grid IS the rendered tab.
 
 ## What's next
 
-**The GUI is now at full CLI parity for the four main surfaces** —
-Tuner, Tunings, Recorder, Playback. The QoL pass items the Recorder
-build surfaced (metronome on record, pre-roll, pause/resume, duration
-display, title prompt, fretboard-fit indicator) all shipped on both
-CLI and GUI; Playback inherited each one as it landed.
+**The roadmap's "follows" tier** is the next big-rock work — see
+[ROADMAP.md](ROADMAP.md) for the ordered list. Top of the list:
 
-**Smaller CLI follow-ons** ([ROADMAP.md](ROADMAP.md)):
+1. **Tab audio generation** (prerequisite for slow-down practice +
+   backing tracks).
+2. **Slow-down practice** via `rubato` / `signalsmith-stretch` — gated
+   on (1).
+3. **Pattern trainer accuracy verification** — rhythm-only verification
+   on top of the existing pattern library.
+4. **Section looper / adaptive difficulty / tab fade-out** —
+   Master-Mode style; independent of audio generation.
 
-- `twanga tunings remove` subcommand (GUI has the delete button; CLI doesn't).
-- Tauri command to bidirectionally sync `$CONFIG/twanga/tunings.toml` ↔
-  browser `localStorage` so custom tunings cross the CLI ↔ desktop-app boundary.
+**Deferred** (paused while we prove things on web first): the two big
+Tauri-shell items (filesystem-backed library + bidirectional
+tunings.toml sync). The architecture is set up so anything that ships
+on web ships unchanged in the desktop shell once the filesystem
+backends land.
 
-**Tauri library backend** — `frontend/web/lib/library-tauri.js` is
-stubbed but unimplemented. Once Tauri commands `list_recordings` /
-`load_recording` / `save_recording` exist on the desktop side, the
-GUI's library reads from `$CONFIG/twanga/recordings/` instead of
-IndexedDB, the browser-storage warnings hide automatically, and CLI
-recordings show up in the desktop app's library list.
-
-**Beyond parity:** the practice mechanics, tab editor, and continuous-
-pitch (Audiosurf-mode) directions on [BACKLOG.md](BACKLOG.md) open up.
-None of them are committed yet — they need a real shape decision before
-they land on the roadmap.
+**Backlog** — see [BACKLOG.md](BACKLOG.md) for smaller adjustments,
+QoL polish, content expansions, and longer-horizon directions
+(practice mechanics, audio import / Demucs, sample bank, etc.).

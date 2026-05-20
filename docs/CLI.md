@@ -39,13 +39,16 @@ counterpart in one place.
 |---------|------------|------|
 | Tuner | `twanga tune` | [features/tuner.md](features/tuner.md) |
 | Recorder | `twanga record` | [features/recorder.md](features/recorder.md) |
-| Playback | `twanga play <path>` | [features/playback.md](features/playback.md) |
-| Patterns | `twanga play assets/patterns/<file>.alphatex --loop` | [features/patterns.md](features/patterns.md) |
+| Playback | `twanga play [path]` | [features/playback.md](features/playback.md) |
+| Patterns | `twanga patterns <list\|play\|path>` | [features/patterns.md](features/patterns.md) |
 | Tab editor | (GUI only — see scope) | [features/editor.md](features/editor.md) |
 | Tunings | `twanga tunings <list\|path\|add\|remove>` | [features/tunings.md](features/tunings.md) |
+| Docs | `twanga docs [feature]` | The per-feature pages above, printed to stdout for `glow` / `mdcat` / `bat -l md`. |
 
 Bare `twanga` with no subcommand prints the splash banner + the standard
-clap long-help so you can discover what's available.
+clap long-help so you can discover what's available. Bare `twanga play`
+opens an interactive picker over bundled examples + patterns + your
+`./recordings/`, mirroring the GUI's Playback library.
 
 ## Other subcommands
 

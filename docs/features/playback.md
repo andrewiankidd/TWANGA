@@ -5,9 +5,10 @@ metronome. Wait mode pauses at each note until you play it. Loop a section or
 the whole file. Transpose onto a different instrument with the same alphaTex
 parser used everywhere else.
 
-## CLI — `twanga play <path>`
+## CLI — `twanga play [path]`
 
 ```bash
+twanga play                                                        # interactive picker
 twanga play assets/examples/twinkle-twinkle-uke.alphatex --bpm 60 --wait
 ```
 
@@ -16,9 +17,14 @@ The audio loop is gated by either time (default) or detected input
 a matching pitch (±50 cents on any expected string/fret). Rests still advance
 with time so the metronome stays musical.
 
+Omit `path` to open an interactive picker that merges bundled examples,
+bundled patterns, and any `.alphatex` files in `./recordings/` — same
+library the GUI's Playback screen shows. The picker prefixes each row with
+`[example]` / `[pattern · <group>]` / `[recording]` so the source is clear.
+
 | Flag | Description |
 |------|-------------|
-| `path` (positional) | Path to a `.alphatex` file. |
+| `path` (positional, optional) | Path to a `.alphatex` file. Omit to open the picker. |
 | `--tuning <slug>` | Re-tune the tab to a different instrument. Notes are transposed by absolute pitch. |
 | `--transpose-mode <drop\|octave-shift>` | What to do with notes that don't fit on the target tuning. `drop` (default) silently omits them and reports a "Skipped:" pre-flight summary. `octave-shift` retries each unreachable note at ±12-semitone offsets before giving up — the standard TuxGuitar / MuseScore convention. Particularly relevant for banjo→ukulele where bass drones would otherwise vanish. |
 | `--capo <spec>` | Capo applied to the tab's tuning. Precedence: `--capo` wins; otherwise falls back to whatever the file embedded in its `\subtitle` field. |

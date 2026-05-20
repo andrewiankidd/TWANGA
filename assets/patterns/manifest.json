@@ -81,7 +81,7 @@
     {
       "id": "guitar",
       "title": "Guitar (standard tuning)",
-      "description": "Open-G chord shape drills. Hold the G shape (3 2 0 0 0 3 low → high) and focus on the right-hand pattern; the fretting is the same for both entries below so muscle memory transfers between them.",
+      "description": "Open-G chord shape drills. Hold the G shape (3 2 0 0 0 3 low → high) — both entries below share that fretting so muscle memory transfers between them; the drill is the picking/strumming pattern itself.",
       "patterns": [
         {
           "id": "boom-chick-guitar",

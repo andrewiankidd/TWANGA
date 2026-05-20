@@ -1,3 +1,4 @@
+mod bundled;
 mod tunings;
 
 use anyhow::{Context, Result, anyhow};
@@ -54,8 +55,11 @@ enum Command {
     /// metronome click on each beat, optional "wait" mode that pauses until
     /// you play the expected note.
     Play {
-        /// Path to a `.alphatex` file.
-        path: PathBuf,
+        /// Path to a `.alphatex` file. Omit to open an interactive
+        /// picker that scans bundled examples, bundled patterns, and
+        /// `./recordings/` for `.alphatex` files — same library the
+        /// GUI's Playback screen shows.
+        path: Option<PathBuf>,
         /// Re-tune the tab to a different instrument's tuning. Notes are
         /// transposed by absolute pitch — e.g. play a uke tab on banjo with
         /// `--tuning standard-banjo`. Notes outside the target instrument's
@@ -164,6 +168,15 @@ enum Command {
         #[command(subcommand)]
         action: TuningsAction,
     },
+    /// Browse + play bundled rhythm + picking drills. Read-only —
+    /// patterns are shipped at `assets/patterns/` with the binary
+    /// (no add / remove subcommands, unlike `tunings`). Use the
+    /// underlying `.alphatex` files with `twanga play <path>` if you
+    /// want to feed them through any of `play`'s flags.
+    Patterns {
+        #[command(subcommand)]
+        action: Option<PatternsAction>,
+    },
     /// Print the per-feature documentation embedded in the binary. With no
     /// argument, lists the available pages. Markdown is printed raw to
     /// stdout; pipe through `glow`, `mdcat`, or `bat -l md` for rendering.
@@ -195,6 +208,36 @@ enum TuningsAction {
         /// for scripts; interactive users should leave this off.
         #[arg(long)]
         force: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum PatternsAction {
+    /// List all bundled patterns, grouped by tradition with difficulty
+    /// markers. Read-only catalog view — no patterns are user-defined.
+    List,
+    /// Print the path to the bundled patterns manifest.
+    Path,
+    /// Play a specific pattern by its manifest id. Scriptable
+    /// equivalent of picking from the interactive `twanga patterns`
+    /// menu. The chosen pattern plays with `--loop full` defaulted
+    /// (override with `--no-loop` to play through once).
+    Play {
+        /// Manifest id of the pattern to play (e.g. `bum-diddy-simple`).
+        /// Run `twanga patterns list` to see the available ids.
+        id: String,
+        /// Disable the metronome click (default: on).
+        #[arg(long)]
+        no_metronome: bool,
+        /// Wait for the user to play each note before advancing.
+        #[arg(long)]
+        wait: bool,
+        /// Skip the default `--loop full` and play through once.
+        #[arg(long)]
+        no_loop: bool,
+        /// Override the tempo from the pattern's `\tempo` line.
+        #[arg(long, num_args = 0..=1, default_missing_value = "")]
+        bpm: Option<String>,
     },
 }
 
@@ -1223,6 +1266,21 @@ fn main() -> Result<()> {
             capo,
             pre_roll,
         } => {
+            // Resolve the file to play: an explicit path always wins;
+            // otherwise drop into the interactive picker that merges
+            // bundled examples + bundled patterns + the user's
+            // `./recordings/` directory. Same library the GUI's
+            // Playback screen shows.
+            let path = match path {
+                Some(p) => p,
+                None => match prompt_play_target()? {
+                    Some(p) => p,
+                    None => {
+                        eprintln!("Nothing selected — exiting.");
+                        return Ok(());
+                    }
+                },
+            };
             // Parse first so the tuning prompt can show what's in the file.
             let content = fs::read_to_string(&path)
                 .with_context(|| format!("failed to read '{}'", path.display()))?;
@@ -1264,6 +1322,18 @@ fn main() -> Result<()> {
             TuningsAction::Path => run_tunings_path()?,
             TuningsAction::Add => run_tunings_add()?,
             TuningsAction::Remove { slug, force } => run_tunings_remove(slug, force)?,
+        },
+        Command::Patterns { action } => match action {
+            None => run_patterns_picker()?,
+            Some(PatternsAction::List) => run_patterns_list()?,
+            Some(PatternsAction::Path) => run_patterns_path()?,
+            Some(PatternsAction::Play {
+                id,
+                no_metronome,
+                wait,
+                no_loop,
+                bpm,
+            }) => run_patterns_play(id, no_metronome, wait, no_loop, bpm)?,
         },
         Command::Docs { feature } => run_docs(feature)?,
     }
@@ -1343,6 +1413,269 @@ fn run_docs(feature: Option<String>) -> Result<()> {
     };
     print!("{}", docs_page_text(&slug)?);
     Ok(())
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Bundled content picker (`twanga play` with no path)
+// ──────────────────────────────────────────────────────────────────────────
+
+/// Build a labelled list of choices for the bare `twanga play` picker.
+/// Pairs each menu line with the filesystem path it resolves to so the
+/// caller can hand it off to `run_playback` without re-discovery.
+struct PlayChoice {
+    label: String,
+    path: PathBuf,
+}
+
+fn collect_play_choices() -> Vec<PlayChoice> {
+    let mut choices: Vec<PlayChoice> = Vec::new();
+
+    // Bundled examples first — they're stable across runs and don't
+    // depend on the user having recorded anything.
+    if let Ok(examples) = bundled::load_examples() {
+        for entry in examples {
+            if let Ok(path) = bundled::resolve_example_path(&entry) {
+                let tuning = entry.tuning.as_deref().unwrap_or("");
+                let label = if tuning.is_empty() {
+                    format!("[example] {}", entry.title)
+                } else {
+                    format!("[example] {} ({tuning})", entry.title)
+                };
+                choices.push(PlayChoice { label, path });
+            }
+        }
+    }
+
+    // Then bundled patterns — flatten the group tree, sort by
+    // difficulty within each group (the same ordering the GUI uses).
+    if let Ok(groups) = bundled::load_patterns() {
+        for (group, pattern) in bundled::flat_pattern_list(&groups) {
+            if let Ok(path) = bundled::resolve_pattern_path(&pattern) {
+                let pips = bundled::difficulty_pips(pattern.difficulty);
+                let prefix = if pips.is_empty() {
+                    format!("[pattern · {}]", group.title)
+                } else {
+                    format!("[pattern · {} · {pips}]", group.title)
+                };
+                choices.push(PlayChoice {
+                    label: format!("{prefix} {}", pattern.title),
+                    path,
+                });
+            }
+        }
+    }
+
+    // Finally any local recordings — those are the user's own takes,
+    // most-recent first so the natural use case ("play back what I
+    // just recorded") works without scrolling.
+    if let Ok(recordings) = bundled::scan_recordings() {
+        for rec in recordings {
+            let stem = rec
+                .path
+                .file_name()
+                .and_then(|s| s.to_str())
+                .unwrap_or("recording");
+            choices.push(PlayChoice {
+                label: format!("[recording] {} ({stem})", rec.title),
+                path: rec.path,
+            });
+        }
+    }
+
+    choices
+}
+
+/// Show an interactive picker that lets the user pick a file to play
+/// when `twanga play` was invoked with no path. Returns `None` if
+/// nothing's available to play — caller should print a hint and exit.
+fn prompt_play_target() -> Result<Option<PathBuf>> {
+    use std::io::IsTerminal;
+    if !std::io::stdin().is_terminal() || !std::io::stderr().is_terminal() {
+        return Err(anyhow!(
+            "no path given and stdin isn't a TTY; pass a `.alphatex` file path or run interactively"
+        ));
+    }
+    let choices = collect_play_choices();
+    if choices.is_empty() {
+        eprintln!(
+            "No alphaTex files found. Looked in:\n  {}\n  {}\n  {}/",
+            bundled::examples_manifest_path().display(),
+            bundled::patterns_manifest_path().display(),
+            bundled::recordings_dir_path().display(),
+        );
+        eprintln!(
+            "Pass a `.alphatex` path explicitly (e.g. `twanga play path/to/file.alphatex`),"
+        );
+        eprintln!("or run from a directory that has one of the above.");
+        return Ok(None);
+    }
+    let labels: Vec<&str> = choices.iter().map(|c| c.label.as_str()).collect();
+    let idx = twanga_tui::select_with_default_and_hint(
+        "Choose a tab to play:",
+        &labels,
+        0,
+        Some("tip: pass a `.alphatex` path directly to skip this menu"),
+    )?;
+    Ok(Some(choices[idx].path.clone()))
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// `twanga patterns` subcommand handlers
+// ──────────────────────────────────────────────────────────────────────────
+
+/// `twanga patterns` (no subcommand) — interactive picker over the
+/// bundled patterns. After the user picks one, plays it through the
+/// same `run_playback` path `twanga play` uses, with `--loop full`
+/// defaulted (patterns are meant to loop).
+fn run_patterns_picker() -> Result<()> {
+    use std::io::IsTerminal;
+    if !std::io::stdin().is_terminal() || !std::io::stderr().is_terminal() {
+        return Err(anyhow!(
+            "interactive picker requires a TTY — use `twanga patterns play <id>` non-interactively"
+        ));
+    }
+    let groups = bundled::load_patterns()?;
+    let flat = bundled::flat_pattern_list(&groups);
+    if flat.is_empty() {
+        eprintln!(
+            "No patterns found at {}.",
+            bundled::patterns_manifest_path().display()
+        );
+        eprintln!("Run from the TWANGA repo root, or use `twanga play <path>` instead.");
+        return Ok(());
+    }
+    let labels: Vec<String> = flat
+        .iter()
+        .map(|(group, pattern)| {
+            let pips = bundled::difficulty_pips(pattern.difficulty);
+            if pips.is_empty() {
+                format!("{} · {}", group.title, pattern.title)
+            } else {
+                format!("{pips}  {} · {}", group.title, pattern.title)
+            }
+        })
+        .collect();
+    let refs: Vec<&str> = labels.iter().map(|s| s.as_str()).collect();
+    let idx = twanga_tui::select_with_default_and_hint(
+        "Choose a pattern to practice:",
+        &refs,
+        0,
+        Some("patterns loop by default — slow the BPM until you can play it cleanly"),
+    )?;
+    let (_, pattern) = &flat[idx];
+    run_patterns_play(
+        pattern.id.clone(),
+        /* no_metronome */ false,
+        /* wait */ false,
+        /* no_loop */ false,
+        /* bpm */ None,
+    )
+}
+
+/// `twanga patterns list` — catalog view. Prints each group with its
+/// description and then the patterns sorted by difficulty, marked
+/// with ★ pips. Same ordering the GUI's Patterns screen renders.
+fn run_patterns_list() -> Result<()> {
+    let groups = bundled::load_patterns()?;
+    if groups.is_empty() {
+        println!(
+            "(no patterns manifest at {})",
+            bundled::patterns_manifest_path().display()
+        );
+        return Ok(());
+    }
+    for (i, group) in groups.iter().enumerate() {
+        if i > 0 {
+            println!();
+        }
+        println!("{}", group.title);
+        if let Some(desc) = &group.description {
+            println!("  {desc}");
+        }
+        let mut sorted = group.patterns.clone();
+        sorted.sort_by_key(|p| p.difficulty.unwrap_or(u32::MAX));
+        for pattern in sorted {
+            let pips = bundled::difficulty_pips(pattern.difficulty);
+            let tuning = pattern.tuning.as_deref().unwrap_or("");
+            let pad = if pips.is_empty() {
+                "       ".to_string()
+            } else {
+                pips
+            };
+            if tuning.is_empty() {
+                println!("  {pad}  {}  ({})", pattern.title, pattern.id);
+            } else {
+                println!(
+                    "  {pad}  {}  ({}, tuning: {tuning})",
+                    pattern.title, pattern.id
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
+/// `twanga patterns path` — print the manifest path. Companion to
+/// `twanga tunings path`.
+fn run_patterns_path() -> Result<()> {
+    println!("{}", bundled::patterns_manifest_path().display());
+    Ok(())
+}
+
+/// `twanga patterns play <id>` — non-interactive: resolve the id in
+/// the manifest, hand it off to `run_playback`. Defaults to looping
+/// (the whole point of a pattern); `--no-loop` flips that.
+fn run_patterns_play(
+    id: String,
+    no_metronome: bool,
+    wait: bool,
+    no_loop: bool,
+    bpm_arg: Option<String>,
+) -> Result<()> {
+    let groups = bundled::load_patterns()?;
+    let mut found: Option<(bundled::PatternGroup, bundled::PatternEntry)> = None;
+    for group in &groups {
+        for pattern in &group.patterns {
+            if pattern.id == id {
+                found = Some((group.clone(), pattern.clone()));
+                break;
+            }
+        }
+        if found.is_some() {
+            break;
+        }
+    }
+    let Some((_, pattern)) = found else {
+        return Err(anyhow!(
+            "no pattern with id '{id}'. Run `twanga patterns list` to see what's available."
+        ));
+    };
+    let path = bundled::resolve_pattern_path(&pattern)?;
+    let content = fs::read_to_string(&path)
+        .with_context(|| format!("failed to read '{}'", path.display()))?;
+    let parsed =
+        alphatex::parse(&content).map_err(|e| anyhow!("failed to parse alphaTex: {e}"))?;
+    if parsed.columns.is_empty() {
+        return Err(anyhow!("pattern '{}' has no notes to play", id));
+    }
+    let bpm = resolve_bpm_override(bpm_arg)?;
+    let loop_spec = if no_loop {
+        None
+    } else {
+        Some("full".to_string())
+    };
+    run_playback(
+        path,
+        parsed,
+        /* tuning_override */ None,
+        alphatex::TransposeMode::Drop,
+        bpm,
+        !no_metronome,
+        wait,
+        loop_spec,
+        /* capo_spec */ None,
+        /* pre_roll */ 4,
+    )
 }
 
 // ──────────────────────────────────────────────────────────────────────────

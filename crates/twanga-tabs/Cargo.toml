@@ -5,7 +5,7 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
-description = "Tab format parsers/serialisers (GP5, MusicXML, alphaTex). Import-only — no hosting."
+description = "Tab format parsers/serialisers — alphaTex (today), MusicXML (planned). Live TabRecorder + transpose. Proprietary formats (.gp5/.gpx) are explicit non-goals."
 publish = false
 
 [dependencies]

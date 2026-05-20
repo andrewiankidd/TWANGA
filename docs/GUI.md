@@ -29,6 +29,7 @@ in one place.
 | Patterns | `#patterns` | [features/patterns.md](features/patterns.md) |
 | Tab editor | `#editor` | [features/editor.md](features/editor.md) |
 | Tunings | `#tunings` | [features/tunings.md](features/tunings.md) |
+| Docs | `#docs` | (the per-feature pages above, rendered inline) |
 
 ## Running it
 

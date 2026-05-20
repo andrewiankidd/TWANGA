@@ -9,7 +9,7 @@ the docs to enforce it too.
 | [Tuner](tuner.md) | Live pitch detection vs your chosen tuning. |
 | [Recorder](recorder.md) | Capture played notes as an alphaTex tab. |
 | [Playback](playback.md) | Play a tab with metronome, wait mode, loop, transpose. |
-| [Patterns](patterns.md) | Bundled rhythm + picking drills (clawhammer, rolls, strums). |
+| [Patterns](patterns.md) | Bundled rhythm + picking drills (clawhammer, rolls, strums, guitar fingerpicking). |
 | [Tab editor](editor.md) | Post-capture cell-level edits to recordings. |
 | [Tunings](tunings.md) | Built-in + user-defined tuning registry. |
 

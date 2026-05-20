@@ -1,12 +1,13 @@
 # Patterns
 
 A bundled library of short rhythm + picking drills — clawhammer figures,
-bluegrass rolls, uke strums. Each pattern is a small `.alphatex` file
-designed to loop, so you practice the groove rather than working through a
-tune.
+bluegrass rolls, uke strums, guitar fingerpicking. Each pattern is a small
+`.alphatex` file designed to loop, so you practice the groove rather than
+working through a tune.
 
-GUI-first feature with a small CLI counterpart (the patterns are just
-`.alphatex` files, so `twanga play` reads them directly).
+Full parity between CLI and GUI: the GUI has the Patterns screen; the
+CLI has the `twanga patterns` subcommand. Both consume the same manifest
+and play through the same engine.
 
 ## GUI
 
@@ -25,11 +26,14 @@ you can play it cleanly, then bring it back up.
 - **Clawhammer (banjo)** — old-time rhythmic patterns built around the
   bum-diddy figure (melody note + brush + drone-string pluck). Includes
   a basic and a drop-thumb variant.
-- **Bluegrass picking (banjo)** — three-finger picking patterns. Loop
-  under tempo to lock in the muscle memory before applying them to a
-  melody.
+- **Bluegrass picking (banjo)** — three-finger picking patterns: forward
+  roll, reverse roll, alternating-thumb roll. Loop under tempo to lock
+  in the muscle memory before applying them to a melody.
 - **Ukulele strums** — strumming patterns over a held C-major shape
-  (all open strings) so you can focus on the rhythm.
+  (all open strings) so you can focus on the rhythm. Baseline DDUUDU,
+  Island, Waltz (3/4).
+- **Guitar (standard tuning)** — open-G chord drills. Boom-chick (the
+  country/folk backbone) and Travis picking (alternating-bass fingerstyle).
 
 Adding more patterns is a content-only operation: drop a new
 `assets/patterns/<name>.alphatex` and add a manifest entry. See the
@@ -37,18 +41,29 @@ Adding more patterns is a content-only operation: drop a new
 
 ## CLI
 
-There's no dedicated `twanga patterns` subcommand — the patterns are
-ordinary `.alphatex` files. Play them directly:
+`twanga patterns` mirrors the GUI Patterns screen. Four actions:
 
 ```bash
-twanga play assets/patterns/bum-diddy-simple.alphatex --loop
-twanga play assets/patterns/forward-roll-banjo.alphatex --loop --bpm 80
-twanga play assets/patterns/uke-island-strum.alphatex --loop --wait
+twanga patterns                    # interactive picker (groups + difficulty pips)
+twanga patterns list               # catalog dump — scriptable
+twanga patterns play <id>          # non-interactive play; loops by default
+twanga patterns path               # print the manifest path
 ```
 
-The full set is in [`assets/patterns/`](../../assets/patterns/) with a
-manifest at `manifest.json`. Same loop / wait / pre-roll / metronome
-flags as any other `play` invocation.
+Examples:
+
+```bash
+twanga patterns play forward-roll-banjo
+twanga patterns play uke-island-strum --bpm 70 --wait
+twanga patterns play boom-chick-guitar --no-loop
+```
+
+`twanga patterns play` looping is on by default (the whole point of a
+pattern). Pass `--no-loop` to play through once.
+
+Patterns are also surfaced through the bare-`twanga play` picker
+alongside bundled examples and your local `./recordings/` directory, if
+you want them all in one menu instead of a dedicated pattern flow.
 
 ## Where things live
 
