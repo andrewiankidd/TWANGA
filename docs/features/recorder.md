@@ -36,7 +36,10 @@ GUI) shows it in the header.
 | `--title <text>` | Human-readable title — written to `\title` AND used to derive the filename (`<slug>-<unix-secs>.alphatex`). Blank input falls back to `recording-<unix-secs>.alphatex`. |
 
 Controls during a take: `q + Enter` or Ctrl-C stops cleanly, `p + Enter`
-toggles pause/resume.
+toggles pause/resume, **`u + Enter` while paused** undoes the last
+committed column (pops it from the score + rewinds the sample counter
+so resume doesn't fire a phantom catch-up click). Match for the GUI's
+"Undo last column" button.
 
 Example output:
 

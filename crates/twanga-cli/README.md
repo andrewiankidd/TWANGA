@@ -8,7 +8,7 @@ The `twanga` command-line binary. Mostly UX glue — the analysis logic lives in
 - `--flag` (no value) — explicitly ask to be prompted (or, for `--bpm` on `play`, explicitly defer to the file's tempo).
 - `(omitted)` — same as bare `--flag` when run in a terminal; falls back to a sensible default (or just doesn't apply) when stdin isn't a TTY.
 
-Ctrl-C and `q + Enter` both produce a clean exit. `p + Enter` toggles pause/resume on `record` and `play`.
+Ctrl-C and `q + Enter` both produce a clean exit. `p + Enter` toggles pause/resume on `record` and `play`. On `record`, `u + Enter` while paused undoes the last committed column (parity with the GUI Recorder's Undo button).
 
 ## Subcommands
 
@@ -38,6 +38,8 @@ When a capo is set, logged frets are **capo-relative** (the musical convention) 
 | `--pre-roll <N>` | Audible count-in ticks before recording starts (0–16). Prompted if omitted; default 4. Always audible, even when `--no-metronome` is set. Aborts cleanly on Ctrl-C / `q + Enter`. |
 | `--title <text>` | Human-readable title — written to `\title` in the alphaTex header AND used to derive the filename (`<slug>-<unix-secs>.alphatex`). Prompted if omitted; accept blank to fall back to the original `recording-<unix-secs>.alphatex` shape. |
 
+Controls during a take: `q + Enter` (or Ctrl-C) stops, `p + Enter` toggles pause/resume, **`u + Enter` while paused** undoes the most recently committed column. Matches the GUI Recorder's "Undo last column" button.
+
 ### `play [path]` — play back a recording
 
 Load an `.alphatex` file, scroll a cursor through it at the file's (or overridden) tempo. The audio loop is gated by either time (default) or by detected input (`--wait`).
@@ -56,6 +58,10 @@ Omit `path` to open an interactive picker that scans bundled examples (`assets/e
 | `--loop` | Loop the entire file continuously. |
 | `--loop <START:END>` | Loop a specific column range (0-indexed, end exclusive). E.g. `--loop 0:20` plays columns 0–19 on repeat; `--loop 20:30` loops columns 20–29. |
 | `--pre-roll <N>` | Audible count-in ticks before playback starts (0–16). Prompted if omitted; default 4. Always audible, even when `--no-metronome` is set. |
+| `--resume` | Auto-accept any saved bookmark for this file (jump to the saved column without the interactive prompt). Mirrors the GUI's Resume banner button. |
+| `--no-resume` | Auto-decline any saved bookmark. Useful in scripts. |
+
+Bookmarks land in `$CONFIG/twanga/play-resume.toml` on every user-initiated stop (Ctrl-C / `q + Enter`). Naturally-finished plays don't save. Stale bookmarks pointing past a file's edited length are cleared silently on the next load.
 
 Example with the bundled demo:
 
@@ -92,6 +98,40 @@ User-defined tunings live at the platform config dir (`$CONFIG/twanga/tunings.to
 | `twanga tunings path` | Print the absolute path to the user file (whether it exists yet or not). |
 | `twanga tunings add` | Interactive flow: number of strings → per-string open pitch → display name → auto-slug. Saves to the user file, rejects slugs that collide with built-ins. |
 | `twanga tunings remove [--slug <slug>] [--force]` | Delete a user-defined tuning from the user file. Pass `--slug` to skip the menu; pass `--force` to skip the confirmation prompt (useful in scripts). Built-in tunings are compiled into the binary and can't be removed. |
+
+### `edit <path> <action>` — non-interactive tab editor
+
+Scriptable counterpart to the GUI Editor screen. Each invocation performs one mutation and writes the file back in place (or to `--out <path>`). Chain in a shell script for batch edits.
+
+| Action | Description |
+|--------|-------------|
+| `set <column> <string> <fret>` | Set a single cell. `string` is 1-based (string 1 = top of tab); `column` is 0-based; `fret` is any non-negative integer. |
+| `clear <column> <string>` | Clear a single cell. |
+| `clear-col <column>` | Clear every cell in a column (rest the entire beat). |
+| `insert-col [--after <n>]` | Insert a blank column. `--after N` inserts at position N+1; omit to append at the end. |
+| `delete-col <column>` | Delete the column at `column`. |
+| `title <text>` | Set the `\title` directive. Pass `""` to clear. |
+| `bpm <n>` | Set the `\tempo` (20–400 BPM). |
+
+| Flag | Description |
+|------|-------------|
+| `path` (positional) | Path to the `.alphatex` file to mutate. |
+| `--out <path>` | Write the result to a different file instead of overwriting `path`. |
+
+Example:
+
+```bash
+# Bump string 1 / col 0 to fret 7 in twinkle
+twanga edit assets/examples/twinkle-twinkle-uke.alphatex set 0 1 7
+
+# Insert a rest column after column 7
+twanga edit my-take.alphatex insert-col --after 7
+
+# Branch an edit to a new file
+twanga edit my-take.alphatex --out my-take-edited.alphatex bpm 90
+```
+
+Subtitle (human tuning name + capo annotation) round-trips correctly. Output goes through the same `AlphaTexWriter` the Recorder uses on save, so an edited file is bit-for-bit indistinguishable from a fresh recording with the same notes.
 
 ### `devices` — list audio input devices
 

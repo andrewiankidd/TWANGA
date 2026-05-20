@@ -1,4 +1,5 @@
 mod bundled;
+mod play_resume;
 mod tunings;
 
 use anyhow::{Context, Result, anyhow};
@@ -113,6 +114,17 @@ enum Command {
         /// prompted.
         #[arg(long, num_args = 0..=1, default_missing_value = "")]
         pre_roll: Option<String>,
+        /// Skip the "Resume at col N?" prompt by automatically accepting
+        /// the saved bookmark for this file (if one exists). No-op when
+        /// the file has no bookmark — playback still starts from
+        /// column 0.
+        #[arg(long, conflicts_with = "no_resume")]
+        resume: bool,
+        /// Skip the resume prompt by automatically *declining* the
+        /// saved bookmark. Useful in scripts where you want a clean
+        /// start regardless of history.
+        #[arg(long, conflicts_with = "resume")]
+        no_resume: bool,
     },
     /// Live tab recorder — capture played notes as horizontal ASCII tab notation.
     /// Any argument left unset triggers an interactive prompt (with the default
@@ -177,6 +189,22 @@ enum Command {
         #[command(subcommand)]
         action: Option<PatternsAction>,
     },
+    /// Edit an `.alphatex` file in place — cell-level fret changes,
+    /// column insert / delete / clear, title + BPM. Scriptable
+    /// (non-interactive) counterpart to the GUI Editor screen. Each
+    /// `edit` invocation does one operation and writes back; chain
+    /// them in a shell script for batch edits.
+    Edit {
+        /// Path to the `.alphatex` file to mutate.
+        path: PathBuf,
+        /// Write the modified tab to a different file instead of
+        /// overwriting `path`. Useful for branching edits without
+        /// touching the original.
+        #[arg(long)]
+        out: Option<PathBuf>,
+        #[command(subcommand)]
+        action: EditAction,
+    },
     /// Print the per-feature documentation embedded in the binary. With no
     /// argument, lists the available pages. Markdown is printed raw to
     /// stdout; pipe through `glow`, `mdcat`, or `bat -l md` for rendering.
@@ -209,6 +237,37 @@ enum TuningsAction {
         #[arg(long)]
         force: bool,
     },
+}
+
+#[derive(Subcommand)]
+enum EditAction {
+    /// Set a single cell. `string` is 1-based (string 1 = the highest
+    /// pitch / top of the tab); `column` is 0-based. `fret` is any
+    /// non-negative integer (no upper cap — extended-range
+    /// instruments use whatever they need).
+    Set {
+        column: usize,
+        string: u8,
+        fret: u8,
+    },
+    /// Clear a single cell. Same indexing as `set`.
+    Clear { column: usize, string: u8 },
+    /// Clear every cell in the given column (rest the entire beat).
+    ClearCol { column: usize },
+    /// Insert a blank column. `--after` is 0-based; omit to append at
+    /// the end. Inserting after `N-1` produces a blank column at
+    /// position `N` (i.e. one past where you specified).
+    InsertCol {
+        #[arg(long)]
+        after: Option<usize>,
+    },
+    /// Delete the column at `column` (0-based). The columns after it
+    /// shift down by one.
+    DeleteCol { column: usize },
+    /// Set the `\title` directive.
+    Title { text: String },
+    /// Set the `\tempo` directive (BPM, 20–400).
+    Bpm { bpm: u32 },
 }
 
 #[derive(Subcommand)]
@@ -714,6 +773,119 @@ fn validate_pre_roll(n: u32) -> Result<()> {
     }
 }
 
+/// Resolve the resume-bookmark decision for `twanga play`. Looks up
+/// any saved bookmark for `file_path`; returns:
+///   - `Ok(Some(col))` if the user (or `--resume`) opted to jump to
+///     a saved column.
+///   - `Ok(None)` if there's no bookmark, `--no-resume` was passed,
+///     the user declined the prompt, or stdin isn't a TTY (default
+///     for scripts: don't resume).
+///
+/// Mirrors the GUI's banner-then-resume flow but on a per-file
+/// basis since the CLI usually loads with an explicit path.
+fn resolve_resume_choice(
+    file_path: &Path,
+    parsed: &ParsedTab,
+    resume_flag: bool,
+    no_resume_flag: bool,
+) -> Result<Option<u64>> {
+    if no_resume_flag {
+        return Ok(None);
+    }
+    let Some(bm) = play_resume::lookup(file_path).unwrap_or(None) else {
+        return Ok(None);
+    };
+    let total_cols = parsed.columns.len() as u64;
+    // Defensive: a saved column past the file's end (e.g. file was
+    // edited shorter) is meaningless. Clear the stale bookmark and
+    // start from the top.
+    if bm.column >= total_cols {
+        let _ = clear_resume_bookmark(file_path);
+        return Ok(None);
+    }
+    if resume_flag {
+        eprintln!(
+            "Resuming at column {} / {} (saved {})",
+            bm.column + 1,
+            total_cols,
+            humanise_resume_age(bm.when),
+        );
+        return Ok(Some(bm.column));
+    }
+    use std::io::IsTerminal;
+    if !std::io::stdin().is_terminal() || !std::io::stderr().is_terminal() {
+        // Non-interactive default: don't auto-resume — scripts get a
+        // predictable start. Use `--resume` to opt in.
+        return Ok(None);
+    }
+    let label = bm.title.clone().unwrap_or_else(|| {
+        file_path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("this tab")
+            .to_string()
+    });
+    let prompt = format!(
+        "Resume \"{}\" at column {} / {} (saved {})? (Y/n)",
+        label,
+        bm.column + 1,
+        total_cols,
+        humanise_resume_age(bm.when),
+    );
+    let accept: bool = twanga_tui::prompt_parsed(&prompt, true, |s| {
+        match s.trim().to_lowercase().as_str() {
+            "" | "y" | "yes" => Ok(true),
+            "n" | "no" => Ok(false),
+            other => Err(format!("expected y/yes or n/no, got '{other}'")),
+        }
+    })?;
+    Ok(if accept { Some(bm.column) } else { None })
+}
+
+/// Best-effort "5 minutes ago" / "2 hours ago" / "yesterday" /
+/// "2026-05-21" rendering for the resume prompt. Keeps the prompt
+/// readable without dragging in a chrono dep.
+fn humanise_resume_age(when_unix: u64) -> String {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    if when_unix == 0 || when_unix > now {
+        return "just now".to_string();
+    }
+    let secs = now - when_unix;
+    if secs < 60 {
+        return "just now".to_string();
+    }
+    if secs < 60 * 60 {
+        let m = secs / 60;
+        return format!("{m} minute{} ago", if m == 1 { "" } else { "s" });
+    }
+    if secs < 60 * 60 * 24 {
+        let h = secs / (60 * 60);
+        return format!("{h} hour{} ago", if h == 1 { "" } else { "s" });
+    }
+    if secs < 60 * 60 * 24 * 7 {
+        let d = secs / (60 * 60 * 24);
+        return if d == 1 {
+            "yesterday".to_string()
+        } else {
+            format!("{d} days ago")
+        };
+    }
+    let weeks = secs / (60 * 60 * 24 * 7);
+    format!("{weeks} week{} ago", if weeks == 1 { "" } else { "s" })
+}
+
+/// Thin wrapper to swallow the result of clearing a stale bookmark.
+/// Best-effort — if the user has no config dir we don't care.
+fn clear_resume_bookmark(file_path: &Path) -> Result<()> {
+    let Some(bp) = play_resume::bookmarks_file_path() else {
+        return Ok(());
+    };
+    play_resume::clear_at(&bp, file_path)
+}
+
 /// Resolve `--title` for `record`. Three-form pattern: explicit value
 /// passes through, bare flag prompts (default blank → no title), omission
 /// also defers to a prompt. Blank input is preserved as `None` so the
@@ -843,6 +1015,13 @@ fn is_quit_input(input: &str) -> bool {
 /// form following the same pattern as `q` / `quit`.
 fn is_pause_input(input: &str) -> bool {
     matches!(input, "p" | "pause")
+}
+
+/// Undo-last-column for `record` while paused. `u + Enter` parity with
+/// the GUI Recorder's "Undo last column" button. Long form `undo`
+/// matches the `quit` / `pause` aliasing pattern.
+fn is_undo_input(input: &str) -> bool {
+    matches!(input, "u" | "undo")
 }
 
 fn run_chromatic(mut tuner: Tuner, mut stream: InputStream) -> Result<()> {
@@ -1086,7 +1265,9 @@ fn run_recorder(
     eprintln!("Saving to:  {}", recording_path.display());
     eprintln!();
     eprintln!("─────────────────────────────────────────────────");
-    eprintln!("  Controls: 'q' + Enter to stop, 'p' + Enter to pause/resume");
+    eprintln!(
+        "  Controls: 'q' stop · 'p' pause/resume · 'u' undo last col (while paused)"
+    );
     eprintln!("─────────────────────────────────────────────────");
     eprintln!();
 
@@ -1133,9 +1314,31 @@ fn run_recorder(
             if is_pause_input(&input) {
                 paused = !paused;
                 if paused {
-                    eprintln!("\n[paused — press 'p' + Enter to resume]");
+                    eprintln!(
+                        "\n[paused — 'p' + Enter to resume, 'u' + Enter to undo last column]"
+                    );
                 } else {
                     eprintln!("[resuming]");
+                }
+            } else if is_undo_input(&input) {
+                // Only honour undo while paused, matching the GUI
+                // recorder's Undo-last-column button (which is only
+                // visible while the recorder is paused). Doing it
+                // while actively recording would race the tick driver.
+                if paused {
+                    match recorder.undo_last_column() {
+                        Some(_marks) => {
+                            total_columns = total_columns.saturating_sub(1);
+                            eprintln!(
+                                "[undid last column — {total_columns} columns remaining]"
+                            );
+                        }
+                        None => {
+                            eprintln!("[nothing to undo]");
+                        }
+                    }
+                } else {
+                    eprintln!("[undo only works while paused — press 'p' + Enter first]");
                 }
             }
         }
@@ -1265,6 +1468,8 @@ fn main() -> Result<()> {
             loop_spec,
             capo,
             pre_roll,
+            resume,
+            no_resume,
         } => {
             // Resolve the file to play: an explicit path always wins;
             // otherwise drop into the interactive picker that merges
@@ -1296,6 +1501,10 @@ fn main() -> Result<()> {
                 "octave-shift" => alphatex::TransposeMode::OctaveShift,
                 _ => alphatex::TransposeMode::Drop,
             };
+            // Resume bookmark resolution. Three states for the user
+            // (`--resume`, `--no-resume`, neither) → either skip the
+            // prompt one way or the other, or ask interactively.
+            let resume_col = resolve_resume_choice(&path, &parsed, resume, no_resume)?;
             run_playback(
                 path,
                 parsed,
@@ -1307,6 +1516,7 @@ fn main() -> Result<()> {
                 loop_spec,
                 capo,
                 pre_roll,
+                resume_col,
             )?;
         }
         Command::Devices => {
@@ -1335,6 +1545,7 @@ fn main() -> Result<()> {
                 bpm,
             }) => run_patterns_play(id, no_metronome, wait, no_loop, bpm)?,
         },
+        Command::Edit { path, out, action } => run_edit(path, out, action)?,
         Command::Docs { feature } => run_docs(feature)?,
     }
     Ok(())
@@ -1675,7 +1886,192 @@ fn run_patterns_play(
         loop_spec,
         /* capo_spec */ None,
         /* pre_roll */ 4,
+        /* resume_col */ None,
     )
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// `twanga edit` — non-interactive tab mutator
+// ──────────────────────────────────────────────────────────────────────────
+
+/// Apply a single edit action to an `.alphatex` file and write the
+/// result back (in place, or to `out` if specified). One operation
+/// per invocation — chain in a shell script for batch edits.
+///
+/// Each action goes through the same `serialize_recording`-style
+/// path the Recorder + GUI Editor use: parse → mutate `ParsedTab`
+/// in memory → re-serialize via `AlphaTexWriter`. So saved output is
+/// bit-for-bit indistinguishable from a fresh recording.
+fn run_edit(path: PathBuf, out: Option<PathBuf>, action: EditAction) -> Result<()> {
+    let content = fs::read_to_string(&path)
+        .with_context(|| format!("failed to read '{}'", path.display()))?;
+    let mut parsed = alphatex::parse(&content)
+        .map_err(|e| anyhow!("failed to parse alphaTex: {e}"))?;
+    // Construct the working `Tuning` from the file's `\tuning` header,
+    // then override its `name` with the file's original subtitle so
+    // the AlphaTexWriter round-trips the subtitle line instead of
+    // clobbering it with the placeholder "(from alphaTex)". The
+    // subtitle's `; capo=...` suffix is stripped (we pass capo
+    // separately to the writer, which re-attaches it on the way out).
+    let mut tuning = parsed
+        .tuning()
+        .ok_or_else(|| anyhow!("'{}' has no parseable \\tuning header", path.display()))?;
+    if let Some(human_subtitle) = parsed.subtitle_display() {
+        tuning.name = human_subtitle;
+    }
+    let string_count = tuning.strings.len();
+
+    match action {
+        EditAction::Set {
+            column,
+            string,
+            fret,
+        } => {
+            validate_column(column, parsed.columns.len())?;
+            validate_string(string, string_count)?;
+            let col = &mut parsed.columns[column];
+            // Drop any existing hit on this string, then push the new one.
+            col.hits.retain(|(s, _)| *s != string);
+            col.hits.push((string, fret));
+            // Keep hits sorted by string for stable output ordering — the
+            // recorder writes them in string-index order too.
+            col.hits.sort_by_key(|(s, _)| *s);
+            eprintln!("set col {column}, string {string}, fret {fret}");
+        }
+        EditAction::Clear { column, string } => {
+            validate_column(column, parsed.columns.len())?;
+            validate_string(string, string_count)?;
+            let col = &mut parsed.columns[column];
+            let before = col.hits.len();
+            col.hits.retain(|(s, _)| *s != string);
+            if col.hits.len() == before {
+                eprintln!("(col {column}, string {string} was already empty)");
+            } else {
+                eprintln!("cleared col {column}, string {string}");
+            }
+        }
+        EditAction::ClearCol { column } => {
+            validate_column(column, parsed.columns.len())?;
+            parsed.columns[column].hits.clear();
+            eprintln!("cleared col {column}");
+        }
+        EditAction::InsertCol { after } => {
+            // `after = None` → append at the end. `after = Some(n)` →
+            // insert after column n (resulting position = n+1).
+            let total = parsed.columns.len();
+            let insert_at = match after {
+                Some(n) => {
+                    if n >= total {
+                        return Err(anyhow!(
+                            "--after {n} is out of range (file has {total} columns; 0..{total} valid)"
+                        ));
+                    }
+                    n + 1
+                }
+                None => total,
+            };
+            // Inherit duration_denom from the existing first column so
+            // the new blank stays in time with the rest of the file.
+            let duration_denom = parsed
+                .columns
+                .first()
+                .map(|c| c.duration_denom)
+                .unwrap_or(8);
+            parsed.columns.insert(
+                insert_at,
+                alphatex::TabColumn {
+                    duration_denom,
+                    hits: Vec::new(),
+                },
+            );
+            eprintln!("inserted blank column at position {insert_at}");
+        }
+        EditAction::DeleteCol { column } => {
+            validate_column(column, parsed.columns.len())?;
+            parsed.columns.remove(column);
+            eprintln!(
+                "deleted col {column} (file now has {} columns)",
+                parsed.columns.len()
+            );
+        }
+        EditAction::Title { text } => {
+            let trimmed = text.trim();
+            if trimmed.is_empty() {
+                parsed.title = None;
+                eprintln!("cleared \\title");
+            } else {
+                parsed.title = Some(trimmed.to_string());
+                eprintln!("set \\title to \"{trimmed}\"");
+            }
+        }
+        EditAction::Bpm { bpm } => {
+            validate_bpm(bpm)?;
+            parsed.tempo = bpm;
+            eprintln!("set \\tempo to {bpm}");
+        }
+    }
+
+    // Re-serialize through AlphaTexWriter — same path as the Recorder's
+    // save. Preserves tuning, capo (round-tripped via subtitle), title,
+    // and resolution.
+    let capo = parsed.capo().unwrap_or_else(|| Capo::none(string_count));
+    let resolution_denom = parsed
+        .columns
+        .first()
+        .map(|c| c.duration_denom)
+        .unwrap_or(8);
+    let mut buf: Vec<u8> = Vec::new();
+    {
+        let mut w = AlphaTexWriter::new(
+            &mut buf,
+            &tuning,
+            &capo,
+            parsed.tempo,
+            resolution_denom,
+            parsed.title.as_deref(),
+        )
+        .map_err(|e| anyhow!("writer init failed: {e}"))?;
+        // Each column gets serialized as the per-string fret marks. The
+        // writer takes `&[Option<u8>]` — one entry per string, in
+        // tuning order.
+        let mut row: Vec<Option<u8>> = vec![None; string_count];
+        for col in &parsed.columns {
+            row.iter_mut().for_each(|m| *m = None);
+            for (string, fret) in &col.hits {
+                let idx = (*string as usize).saturating_sub(1);
+                if idx < string_count {
+                    row[idx] = Some(*fret);
+                }
+            }
+            w.write_column(&row).map_err(|e| anyhow!("write column: {e}"))?;
+        }
+        w.finalize().map_err(|e| anyhow!("finalize: {e}"))?;
+    }
+    let out_path = out.unwrap_or(path);
+    fs::write(&out_path, buf)
+        .with_context(|| format!("failed to write '{}'", out_path.display()))?;
+    eprintln!("wrote {}", out_path.display());
+    Ok(())
+}
+
+fn validate_column(col: usize, total: usize) -> Result<()> {
+    if col >= total {
+        Err(anyhow!(
+            "column {col} is out of range (file has {total} columns; 0..{total} valid)"
+        ))
+    } else {
+        Ok(())
+    }
+}
+
+fn validate_string(string: u8, total: usize) -> Result<()> {
+    if string == 0 || (string as usize) > total {
+        Err(anyhow!(
+            "string {string} is out of range (tuning has {total} strings; 1..={total} valid)"
+        ))
+    } else {
+        Ok(())
+    }
 }
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -1703,6 +2099,7 @@ fn run_playback(
     loop_spec: Option<String>,
     capo_spec: Option<String>,
     pre_roll: u32,
+    resume_col: Option<u64>,
 ) -> Result<()> {
     // Transpose if --tuning was provided (either explicitly via flag or via
     // the prompt). The transposed tab carries the target tuning's names in
@@ -1889,18 +2286,47 @@ fn run_playback(
         return Ok(());
     }
 
+    // Track the current column outside the inner loops so the
+    // user-initiated stop paths can save a resume bookmark before
+    // returning. Updated on every column tick; the initial value
+    // only matters if we exit before the inner loop even starts
+    // (e.g. degenerate empty range — handled upstream, but defensive).
+    #[allow(unused_assignments)]
+    let mut last_col_idx: usize = loop_start;
+    let mut first_iter = true;
+    let save_bookmark_and_exit = |path: &Path,
+                                  parsed_title: Option<&str>,
+                                  col: usize|
+     -> Result<()> {
+        // Best-effort — bookmark failure shouldn't blow up the stop.
+        if let Err(e) = play_resume::record(path, col as u64, parsed_title.map(|s| s.to_string()))
+        {
+            eprintln!("(couldn't save resume bookmark: {e})");
+        }
+        Ok(())
+    };
     'session: loop {
-        let mut col_idx = loop_start;
+        let mut col_idx = if first_iter {
+            first_iter = false;
+            resume_col
+                .map(|c| (c as usize).min(loop_end.saturating_sub(1)))
+                .unwrap_or(loop_start)
+        } else {
+            loop_start
+        };
         while col_idx < loop_end {
+            last_col_idx = col_idx;
             if twanga_tui::is_shutdown_requested() {
                 eprintln!();
                 eprintln!("Playback stopped.");
+                save_bookmark_and_exit(&path, tab.title.as_deref(), last_col_idx)?;
                 return Ok(());
             }
             if let Ok(input) = stdin_rx.try_recv() {
                 if is_quit_input(&input) {
                     eprintln!();
                     eprintln!("Playback stopped.");
+                    save_bookmark_and_exit(&path, tab.title.as_deref(), last_col_idx)?;
                     return Ok(());
                 }
                 if is_pause_input(&input) {

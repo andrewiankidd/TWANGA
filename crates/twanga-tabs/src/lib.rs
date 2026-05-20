@@ -1245,6 +1245,47 @@ impl TabRecorder {
         }
     }
 
+    /// Pop the most-recently-committed column from the in-progress
+    /// block. Returns the popped marks (one `Option<u8>` per string)
+    /// when there was a column to undo, or `None` if no columns have
+    /// been committed in the current block. Also blanks the in-flight
+    /// `column_marks` so the freshly-popped column starts fresh on
+    /// resume, and resets the sample counter so the next column-tick
+    /// happens after a full duration rather than firing immediately.
+    ///
+    /// Used by `twanga record`'s pause-undo flow (CLI `u + Enter`
+    /// while paused, GUI "Undo last column" button while paused).
+    /// Both surfaces want the same semantics: drop the last column,
+    /// don't replay phantom metronome clicks, let the user play it
+    /// again from scratch.
+    ///
+    /// Note: this only undoes columns from the *current* in-progress
+    /// block. Once a block completes (via the `BlockComplete` event)
+    /// it's been written to disk by the caller's alphaTex writer; the
+    /// recorder no longer has those columns to pop. The caller can
+    /// still display the count went down; rolling back a fully
+    /// finalised block would need a different (writer-level) undo.
+    pub fn undo_last_column(&mut self) -> Option<Vec<Option<u8>>> {
+        // All `completed_columns[s]` rows have the same length — the
+        // commit loop in `advance()` pushes to every string in lockstep.
+        // Use string 0 as the canonical length, but pop from each.
+        if self.completed_columns.first().map(|v| v.len()).unwrap_or(0) == 0 {
+            return None;
+        }
+        let mut popped: Vec<Option<u8>> = Vec::with_capacity(self.completed_columns.len());
+        for col in &mut self.completed_columns {
+            // `col.pop()` returns `Option<Option<u8>>` — the outer
+            // `Option` is the "was there a column" signal (guaranteed
+            // `Some` here by the length check above), the inner is the
+            // mark itself (`Some(fret)` or `None` for "no hit this
+            // string this column").
+            popped.push(col.pop().unwrap_or(None));
+        }
+        self.column_marks.fill(None);
+        self.samples_in_current_column = 0;
+        Some(popped)
+    }
+
     /// Advance internal time. Returns any column ticks and block-completes
     /// that happened during this advance.
     pub fn advance(&mut self, samples: usize) -> Vec<TabEvent> {
@@ -1372,6 +1413,42 @@ mod tests {
         assert_eq!(r.string_index_for_name("A4"), Some(0));
         assert_eq!(r.string_index_for_name("g4 (reentrant)"), Some(3));
         assert_eq!(r.string_index_for_name("nope"), None);
+    }
+
+    #[test]
+    fn recorder_undo_last_column_pops_one_and_returns_marks() {
+        let t = uke();
+        let mut r = TabRecorder::new(&t, 1000, 10, 4);
+        r.record_hit(0, 5);
+        let _ = r.advance(10); // commit col 1 (string 0 = fret 5)
+        r.record_hit(1, 2);
+        let _ = r.advance(10); // commit col 2 (string 1 = fret 2)
+
+        // Undo col 2 — should return [None, Some(2), None, None].
+        let popped = r.undo_last_column().expect("had a column to pop");
+        assert_eq!(popped, vec![None, Some(2), None, None]);
+
+        // Col 1 is still there.
+        // Render and verify by feeding nothing for the next column —
+        // the rendered tab should reflect col 1 (the survivor) plus
+        // the freshly-committed blank column we just produced. The
+        // block isn't full, so the rendered width is current-block-
+        // length (2 cols), not the configured `columns_per_block` (4).
+        let events = r.advance(10); // commit a blank column 2-replacement
+        let last = events.last().unwrap();
+        let rows = rows_of(last);
+        assert_eq!(tab_after(rows, 0), "5-");
+        assert_eq!(tab_after(rows, 1), "--");
+    }
+
+    #[test]
+    fn recorder_undo_last_column_returns_none_when_empty() {
+        let t = uke();
+        let mut r = TabRecorder::new(&t, 1000, 10, 4);
+        assert!(
+            r.undo_last_column().is_none(),
+            "undo on a fresh recorder should be a no-op"
+        );
     }
 
     #[test]

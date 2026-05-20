@@ -24,7 +24,7 @@ Open the deployed app at **[andrewiankidd.github.io/TWANGA/app](https://andrewia
 
 ![TWANGA GUI — main menu](assets/screencaps/gui-menu.png)
 
-Seven screens: **Tuner**, **Recorder**, **Playback**, **Patterns** (curated rhythm + picking drills), **Editor** (post-capture cell-level edits), **Tunings**, **Docs** (per-feature pages embedded in the bundle). Mic capture uses Web Audio + AudioWorklet; pitch detection runs in the same Rust YIN implementation the CLI uses, compiled to WASM. User recordings persist to IndexedDB (with a Download button on every entry so you can back them up to real files), user-defined tunings live in `localStorage` mirroring the CLI's `tunings.toml`.
+Seven screens: **Tuner**, **Recorder**, **Playback**, **Patterns** (curated rhythm + picking drills), **Editor** (post-capture cell-level edits), **Tunings**, **Docs** (per-feature pages embedded in the bundle). All seven have CLI counterparts — the Editor pairs with `twanga edit` (non-interactive cell mutations, scriptable). Mic capture uses Web Audio + AudioWorklet; pitch detection runs in the same Rust YIN implementation the CLI uses, compiled to WASM. User recordings persist to IndexedDB (with a Download button on every entry so you can back them up to real files), user-defined tunings live in `localStorage` mirroring the CLI's `tunings.toml`.
 
 → **Full GUI guide: [docs/GUI.md](docs/GUI.md)**
 
@@ -55,6 +55,7 @@ Commands:
   tune      Live tuner — capture audio and show detected pitch vs the nearest target
   play      Play back a `.alphatex` recording (omit the path for an interactive picker)
   record    Live tab recorder — capture played notes as horizontal ASCII tab notation
+  edit      Edit a tab in place — set / clear cells, insert / delete columns, title, BPM
   devices   List available audio input devices
   convert   Convert a tab file from one format to another
   tunings   Manage user-defined tunings stored at the platform config dir
@@ -84,7 +85,7 @@ Multi-crate Cargo workspace. Each crate has a narrow, deliberately-enforced resp
 | **[twanga-audio](crates/twanga-audio/)** | Realtime audio capture (`InputStream`) and playback (`OutputStream`), wrapping CPAL. ASIO behind the `asio` cargo feature on Windows. |
 | **[twanga-tabs](crates/twanga-tabs/)** | Tab data: live `TabRecorder`, alphaTex serialiser + parser. MusicXML is a future open-standard interop target; proprietary formats (`.gp5`/`.gpx`) are explicit non-goals. |
 | **[twanga-tui](crates/twanga-tui/)** | Terminal UX primitives shared across TWANGA's CLIs — selection menus, refreshing displays, Ctrl-C handling, ANSI colours. |
-| **[twanga-cli](crates/twanga-cli/)** | CLI binary `twanga` — `tune`, `record`, `play`, `patterns`, `tunings`, `docs`, `devices`, `convert` subcommands. |
+| **[twanga-cli](crates/twanga-cli/)** | CLI binary `twanga` — `tune`, `record`, `play`, `edit`, `patterns`, `tunings`, `docs`, `devices`, `convert` subcommands. |
 | **[twanga-bench](crates/twanga-bench/)** | Latency + pitch-detection accuracy benchmarks (placeholder). |
 | **[twanga-app](crates/twanga-app/)** | Tauri 2 desktop shell — hosts the shared [frontend/web/](frontend/web/) bundle (HTML + WASM bindings) in a native window. Same UI as the web build, just wrapped in a Tauri webview. |
 | **[twanga-web](crates/twanga-web/)** | `wasm-bindgen` bridge that exposes `twanga-core` / `twanga-dsp` / `twanga-tabs` to the browser frontend. |

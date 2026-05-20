@@ -14,10 +14,10 @@ For the full shipped-feature inventory + when each landed, see
 | Feature | CLI | GUI | Page |
 |---------|-----|-----|------|
 | **Tuner** — live pitch detection, per-string + chromatic, capo-aware | ✅ | ✅ | [features/tuner.md](features/tuner.md) |
-| **Recorder** — capture played notes as alphaTex, metronome, pre-roll, pause/resume, undo-column | ✅ | ✅ | [features/recorder.md](features/recorder.md) |
-| **Playback** — scroll cursor + metronome + wait mode + loop + transpose (drop or octave-shift) + capo | ✅ | ✅ | [features/playback.md](features/playback.md) |
+| **Recorder** — capture played notes as alphaTex, metronome, pre-roll, pause/resume, undo-column | ✅ (`u + Enter` undo) | ✅ (button) | [features/recorder.md](features/recorder.md) |
+| **Playback** — scroll cursor + metronome + wait mode + loop + transpose (drop or octave-shift) + capo + resume bookmarks | ✅ | ✅ | [features/playback.md](features/playback.md) |
 | **Patterns** — bundled rhythm + picking drills (10 across 4 groups), tree-of-difficulty | ✅ | ✅ | [features/patterns.md](features/patterns.md) |
-| **Tab editor** — post-capture cell-level edits, save back in place | (GUI-only — intentional) | ✅ | [features/editor.md](features/editor.md) |
+| **Tab editor** — cell-level edits, column insert / delete / clear, title + BPM | ✅ (`twanga edit`, scriptable) | ✅ (interactive grid) | [features/editor.md](features/editor.md) |
 | **Tunings** — built-in + user-defined registry, add/remove/list | ✅ | ✅ | [features/tunings.md](features/tunings.md) |
 | **Docs** — per-feature pages embedded in the binary / bundled with the web app | ✅ (`twanga docs`) | ✅ (`#docs`) | [features/](features/) |
 

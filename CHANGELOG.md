@@ -10,6 +10,37 @@ dated section.
 
 ### Added
 
+- **Closes the last three CLI ↔ GUI parity gaps.** Three GUI polish
+  items that had shipped without CLI counterparts now have full
+  parity:
+  - **Recorder: `u + Enter` while paused** undoes the last
+    committed column. Mirror of the GUI's "Undo last column"
+    button. Backed by a new `TabRecorder::undo_last_column()`
+    method in `twanga-tabs` (two cargo tests covering happy path
+    + empty-recorder no-op).
+  - **Playback: per-file resume bookmarks.** On any user-
+    initiated stop, `twanga play` saves the file path + current
+    column + title + timestamp to
+    `$CONFIG/twanga/play-resume.toml` (mirror of the GUI's
+    `localStorage` resume map). Next time you load the same
+    file, a `Y/n` prompt offers to resume at the saved column.
+    New `--resume` / `--no-resume` flags skip the prompt in
+    scripts. Stale bookmarks (saved column past the file's
+    current length) are cleared silently. New `play_resume`
+    module with 5 cargo tests.
+  - **`twanga edit <path> <action>`** — non-interactive
+    counterpart to the GUI Editor screen. Actions: `set`,
+    `clear`, `clear-col`, `insert-col [--after N]`,
+    `delete-col`, `title`, `bpm`. Each invocation applies one
+    mutation and writes back in place (or to `--out <path>`).
+    Round-trips through the same `AlphaTexWriter` path the
+    Recorder uses on save, including capo + subtitle
+    preservation. Scriptable: chain multiple edits in a shell.
+
+  The "GUI-only by design" note for the Editor is gone — it now
+  has a scriptable CLI counterpart. Tab editor is no longer in
+  the "intentional asymmetry" bucket.
+
 - **`twanga patterns` subcommand + bare-`twanga play` picker.**
   CLI mirror of the GUI's Patterns screen + Playback library list.
   See squashed commit message.

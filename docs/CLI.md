@@ -41,7 +41,7 @@ counterpart in one place.
 | Recorder | `twanga record` | [features/recorder.md](features/recorder.md) |
 | Playback | `twanga play [path]` | [features/playback.md](features/playback.md) |
 | Patterns | `twanga patterns <list\|play\|path>` | [features/patterns.md](features/patterns.md) |
-| Tab editor | (GUI only — see scope) | [features/editor.md](features/editor.md) |
+| Tab editor | `twanga edit <path> <set\|clear\|clear-col\|insert-col\|delete-col\|title\|bpm>` | [features/editor.md](features/editor.md) |
 | Tunings | `twanga tunings <list\|path\|add\|remove>` | [features/tunings.md](features/tunings.md) |
 | Docs | `twanga docs [feature]` | The per-feature pages above, printed to stdout for `glow` / `mdcat` / `bat -l md`. |
 

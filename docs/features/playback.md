@@ -34,6 +34,8 @@ library the GUI's Playback screen shows. The picker prefixes each row with
 | `--loop` | Loop the entire file continuously. |
 | `--loop <START:END>` | Loop a column range (0-indexed, end exclusive). |
 | `--pre-roll <N>` | Audible count-in ticks before playback starts (0–16). Default 4. |
+| `--resume` | Auto-accept the saved bookmark for this file (if any) and jump to that column without the interactive prompt. Mirrors the GUI's "Resume" banner button. |
+| `--no-resume` | Auto-decline any saved bookmark. Useful in scripts where you want a predictable start from column 0 regardless of history. |
 
 Examples:
 
@@ -55,6 +57,16 @@ twanga play assets/examples/cripple-creek-banjo.alphatex \
 
 Controls during playback: `q + Enter` or Ctrl-C stops, `p + Enter` toggles
 pause/resume.
+
+**Last-session resume.** On any user-initiated stop, the CLI saves a
+bookmark (the file's path + the current column + a `when` timestamp) to
+`$CONFIG/twanga/play-resume.toml`. The next time you `twanga play` the
+same file, you're prompted to resume from that column (`Y/n`, default
+yes). Stale bookmarks pointing past the file's current length are
+silently cleared. Naturally-finished plays don't save a bookmark.
+Scripts can pass `--resume` (auto-accept) or `--no-resume` (auto-decline)
+to skip the prompt. Same shape as the GUI's resume banner, just per-file
+rather than most-recent-only.
 
 ## GUI
 
