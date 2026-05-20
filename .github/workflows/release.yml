@@ -541,7 +541,7 @@ jobs:
           merge-multiple: true
 
       - name: 📦 Create draft release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ steps.meta.outputs.tag }}
           name: TWANGA ${{ steps.meta.outputs.tag }}
@@ -571,7 +571,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
         run: |
-          # softprops/action-gh-release@v2 updates the release in place
+          # softprops/action-gh-release@v3 updates the release in place
           # when the tag already exists, but it does NOT move the git tag
           # itself to the new commit. Easiest correct semantics: delete
           # the release + tag, then recreate against the current commit.
@@ -580,7 +580,7 @@ jobs:
           gh release delete latest-main --yes --cleanup-tag --repo "${{ github.repository }}" || true
 
       - name: 🔄 Publish rolling latest-main release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: latest-main
           name: 'Latest main build'
