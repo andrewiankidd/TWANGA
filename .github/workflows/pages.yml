@@ -78,6 +78,18 @@ jobs:
           ls -lh frontend/web/assets/examples/
           ls -lh frontend/web/assets/patterns/
 
+      # Per-feature docs (docs/features/*.md) are the source of truth for
+      # both the in-app docs viewer (`#docs/<slug>`) and the CLI's
+      # `twanga docs <slug>` subcommand. The viewer fetches them via
+      # `assets/docs/<slug>.md` relative to the deploy root, so copy
+      # them into the bundle here. The CLI embeds the same files
+      # directly via `include_str!` at build time.
+      - name: Bundle per-feature docs into the site
+        run: |
+          mkdir -p frontend/web/assets/docs
+          cp docs/features/*.md frontend/web/assets/docs/
+          ls -lh frontend/web/assets/docs/
+
       - uses: actions/configure-pages@v5
 
       - name: Upload site artifact

@@ -164,6 +164,15 @@ enum Command {
         #[command(subcommand)]
         action: TuningsAction,
     },
+    /// Print the per-feature documentation embedded in the binary. With no
+    /// argument, lists the available pages. Markdown is printed raw to
+    /// stdout; pipe through `glow`, `mdcat`, or `bat -l md` for rendering.
+    Docs {
+        /// Feature slug — one of `tuner`, `recorder`, `playback`,
+        /// `patterns`, `editor`, `tunings`. Omit to list the available
+        /// pages.
+        feature: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -1256,7 +1265,83 @@ fn main() -> Result<()> {
             TuningsAction::Add => run_tunings_add()?,
             TuningsAction::Remove { slug, force } => run_tunings_remove(slug, force)?,
         },
+        Command::Docs { feature } => run_docs(feature)?,
     }
+    Ok(())
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Docs
+// ──────────────────────────────────────────────────────────────────────────
+//
+// Per-feature documentation embedded in the binary via `include_str!`. The
+// same markdown files are bundled into the deployed web app at
+// `assets/docs/<slug>.md` (CI step in `.github/workflows/pages.yml`) and
+// rendered by the SPA's docs viewer (`#docs/<slug>`). Single source of
+// truth: `docs/features/*.md` at the repo root.
+//
+// Rendering is intentionally not done here. Terminals vary in markdown
+// support and we'd be reinventing `glow` / `mdcat` / `bat` poorly.
+// Print the raw markdown to stdout; users who want fancy rendering pipe
+// it through their tool of choice.
+
+const DOC_TUNER: &str = include_str!("../../../docs/features/tuner.md");
+const DOC_RECORDER: &str = include_str!("../../../docs/features/recorder.md");
+const DOC_PLAYBACK: &str = include_str!("../../../docs/features/playback.md");
+const DOC_PATTERNS: &str = include_str!("../../../docs/features/patterns.md");
+const DOC_EDITOR: &str = include_str!("../../../docs/features/editor.md");
+const DOC_TUNINGS: &str = include_str!("../../../docs/features/tunings.md");
+
+/// Slug → embedded markdown body. Order here is the listing order shown
+/// to the user when they run `twanga docs` with no arg.
+const DOCS_PAGES: &[(&str, &str, &str)] = &[
+    ("tuner", "Live pitch detection vs your chosen tuning.", DOC_TUNER),
+    ("recorder", "Capture played notes as an alphaTex tab.", DOC_RECORDER),
+    ("playback", "Play a tab with metronome, wait, loop, transpose.", DOC_PLAYBACK),
+    ("patterns", "Bundled rhythm + picking drills.", DOC_PATTERNS),
+    ("editor", "Post-capture cell-level edits to recordings.", DOC_EDITOR),
+    ("tunings", "Built-in + user-defined tuning registry.", DOC_TUNINGS),
+];
+
+/// Pure helper: format the listing shown by `twanga docs` (no arg).
+/// Extracted so tests don't have to capture stdout. The `run_docs`
+/// wrapper handles the println side-effect.
+fn docs_listing_text() -> String {
+    let mut out = String::new();
+    out.push_str("Per-feature documentation embedded in this binary.\n\n");
+    out.push_str("Usage: twanga docs <feature>\n\n");
+    out.push_str("Available pages:\n");
+    for (slug, blurb, _) in DOCS_PAGES {
+        out.push_str(&format!("  {slug:<10} {blurb}\n"));
+    }
+    out.push_str("\nMarkdown is printed raw to stdout. Pipe through your\n");
+    out.push_str("renderer of choice for prettier output, e.g.:\n");
+    out.push_str("  twanga docs playback | glow -\n");
+    out.push_str("  twanga docs playback | bat -l md\n");
+    out
+}
+
+/// Pure helper: look up the embedded markdown body for `slug`. Returns
+/// `Err` with a human-readable message when no page matches (so the
+/// surface error in `run_docs` and any future programmatic consumer
+/// produce the same text).
+fn docs_page_text(slug: &str) -> Result<&'static str> {
+    let normalised = slug.to_lowercase();
+    DOCS_PAGES
+        .iter()
+        .find(|(s, _, _)| *s == normalised)
+        .map(|(_, _, body)| *body)
+        .ok_or_else(|| {
+            anyhow!("unknown docs page '{slug}' — try `twanga docs` for the list")
+        })
+}
+
+fn run_docs(feature: Option<String>) -> Result<()> {
+    let Some(slug) = feature else {
+        print!("{}", docs_listing_text());
+        return Ok(());
+    };
+    print!("{}", docs_page_text(&slug)?);
     Ok(())
 }
 
@@ -1796,5 +1881,84 @@ mod slug_tests {
         assert!(validate_slug("-leading").is_err());
         assert!(validate_slug("trailing-").is_err());
         assert!(validate_slug("").is_err());
+    }
+}
+
+#[cfg(test)]
+mod docs_tests {
+    use super::*;
+
+    /// `include_str!` guarantees the files exist at compile time, but
+    /// nothing stops a future hand-edit from accidentally truncating
+    /// one to zero bytes. Pin "every page has content + a top-level H1".
+    #[test]
+    fn every_embedded_page_is_non_empty_with_h1() {
+        for (slug, blurb, body) in DOCS_PAGES {
+            assert!(!body.is_empty(), "embedded doc '{slug}' is empty");
+            assert!(!blurb.is_empty(), "blurb for '{slug}' is empty");
+            assert!(
+                body.starts_with("# "),
+                "embedded doc '{slug}' must start with an H1, got: {:?}",
+                &body[..body.len().min(40)]
+            );
+        }
+    }
+
+    #[test]
+    fn slugs_are_unique() {
+        let mut seen: std::collections::HashSet<&str> = std::collections::HashSet::new();
+        for (slug, _, _) in DOCS_PAGES {
+            assert!(seen.insert(slug), "duplicate doc slug: {slug}");
+        }
+    }
+
+    #[test]
+    fn docs_page_text_returns_body_for_known_slug() {
+        let body = docs_page_text("tuner").expect("tuner page lookup");
+        assert!(body.contains("# Tuner"));
+    }
+
+    #[test]
+    fn docs_page_text_is_case_insensitive() {
+        // CLI users sometimes type `Tuner` or `TUNER`. Mirror the
+        // behaviour `run_docs` exposes via `to_lowercase()`.
+        assert!(docs_page_text("TUNER").is_ok());
+        assert!(docs_page_text("Recorder").is_ok());
+    }
+
+    #[test]
+    fn docs_page_text_errors_on_unknown_slug() {
+        let err = docs_page_text("not-a-feature").expect_err("should error");
+        let msg = err.to_string();
+        assert!(msg.contains("not-a-feature"), "unexpected message: {msg}");
+        assert!(msg.contains("twanga docs"), "should hint at the listing: {msg}");
+    }
+
+    #[test]
+    fn docs_listing_text_includes_every_slug() {
+        let listing = docs_listing_text();
+        for (slug, _, _) in DOCS_PAGES {
+            assert!(
+                listing.contains(slug),
+                "listing missing slug '{slug}': {listing}"
+            );
+        }
+    }
+
+    /// The GUI's `DOCS_FEATURES` array in `frontend/web/app.html` mirrors
+    /// the slugs here — they have to stay in sync or `twanga docs` and
+    /// the web docs viewer drift apart. We can't import JS into the
+    /// Rust test, but we can at least pin the expected slug set; any
+    /// change here is a deliberate sync point with the JS side.
+    #[test]
+    fn slug_set_matches_expected_features() {
+        let expected = ["tuner", "recorder", "playback", "patterns", "editor", "tunings"];
+        let actual: Vec<&str> = DOCS_PAGES.iter().map(|(s, _, _)| *s).collect();
+        assert_eq!(
+            actual, expected,
+            "if you add/remove a feature, update both DOCS_PAGES \
+             (Rust, here) and DOCS_FEATURES (JS, frontend/web/app.html) \
+             and the bundle copy in `.github/workflows/pages.yml`",
+        );
     }
 }

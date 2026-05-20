@@ -1294,6 +1294,110 @@
             font-style: italic;
         }
 
+        /* Docs screen — feature-page markdown rendered inline. Plain
+           document styling so it reads like docs, not like the rest of
+           the app's controls. Code blocks + tables get visible borders. */
+        .docs-view {
+            color: var(--primary);
+            line-height: 1.55;
+            font-size: 0.95rem;
+        }
+        .docs-view h1 { font-size: 1.6rem; margin: 0 0 0.6rem; color: var(--highlight); }
+        .docs-view h2 { font-size: 1.2rem; margin: 1.5rem 0 0.5rem; color: var(--highlight); border-bottom: 1px solid var(--border); padding-bottom: 0.2rem; }
+        .docs-view h3 { font-size: 1.05rem; margin: 1.1rem 0 0.4rem; color: var(--primary); }
+        .docs-view p, .docs-view ul, .docs-view ol { margin: 0 0 0.8rem; }
+        .docs-view ul, .docs-view ol { padding-left: 1.6rem; }
+        .docs-view li { margin: 0.15rem 0; }
+        .docs-view a { color: var(--highlight); text-decoration: none; }
+        .docs-view a:hover { text-decoration: underline; }
+        .docs-view code {
+            background: var(--background);
+            border: 1px solid var(--border);
+            border-radius: 3px;
+            padding: 0 0.3em;
+            font-family: monospace;
+            font-size: 0.88em;
+        }
+        .docs-view pre {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 0.8rem 1rem;
+            overflow-x: auto;
+            margin: 0 0 0.8rem;
+        }
+        .docs-view pre code {
+            background: transparent;
+            border: none;
+            padding: 0;
+            font-size: 0.85rem;
+        }
+        .docs-view table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 0 0 0.8rem;
+            font-size: 0.88rem;
+        }
+        .docs-view th, .docs-view td {
+            border: 1px solid var(--border);
+            padding: 0.4rem 0.6rem;
+            text-align: left;
+            vertical-align: top;
+        }
+        .docs-view th {
+            background: var(--card);
+            color: var(--highlight);
+            font-weight: 700;
+        }
+        .docs-view blockquote {
+            border-left: 3px solid var(--highlight);
+            padding-left: 0.8rem;
+            color: var(--muted);
+            margin: 0 0 0.8rem;
+        }
+        .docs-view strong { color: var(--primary); }
+        .docs-view img { max-width: 100%; height: auto; border-radius: 4px; }
+        .docs-feature-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 0.7rem;
+            margin: 1.2rem 0;
+        }
+        .docs-feature-card {
+            display: block;
+            padding: 0.8rem 1rem;
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            color: var(--primary);
+            text-decoration: none;
+            transition: border-color 0.15s ease, transform 0.15s ease;
+        }
+        .docs-feature-card:hover {
+            border-color: var(--highlight);
+            transform: translateY(-1px);
+        }
+        .docs-feature-card .name {
+            font-weight: 700;
+            color: var(--highlight);
+            font-size: 1rem;
+            display: block;
+            margin-bottom: 0.2rem;
+        }
+        .docs-feature-card .blurb {
+            color: var(--muted);
+            font-size: 0.82rem;
+            line-height: 1.35;
+        }
+        .docs-error {
+            background: var(--card);
+            border: 1px solid var(--err);
+            border-left-width: 3px;
+            border-radius: var(--radius);
+            padding: 1rem 1.2rem;
+            color: var(--err);
+        }
+
         footer {
             position: fixed;
             bottom: 0;
@@ -1360,6 +1464,10 @@
                 <button class="menu-btn" data-screen="tunings">
                     <span class="title">Tunings</span>
                     <span class="desc">Built-in presets + your own custom tunings</span>
+                </button>
+                <button class="menu-btn" data-screen="docs">
+                    <span class="title">Docs</span>
+                    <span class="desc">Per-feature guides, embedded in the app</span>
                 </button>
             </div>
         </section>
@@ -1822,6 +1930,21 @@
                 <div class="form-ok" id="editor-ok" hidden></div>
             </div>
         </section>
+
+        <!-- Docs screen — fetches per-feature markdown from
+             `assets/docs/<slug>.md` and renders it inline. Same bundle
+             serves the deployed web build AND the Tauri shell, so the
+             docs version is always pinned to whatever the app was
+             built with. Routes:
+                #docs           → feature index
+                #docs/<slug>    → that feature's page  -->
+        <section id="screen-docs" class="screen">
+            <div class="back-row">
+                <button class="back-btn" data-back>← Menu</button>
+                <button class="back-btn" id="docs-index-btn" hidden>← All docs</button>
+            </div>
+            <article class="docs-view" id="docs-view"></article>
+        </section>
     </main>
 
     <footer>
@@ -1886,6 +2009,7 @@
         } from './controllers/tuning.js';
         import { makeMicMeter } from './controllers/mic-meter.js';
         import * as library from './lib/library.js';
+        import { renderMarkdown } from './lib/markdown.js';
 
         function el(id) { return document.getElementById(id); }
 
@@ -1905,6 +2029,15 @@
 
         function routeFromHash() {
             const hash = location.hash.replace(/^#/, '');
+            // Docs is two-level: `docs` lands on the feature index,
+            // `docs/<slug>` renders that feature's page. Show the docs
+            // screen first then dispatch the loader.
+            if (hash === 'docs' || hash.startsWith('docs/')) {
+                show('docs');
+                const slug = hash === 'docs' ? '' : hash.slice('docs/'.length);
+                docsLoad(slug);
+                return;
+            }
             show(hash || 'menu');
         }
 
@@ -2066,6 +2199,14 @@
             // strumming drills. Loads on demand; clicking Practice
             // hands off to the Playback engine with loop=full preset.
             initPatterns();
+
+            // Docs screen — fetches per-feature markdown from
+            // `assets/docs/<slug>.md` and renders inline. The
+            // hash router (#docs / #docs/<slug>) lights it up;
+            // here we just wire the "All docs" back button.
+            el('docs-index-btn').addEventListener('click', () => {
+                location.hash = '#docs';
+            });
 
             // Menu navigation.
             document.querySelectorAll('[data-screen]').forEach((btn) => {
@@ -4895,6 +5036,143 @@
             dirty: false,
             renderer: null,         // active Tab renderer instance (interactive: true)
         };
+
+        // ----------------------------------------------------------------
+        // DOCS (per-feature markdown rendered inline)
+        // ----------------------------------------------------------------
+        //
+        // Markdown files live at `assets/docs/<slug>.md` in the deployed
+        // bundle (CI copies them from `docs/features/` on every deploy).
+        // No-arg `#docs` renders an index of feature cards; `#docs/<slug>`
+        // fetches + renders that file via `renderMarkdown`.
+        //
+        // Same bundle works web + Tauri (file://) because the fetch path
+        // is relative — no special-case for desktop.
+
+        const DOCS_FEATURES = [
+            { slug: 'tuner', name: 'Tuner', blurb: 'Live pitch detection vs your chosen tuning.' },
+            { slug: 'recorder', name: 'Recorder', blurb: 'Capture played notes as an alphaTex tab.' },
+            { slug: 'playback', name: 'Playback', blurb: 'Play a tab with metronome, wait, loop, transpose.' },
+            { slug: 'patterns', name: 'Patterns', blurb: 'Bundled rhythm + picking drills.' },
+            { slug: 'editor', name: 'Tab editor', blurb: 'Post-capture cell-level edits to recordings.' },
+            { slug: 'tunings', name: 'Tunings', blurb: 'Built-in + user-defined tuning registry.' },
+        ];
+
+        // Module-level cache so navigating back + forth doesn't refetch.
+        const _docsCache = new Map();
+
+        async function _fetchDoc(slug) {
+            if (_docsCache.has(slug)) return _docsCache.get(slug);
+            const url = `assets/docs/${encodeURIComponent(slug)}.md`;
+            const r = await fetch(url, { cache: 'force-cache' });
+            if (!r.ok) throw new Error(`HTTP ${r.status}`);
+            const text = await r.text();
+            _docsCache.set(slug, text);
+            return text;
+        }
+
+        async function docsLoad(slug) {
+            const view = el('docs-view');
+            const backBtn = el('docs-index-btn');
+            if (!slug) {
+                backBtn.hidden = true;
+                view.innerHTML = _docsIndexHtml();
+                return;
+            }
+            backBtn.hidden = false;
+            // Validate the slug is one we ship to avoid attempting a
+            // fetch on user-typed garbage in the hash.
+            if (!DOCS_FEATURES.some((f) => f.slug === slug)) {
+                view.innerHTML = `<div class="docs-error">Unknown docs page: <code>${escapeHtmlText(slug)}</code>. <a href="#docs">Back to all docs</a>.</div>`;
+                return;
+            }
+            view.innerHTML = `<p class="docs-loading">Loading…</p>`;
+            try {
+                const md = await _fetchDoc(slug);
+                view.innerHTML = renderMarkdown(md);
+                // Rewrite relative links between feature pages so they
+                // route through the SPA's hash router instead of trying
+                // to load a `.md` file directly (which works on GH
+                // Pages with raw markdown but not inside the app shell).
+                _rewriteDocsLinks(view, slug);
+            } catch (e) {
+                view.innerHTML = `<div class="docs-error">Failed to load "${escapeHtmlText(slug)}": ${escapeHtmlText(String(e?.message ?? e))}</div>`;
+            }
+        }
+
+        function _docsIndexHtml() {
+            const cards = DOCS_FEATURES.map((f) =>
+                `<a class="docs-feature-card" href="#docs/${f.slug}">`
+                + `<span class="name">${escapeHtmlText(f.name)}</span>`
+                + `<span class="blurb">${escapeHtmlText(f.blurb)}</span>`
+                + `</a>`
+            ).join('');
+            return `<h1>Docs</h1>`
+                + `<p>Per-feature guides — each one covers both the CLI and GUI surfaces side by side. `
+                + `Feature parity is a project invariant; the docs mirror it.</p>`
+                + `<div class="docs-feature-grid">${cards}</div>`
+                + `<p>Higher-level overviews live in `
+                + `<a href="https://github.com/andrewiankidd/TWANGA/blob/main/docs/CLI.md">CLI.md</a> and `
+                + `<a href="https://github.com/andrewiankidd/TWANGA/blob/main/docs/GUI.md">GUI.md</a>. `
+                + `Full per-flag reference: `
+                + `<a href="https://github.com/andrewiankidd/TWANGA/blob/main/crates/twanga-cli/README.md">twanga-cli README</a>.</p>`;
+        }
+
+        /// Rewrite cross-page links so they route through the SPA hash
+        /// router. Source markdown uses paths like `tuner.md` (within
+        /// `docs/features/`) or `../ROADMAP.md` (up to `docs/`). Inside
+        /// the app shell, those should become `#docs/tuner` for known
+        /// features, or fall through to a GitHub URL for everything
+        /// else (so external refs still resolve).
+        function _rewriteDocsLinks(viewEl, currentSlug) {
+            const slugs = new Set(DOCS_FEATURES.map((f) => f.slug));
+            for (const a of viewEl.querySelectorAll('a[href]')) {
+                const href = a.getAttribute('href');
+                if (!href) continue;
+                // Already a hash link — let it through.
+                if (href.startsWith('#')) continue;
+                // Absolute URL — let it through.
+                if (/^https?:\/\//i.test(href)) {
+                    a.target = '_blank';
+                    a.rel = 'noopener';
+                    continue;
+                }
+                // Sibling feature page e.g. `tuner.md` or `playback.md`.
+                const sibling = href.match(/^([\w-]+)\.md(#.*)?$/);
+                if (sibling && slugs.has(sibling[1])) {
+                    a.setAttribute('href', `#docs/${sibling[1]}${sibling[2] ?? ''}`);
+                    continue;
+                }
+                // Anything else points outside the features dir
+                // (e.g. ../ROADMAP.md, ../../crates/twanga-cli/README.md).
+                // Send it to GitHub so the link still works.
+                const cleaned = href.replace(/^(\.\.\/)+/, '');
+                a.setAttribute(
+                    'href',
+                    `https://github.com/andrewiankidd/TWANGA/blob/main/docs/features/${href}`.replace(
+                        /docs\/features\/\.\.\//, 'docs/'
+                    ).replace(/docs\/\.\.\//, '')
+                );
+                // The naive concat above doesn't always come out clean;
+                // for the common `../X.md` case we want
+                // `https://.../main/docs/X.md`. Override that explicitly:
+                if (href.startsWith('../')) {
+                    a.setAttribute(
+                        'href',
+                        `https://github.com/andrewiankidd/TWANGA/blob/main/docs/${cleaned}`
+                    );
+                }
+                a.target = '_blank';
+                a.rel = 'noopener';
+            }
+        }
+
+        function escapeHtmlText(s) {
+            return String(s)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;');
+        }
 
         function initEditor() {
             renderEditorLibrary();

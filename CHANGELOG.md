@@ -14,6 +14,36 @@ dated section.
   alternating-thumb rolls, guitar boom-chick + Travis). See the
   squashed commit message.
 
+- **Tests for the docs system.** 7 Rust tests + 25 Node tests
+  covering the markdown renderer + docs slug sync point. See
+  squashed commit message.
+
+- **Per-feature docs (Tuner / Recorder / Playback / Patterns / Editor
+  / Tunings), embedded on all three surfaces.** New
+  [`docs/features/*.md`](docs/features/) is the single source of
+  truth; each page covers CLI + GUI side by side so the
+  feature-parity invariant is enforced by the docs structure too.
+
+  - **GUI**: new `#docs` / `#docs/<feature>` routes in the SPA, with
+    a hand-rolled markdown renderer at
+    [`frontend/web/lib/markdown.js`](frontend/web/lib/markdown.js).
+    CI copies `docs/features/*.md` into `frontend/web/assets/docs/`
+    on every deploy, so the same bundle serves the web build (GH
+    Pages) and the Tauri shell (file://) — no separate docs site,
+    docs version always pinned to the app version. Main menu has a
+    new **Docs** card.
+  - **CLI**: new `twanga docs [<feature>]` subcommand. Markdown
+    bodies are `include_str!`'d at build time. No-arg lists the
+    available pages; `twanga docs playback` prints the raw
+    markdown to stdout. Pipe through `glow` / `mdcat` / `bat -l md`
+    for fancy rendering.
+  - **Landing page**: the previously-broken `docs.html` /
+    `changelog.html` nav links now deeplink to `app.html#docs`
+    and the repo's `CHANGELOG.md`.
+  - **Existing hubs slimmed**: [`docs/CLI.md`](docs/CLI.md) and
+    [`docs/GUI.md`](docs/GUI.md) become short overviews that point
+    into the per-feature pages; full content moved out so there's
+    no duplication.
 
 - **Pattern trainer screen — first cut.** New `#patterns` screen
   with a curated, tree-organised browser of bundled rhythm /

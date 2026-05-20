@@ -1,0 +1,119 @@
+# Playback
+
+Load an `.alphatex` tab, scroll a cursor through it at tempo with optional
+metronome. Wait mode pauses at each note until you play it. Loop a section or
+the whole file. Transpose onto a different instrument with the same alphaTex
+parser used everywhere else.
+
+## CLI — `twanga play <path>`
+
+```bash
+twanga play assets/examples/twinkle-twinkle-uke.alphatex --bpm 60 --wait
+```
+
+The audio loop is gated by either time (default) or detected input
+(`--wait`). In wait mode the cursor pauses on each note until the mic detects
+a matching pitch (±50 cents on any expected string/fret). Rests still advance
+with time so the metronome stays musical.
+
+| Flag | Description |
+|------|-------------|
+| `path` (positional) | Path to a `.alphatex` file. |
+| `--tuning <slug>` | Re-tune the tab to a different instrument. Notes are transposed by absolute pitch. |
+| `--transpose-mode <drop\|octave-shift>` | What to do with notes that don't fit on the target tuning. `drop` (default) silently omits them and reports a "Skipped:" pre-flight summary. `octave-shift` retries each unreachable note at ±12-semitone offsets before giving up — the standard TuxGuitar / MuseScore convention. Particularly relevant for banjo→ukulele where bass drones would otherwise vanish. |
+| `--capo <spec>` | Capo applied to the tab's tuning. Precedence: `--capo` wins; otherwise falls back to whatever the file embedded in its `\subtitle` field. |
+| `--bpm <N>` | Override the tempo from the file. |
+| `--no-metronome` | Silence the click (default is on). |
+| `--wait` | Practice mode — cursor pauses at each note until you play it. |
+| `--loop` | Loop the entire file continuously. |
+| `--loop <START:END>` | Loop a column range (0-indexed, end exclusive). |
+| `--pre-roll <N>` | Audible count-in ticks before playback starts (0–16). Default 4. |
+
+Examples:
+
+```bash
+# Play the uke arrangement on uke
+twanga play assets/examples/twinkle-twinkle-uke.alphatex --bpm 60 --wait
+
+# Transpose it to banjo, loop the first phrase
+twanga play assets/examples/twinkle-twinkle-uke.alphatex \
+    --tuning standard-banjo --bpm 70 --loop 0:16
+
+# Same arrangement, with a capo on fret 3
+twanga play assets/examples/twinkle-twinkle-uke.alphatex --capo 3
+
+# Banjo tab on uke, octave-shifting bass drones up so they don't vanish
+twanga play assets/examples/cripple-creek-banjo.alphatex \
+    --tuning standard-ukulele --transpose-mode octave-shift
+```
+
+Controls during playback: `q + Enter` or Ctrl-C stops, `p + Enter` toggles
+pause/resume.
+
+## GUI
+
+Open the Playback card from the main menu (or `#playback`).
+
+The screen has two views: a **library list** until a tab is loaded, then a
+**per-tab playback view** with transport + settings.
+
+### Library view
+
+- **Tab rows** — bundled examples first, then user recordings (newest
+  first). Each row shows the title, the tuning/instrument subtitle, and a
+  source tag. User rows have Download + Delete; bundled rows are
+  read-only.
+- **Drop zone** — drag a `.alphatex` file (or click Choose file) to
+  import.
+- **Last-session resume banner** — appears above the library when there's
+  a saved position. **Resume** loads that tab and starts at the saved
+  column; **Dismiss** clears the bookmark.
+
+### Per-tab playback view
+
+- **Tuning picker + capo** — same shared controller as Tuner / Recorder.
+  Lets you transpose the loaded tab onto a different instrument before
+  playing. Tab's original tuning is pre-selected after load (via
+  registry name-matching).
+- **Transpose mode** — dropdown next to the tuning picker:
+  - `drop` — historical behaviour; notes that don't fit on the target
+    are silently omitted and listed in the "Skipped:" preamble.
+  - `octave-shift` — notes are retried at ±12 semitones before being
+    dropped. Recommended for cross-instrument plays (e.g.
+    banjo → ukulele clawhammer drones).
+- **BPM** — number stepper. Reset button restores the file's stored
+  tempo.
+- **Loop** — dropdown with `off` / `full` / `range…`. `range…` reveals
+  start + end column inputs. Equivalent to the CLI's `--loop` flag.
+- **Pre-roll / metronome toggle / wait toggle** — same controls as the
+  Recorder. Wait mode opens the mic, shows the same mic-level meter the
+  Recorder uses.
+- **Renderer picker** — Tab or Highway view.
+- **Play / Pause / Stop** — spacebar shortcut for pause/resume. Pause
+  pressed during wait closes out the wait segment so resume doesn't
+  double-count time.
+- **Skipped notes preamble** — surfaces up to 8 unique note names that
+  didn't fit on the target tuning, plus the total count.
+
+Saved position (per-tab last column played) lives in `localStorage`
+under `twanga-playback-resume-v1`. Bookmark writes happen on Stop and on
+Back-to-library. "Finished" stops don't save (replaying from the end is
+useless).
+
+## Where things live
+
+- **CLI** — reads any `.alphatex` you can hand it via the path
+  argument. Bundled examples live at `assets/examples/`.
+- **GUI** — same bundled examples (shipped via
+  `assets/examples/manifest.json`) merged with user recordings in
+  IndexedDB. Drop-zone imports also go to IDB.
+
+## See also
+
+- [Recorder feature](recorder.md) — where most user-recordings come
+  from.
+- [Tab editor feature](editor.md) — fix up recordings cell-by-cell;
+  the resulting file lands back in the same library.
+- [Transpose mode trade-offs](../BACKLOG.md) — the "drop vs
+  octave-shift" decision history.
+- [CLI overview](../CLI.md) · [GUI overview](../GUI.md).
