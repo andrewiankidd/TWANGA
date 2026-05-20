@@ -54,6 +54,36 @@ The Tauri shell hosts the same `frontend/web/` bundle in a native window. Filesy
 - **Filesystem-watch-driven cross-process sync.** Today the GUI bootstraps user tunings from `tunings.toml` on startup and write-throughs on every save, but doesn't notice if the CLI mutates the file while the GUI is running. A `notify`-crate watcher + a Tauri event would close that gap. Same idea for the recordings dir (Playback library refresh on external file add). Not high-priority — desktop users tend to be in one app at a time and a manual refresh works.
 - **Browser-storage warning banner under Tauri.** Already CSS-hidden via the `body.is-tauri` class (because the filesystem doesn't evict). Verify it stays hidden as the GUI evolves.
 
+## Web feature parity
+
+The web build isn't a "tuner demo only" tier — full feature parity is the goal, accepting that browser latency and audio quality are inferior to native. **Limited and inferior is acceptable; absent is not.**
+
+- **All features available in the browser.** Tuner, Recorder, Playback, Library, transposing — everything ships to web. Wait-mode tolerance is wider; that's the only honest compromise.
+- **Calibration-driven tolerance** rather than device-class heuristics. See the Latency calibration wizard entry below — same approach works on every surface, just with looser default tolerances on web until calibration runs.
+- **Quick mode vs precise mode labelling.** App detects which class via calibration, surfaces it in the UI honestly (see the Latency calibration wizard entry for the per-mode tolerance bands). Honest > pretending the experience is identical across hardware.
+
+## Setup diagnostic mode
+
+Walks users through verifying their instrument is actually playable before practice. Most beginners fail because the instrument is undermining them and they can't tell. Author profile: two years of struggle on a banjo with the bridge an inch out of position before noticing. This is the kind of thing TWANGA is uniquely placed to help with — a learning tool that includes the parts of "learning" other tools assume you already know.
+
+- **Bridge position check.** Compare 12th-fret fretted note to the open string an octave up. Report direction + magnitude of any error in plain language: "Bridge needs to move 3mm toward the tail" (with "12th fret +18 cents on D" alongside as the technical version — see Cross-cutting principles → Two-tier output below).
+- **Bridge intonation per string.** Loop the check across all strings. If different strings want the bridge in different positions, recommend a bridge angle.
+- **Head tension check (banjo).** User taps the head with a hard object (pencil, plectrum); app analyses the tap response. Detect whether there's a sustained periodic component (resonant — healthy tension) or just a damped transient (loose — needs tightening). Optionally identify the resonant pitch.
+- **Verify-the-measurement feedback loop.** If the input is a damped transient with no sustain, prompt the user to retry with a harder object — "we heard your tap, but it died too fast for us to read. Try tapping with a pencil so the head can ring freely." Generalises to any diagnostic where measurement technique matters.
+- **Dead-string detection.** Compare decay envelopes across strings. Strings that decay much faster than peers are probably worn or damaged.
+- **String age estimation.** Spectral brightness drops as strings age. Log over time, prompt replacement when it crosses a threshold.
+- **Bridge geometry vs orientation.** Some bridges are deliberately wedge-shaped (vertical face toward tailpiece, slope toward the neck). Users sometimes install them backwards. A visual check or comparison test could catch this.
+- **Action assessment.** Indirectly estimate string-to-fret gap from signal characteristics (attack sharpness, sustain length, harmonic content). Approximate but useful as a flag.
+- **Style-aware setup guidance.** Different styles want different setups (bright bluegrass vs mellow clawhammer; resonator on vs off vs stuffed). App asks the user's intended style and recommends setup tweaks accordingly — the kind of advice that takes a beginner years to discover unaided.
+
+## Twanga as a setup-teaching resource (onboarding flow)
+
+The first-run experience teaches setup *while* diagnosing it. Each step in the setup diagnostic flow doubles as a vocabulary lesson — users learn what a 12th-fret harmonic is when the app needs to use one, not in a separate "Banjo 101" tutorial they'd skip. Reinforces the project's identity: TWANGA is a learning tool, not a tab player.
+
+- **Just-in-time learning.** Each diagnostic step explains what's being checked and why before measuring. Beginners build vocabulary through repeated exposure to the technical terms in context.
+- **Optional deeper dives.** "Why does bridge position matter?" → expandable explanation with diagrams. Doesn't gate progress; available for the curious.
+- **No upfront tutorial wall.** Skip the "intro to banjo" course nobody finishes; teach in the moment when the user has a reason to learn.
+
 ## Practice mechanics — compounding over time
 
 - **Session journaling.** Auto-log every session: tab, duration, BPM, accuracy %, sections looped. Append-only JSON. Power-source for everything below.
@@ -75,7 +105,8 @@ App doesn't always need to know what you're playing. Sometimes it just needs to 
 - **Stretch builders.** Progressive span widening between fingers over days/weeks.
 - **Endurance mode.** Pick a progression, play it for 20 minutes slowly. No scoring, no fail state. Just keep the metronome going. Gentle chime every 5 minutes.
 - **Callous tracking.** Daily check-in: fingertip soreness 1-5, optional "where does it hurt?" tap-on-finger UI. Reveals body-awareness patterns over weeks.
-- **Silent practice mode.** Show what to do; user fingers it on a muted/unplugged instrument. No verification. Builds muscle memory without sound.
+- **Silent practice mode (muted / unplugged).** Show what to do; user fingers it on a muted/unplugged instrument. No verification. Builds muscle memory without sound.
+- **Silent practice mode (acoustic-quiet, audio-loud) via pickup + headphones.** Distinct from the muted variant above. User plays acoustic instrument lightly or with a mute; pickup feeds TWANGA; app outputs synthesised or EQ'd version of their playing through headphones at apparent full volume. Full tonal feedback, near-zero acoustic noise — the "practice at night without waking anyone" mode that doesn't require buying an electric instrument and doesn't suffer mechanical-mute tonal compromises. Dependencies: the synth path from the tab-audio-generation roadmap milestone covers most of it; the new bit is routing live pickup input through synthesis/EQ to a low-latency output bus.
 - **"Practice without practising" mode.** Small unobtrusive overlay (chord name + timer). Changes chord every 30-60s. No verification. Supports the two-minutes-while-the-kettle-boils style of practice that's how most adults actually improve.
 
 ## Mode toggling (UX-level concept)
@@ -109,6 +140,15 @@ Pitch isn't always discrete. For slide, vibrato, bends, fretless, and intonation
 - **Audiosurf-style "play along with any audio" mode.** Drop in MP3 → Demucs isolation → pitch contour → user plays along to match the line. Way easier than transcribe-and-verify. Forgiving by default.
 - **Implementation note:** new crate (`twanga-trace`?) for contour comparison logic. DTW for time alignment + point-wise pitch distance for scoring.
 
+### Articulation detection
+
+Builds on the continuous-pitch visualisation above. Extracts and verifies specific articulation events (vibrato, slide, bend, hammer-on, pull-off) rather than just tracking the contour line.
+
+- **Articulation data model.** Per-note metadata for vibrato (rate + depth), slides (start/end pitch + duration), bends (target interval + duration), hammer-ons, pull-offs. Generic annotation layer attached to notes rather than baked into the note model — keeps `TunedString` / `MidiNote` etc. clean.
+- **Vibrato detection.** FFT of pitch-contour-over-time, look for a 4–7 Hz peak with appropriate depth. Cheap to compute with the existing `rustfft` dependency. Big payoff — nobody else does this for amateur learners.
+- **Vibrato trainer.** Reference contour + user's contour overlaid. User tries to match rate and depth. Probably the most visually compelling feature once continuous-pitch visualisation lands.
+- **Banjo / uke constraint.** Short sustain limits which articulations are detectable. Vibrato detection only works on sustained notes (end-of-phrase holds), not rapid passages. Real constraint, not a bug — document it.
+
 ## Learning aids for tab-illiterate / bad-memory users
 
 (Author profile, but generally useful.)
@@ -128,7 +168,7 @@ Runtime stays deterministic. AI is import-time only, like OCR.
 - **"Mute this part, play it yourself" mode.** Inverse of solo-the-banjo — silence the banjo in the mix, user plays along as the missing part.
 - **Monophonic transcription on isolated stems.** Isolated banjo line → pitch contour → tab notation. Output flagged as low-confidence, user-editable.
 - **Polyphonic transcription via Basic Pitch.** Bolt-on for chord-heavy passages. Mark output as draft. Starting point for tab editor, not end product.
-- **Latency calibration wizard.** First-run flow measures end-to-end output-to-input latency (cable + buffer + reaction) and offsets `wait` mode's pitch-comparison timing. Cheap USB cables + Bluetooth headphones can push round-trip to 100ms+; without calibration the cursor sits waiting because detection arrives late. **Implementation note:** acoustic loopback (click out speakers → captured by mic) is the easy version but dies the moment the user puts headphones on, which is most of them. The fallback that works regardless is tap-along calibration: play 8 clicks, ask the user to tap their instrument on each beat, take the median offset between expected-beat and detected-impulse. Captures output + reaction + input as one number, which is what `wait` mode actually needs.
+- **Latency calibration wizard.** First-run flow measures end-to-end output-to-input latency (cable + buffer + reaction) and offsets `wait` mode's pitch-comparison timing. Cheap USB cables + Bluetooth headphones can push round-trip to 100ms+; without calibration the cursor sits waiting because detection arrives late. **Implementation note:** acoustic loopback (click out speakers → captured by mic) is the easy version but dies the moment the user puts headphones on, which is most of them. The fallback that works regardless is tap-along calibration: play 8 clicks, ask the user to tap their instrument on each beat, take the median offset between expected-beat and detected-impulse. Captures output + reaction + input as one number, which is what `wait` mode actually needs. **Same approach replaces any device-class heuristic on web AND desktop** — browsers can't reliably identify input devices (privacy restrictions), so measuring latency + jitter directly via the calibration is the only honest path. Surface the result in the UI alongside its tolerance band: "🎤 built-in mic — casual mode, ±50ms tolerance" vs "🎸 audio interface — precise mode, ±15ms tolerance". Same code path either surface, just different defaults if calibration hasn't run yet.
 - **Smart tuner input mode.** Detect noisy mic vs clean direct-in, adjust filter strategy.
 
 ## Tab ingestion (the import pipeline)
@@ -192,6 +232,31 @@ Tuner-driven passive sample collection. The chore (tuning) becomes the data sour
 - **Shared playback engine in Rust (bound to WASM).** Wait-mode + tick-loop bookkeeping is currently duplicated CLI ↔ web. The CLI has its own loop in Rust; the web has its own in JS. Drift has already bitten once (wait-mode column-skip was a web-only bug because the CLI uses a different state machine). Worth lifting into `twanga-tabs` or a new `twanga-playback` crate once we have a second drift incident.
 - **Single internal arrangement format (TwangaTab).** Near-superset of MusicXML with instrument-agnostic extensions (tuning per string, fingering hints, folk-specific technique tags). All importers funnel into this; all renderers/players consume it.
 - **Three serialisation formats:** TwangaTab (internal) ↔ alphaTex (human-friendly paste/edit) ↔ MusicXML (interop). One model, three faces.
+
+## Cross-cutting principles
+
+App-wide design rules that surface across multiple features. Not features themselves — design constraints that should shape any feature that interacts with the user. Strong candidates to move to a dedicated `docs/DESIGN.md` later; parked here for now to keep everything in one place.
+
+### Two-tier diagnostic output
+
+Plain language is the primary surface; technical detail is the secondary surface. Both always present.
+
+- **Plain language as the primary surface** — "Move your bridge 3mm toward the tailpiece," not "intonation +18 cents." Beginners can act on it without prior knowledge.
+- **Technical detail as the secondary surface** — subtitle, hover text, debug line. Smaller font, lower contrast, maybe monospace. Visually distinct but **present by default**, not hidden behind a toggle.
+- **Both surfaces always present.** Never plain-language-only (patronising, opaque about *why* the suggestion exists); never technical-only (impenetrable to beginners).
+- **Applies app-wide:**
+  - Tuner: "C# — tune down slightly" + "264.7 Hz, +12 cents"
+  - Playback feedback: "Played slightly late" + "+45ms vs expected onset"
+  - Setup check: "Bridge needs to move 3mm toward the tail" + "12th fret +18 cents (D string)"
+  - Session summary: "Solid 15 minutes" + "Avg accuracy 78%, 23 retries on bar 4, tempo 92 BPM"
+- **Why it matters:** teaches vocabulary over time through repeated exposure, lets users catch algorithm errors, supports cross-tool workflows (YouTube tutorials use technical terms), future-proofs the app as diagnostic algorithms evolve, signals honesty.
+
+### Qualitative diagnostics where measurement is unreliable
+
+Sometimes pattern-matching by ear beats tuner-chasing — especially on transient sounds. Worth capturing as a design rule because the natural instinct is to instrument everything with numbers.
+
+- **Use sound, not numbers, when transients confuse pitch detection.** Drum-head taps, percussive onsets, and other brief signals fool pitch trackers (octave jumps, fundamental detection on harmonics, ambient noise pickup). Better to provide reference audio examples (loose vs proper tension, dead vs fresh string) and ask the user to A/B against their own.
+- **The app could ship reference recordings** of common setup states. User taps their head, listens, taps a reference clip, compares by ear. Lower-tech than a perfect signal-processing solution but more reliable for measurement-resistant signals.
 
 ## Explicit non-goals (do not build)
 
