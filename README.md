@@ -20,11 +20,9 @@ TWANGA ships **two first-class surfaces** — a GUI and a CLI, with the same fea
 
 ### GUI
 
-Open the deployed app at **[andrewiankidd.github.io/TWANGA/app](https://andrewiankidd.github.io/TWANGA/app/)** — no install. Same HTML + WASM bundle the (work-paused) Tauri desktop shell hosts, so anything that lands on web lands unchanged on desktop later.
+Open the deployed app at **[andrewiankidd.github.io/TWANGA/app](https://andrewiankidd.github.io/TWANGA/app/)** — no install.
 
 ![TWANGA GUI — main menu](assets/screencaps/gui-menu.png)
-
-Seven screens: **Tuner**, **Recorder**, **Playback**, **Patterns** (curated rhythm + picking drills), **Editor** (post-capture cell-level edits), **Tunings**, **Docs** (per-feature pages embedded in the bundle). All seven have CLI counterparts — the Editor pairs with `twanga edit` (non-interactive cell mutations, scriptable). Mic capture uses Web Audio + AudioWorklet; pitch detection runs in the same Rust YIN implementation the CLI uses, compiled to WASM. User recordings persist to IndexedDB (with a Download button on every entry so you can back them up to real files), user-defined tunings live in `localStorage` mirroring the CLI's `tunings.toml`.
 
 → **Full GUI guide: [docs/GUI.md](docs/GUI.md)**
 
