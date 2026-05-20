@@ -10,6 +10,36 @@ dated section.
 
 ### Added
 
+- **Last-session resume on Playback.** Saved per-tab to a new
+  `localStorage` map (`twanga-playback-resume-v1`); the most-recent
+  bookmark surfaces as a banner above the library list on screen
+  entry. Click **Resume** to load that tab and start playback at
+  the saved column (the engine back-shifts `playStartTime` so the
+  tick math reads as already-N-columns-in without firing phantom
+  metronome clicks). **Dismiss** clears that bookmark. Bookmarks
+  save on Stop and on Back-to-library; "finished" stops don't save
+  (replaying from the end is useless). A library `delete` event
+  in another tab also clears the matching bookmark.
+- **Undo last column on Recorder.** While paused, an extra
+  **Undo last column** button pops the most-recently committed
+  column from the score and rewinds the wall-clock perception by
+  one column (`totalPausedMs += msPerColumn`) so Resume doesn't
+  immediately re-commit it with a phantom click. Click repeatedly
+  to undo multiple. Disabled when nothing has been committed.
+
+### Changed
+
+- **ROADMAP and BACKLOG are future-only.** Everything previously
+  marked `done` lives in the CHANGELOG; the ROADMAP now lists only
+  Deferred + Follows + v2 items, and the BACKLOG has shed all
+  shipped sections (mic meter, last-session resume, undo column,
+  cell-level edit, insert/delete columns, `twanga tunings remove`,
+  the "parity owed" subsection, and so on). Added a new
+  **architecture/infrastructure** entry flagging the duplicated
+  playback engine (CLI Rust loop vs web JS loop) — the wait-mode
+  column-skip bug only existed on the web side because of that
+  drift.
+
 - **Dedicated GUI + CLI docs.** Top-level README now leads with a
   Getting Started section featuring both first-class surfaces side
   by side: a screenshot of the GUI main menu and a code block of

@@ -1,59 +1,35 @@
 # TWANGA Backlog
 
-Ideas and feature directions discussed during early scoping. Not commitments — just things worth not forgetting. Loosely grouped by theme. Priority and feasibility vary wildly; some are afternoon projects, some are six-month subsystems.
+Ideas and feature directions worth not forgetting. Not commitments — just things we might do someday. Loosely grouped by theme. Priority and feasibility vary wildly; some are afternoon projects, some are six-month subsystems.
 
-See [ROADMAP.md](ROADMAP.md) for what's actually committed next; this file is everything we've thought about that we might do someday.
+See [ROADMAP.md](ROADMAP.md) for the bigger future milestones that have crossed the line into "we're going to do this." Shipped work lives in [CHANGELOG](../CHANGELOG.md).
 
-## Web build feature parity with CLI
+## Renderer plugin system — future delivery mechanisms
 
-The web frontend (`frontend/web/`) ships via GitHub Pages and is wrapped by the Tauri 2 desktop shell. Same HTML/JS/WASM bundle, two delivery paths. **All four user-facing CLI surfaces are at 1:1 GUI parity** as of 2026-05-19 — Tuner, Tunings, Recorder, Playback. Detailed feature inventory lives in the [CHANGELOG](../CHANGELOG.md); this section is just what remains.
-
-### Still owed
-
-- **Persist "last session" state** — last opened tab + last column position. (Tuning + capo already persist via the controller.) One-click resume on next visit.
-- **`twanga tunings remove` CLI subcommand.** GUI has a per-row delete button; the CLI has no equivalent (users edit the TOML by hand). Adding `tunings remove <slug>` would close the only direction-reversed parity gap.
-- **Tauri filesystem library backend** — the `library-tauri.js` stub already mirrors the IDB backend's interface; once `list_recordings` / `load_recording` / `save_recording` Tauri commands land on the desktop side, the browser-storage warnings disappear and CLI recordings show up in the desktop library.
-- **Tauri filesystem tunings sync** — same pattern as the library, but for `$CONFIG/twanga/tunings.toml` ↔ `localStorage`. Desktop app reads/writes the CLI's TOML directly so a custom tuning defined in the GUI shows up in `twanga record --tuning <slug>`.
-
-### Renderer plugin system (shipped — what's next)
-
-Both Recorder and Playback consume any registered renderer through a uniform plugin contract: `{ id, name, version, create(container, options) }` registered with the module-singleton `RendererRegistry`. Built-in `twanga.tab` (column-grid) and `twanga.highway` (notes-toward-you) ship via the *same* `register()` path future third-party plugins will use — no special lane for built-ins, no host-side branching on plugin id. See [`frontend/web/render/`](../frontend/web/render/).
-
-Future delivery mechanisms (none yet built, but the contract is stable enough that they're additive):
+The plugin contract is stable (`{ id, name, version, create(container, options) }` registered via the module-singleton `RendererRegistry`; same path built-ins use, no fast-lane). See [`frontend/web/render/`](../frontend/web/render/). What's *missing* is delivery beyond "compiled in":
 
 - **Tauri desktop** — filesystem load from `$CONFIG/twanga/renderers/*.js`. User drops files in, registry picks them up on startup.
 - **"Load from URL"** in the web build, with explicit user consent + content-hash check.
 - **Decentralised plugin directory** — a list of plugin-manifest URLs the user adds (like git remotes or APT sources). Anyone can host a registry; we ship a default one. Aligns with the local-first / no-walled-garden ethos. Steam Workshop is explicitly *not* the model.
 
-## Recorder + Playback QoL — still owed
-
-Most of this section shipped in the 2026-05-19 cross-cutting QoL batch (metronome on record, pre-roll, pause/resume, duration display, title prompt on record, "couldn't fit on fretboard" indicator — see [CHANGELOG](../CHANGELOG.md)). What remains:
-
-- **Mic-level meter (GUI only, with caveat).** RMS bar so silence vs "mic not detecting your pitch" don't look the same. Doable on the CLI too in principle, but the scrolling tab output would overwrite it — a fixed bottom-line meter would need a multi-region terminal layout that's more work than it's worth. GUI-only is the pragmatic call, even though the CLI gap is a known asymmetry.
-
-- **Live editing / undo last column (GUI only, prerequisite: tab editor).** Pause/resume shipped in the QoL batch; the natural follow-on is offering "Undo last column" while paused — pop the last committed column, rewind the playhead one step, resume from there. The CLI doesn't get this because mid-recording terminal editing is unwieldy; we'd need a dedicated tab-editor screen for it (see below) which exists at a different stage of the workflow.
-
-- **Library "Last session" auto-resume.** The library tracks `createdAt` + `lastBackedUpAt` per entry; adding a `lastPlayedAt` + `lastColumn` would let Playback offer "Resume your last tab where you left off" on screen entry. Bookmark behaviour.
+## Playback — open questions
 
 - **Transpose mode: drop vs octave-shift (maybe).** Today `transpose_to_with_report` silently drops notes that don't fit on the target tuning — the "Skipped: N notes" preamble shows what's missing. Standard practice in cross-instrument transposition (TuxGuitar, MuseScore, etc.) is to **octave-shift** out-of-range notes instead: notes below the target's lowest playable pitch jump up by 12 semitones (and equivalently for too-high notes), preserving melodic contour at the cost of register. The banjo→uke case where it actually matters is clawhammer drone work like Cripple Creek — A3/B3/G3 bass drones drop entirely on uke today, whereas an octave-shifted A4/B4/G4 would sit on the body. Right shape is probably a per-load toggle ("drop unreachable" / "shift to nearest octave"), defaulting to drop. Cheap in `twanga-tabs`: a single new branch in the existing transpose pass that retries with ±12 semitones before giving up. Maybe, not committed.
 
-## Tab editor (eventual, GUI-first)
+## Tab editor — what's next
 
-A dedicated screen for hand-editing the column-grid score after recording (or from scratch). Distinct from the Recorder: the recorder captures live input; the editor lets you fix up what got captured (or didn't). Same column-grid + alphaTex round-trip the rest of the stack uses, so saved files round-trip through `twanga play`.
+The editor screen is shipped (cell-level fret editing on the same Tab renderer Playback uses, column insert / delete / clear, save back in place or as a new copy). Future polish:
 
-- **Cell-level edit.** Click a (string, column) cell, type a fret. Backspace deletes. Arrow keys move the cursor. Same keyboard model as a spreadsheet.
-- **Insert / delete columns.** Shift-right inserts a blank column, shift-delete removes one. Bar lines auto-recompute from `columnsPerBar`.
-- **Per-bar annotations.** "Watch the slide here," "this is the hard part" — see the existing [Annotated tabs] backlog item; the editor is its natural home.
-- **CLI equivalent: probably never.** A terminal tab editor would re-implement what TuxGuitar already does well. The CLI's role stays "capture + play," the editor's role is "fix up post-capture." This is one of the few intentional asymmetries between the surfaces.
-- **Hook into Recorder's pause/resume.** While paused mid-recording, the user can jump into the editor for the captured-so-far score, make corrections, and return to the Recorder to keep going. Same data model on both sides.
+- **Per-bar annotations.** "Watch the slide here," "this is the hard part" — see the [Annotated tabs] item under "Learning aids" below; the editor is its natural home.
+- **Hook into Recorder mid-take.** While the Recorder is paused, jump into the editor for the captured-so-far score, make corrections, return to the Recorder to keep going. Adjacent to (and possibly subsumes) the per-cell undo that already shipped — same data model on both sides.
+- **CLI equivalent: probably never.** A terminal tab editor would re-implement what TuxGuitar already does well. The CLI's role stays "capture + play," the editor's role is "fix up post-capture." One of the few intentional asymmetries between the surfaces.
 
 ## Tauri desktop polish
 
-Quality-of-life work for the Tauri shell after the basic webview-bundle path is in. Mobile via Tauri Mobile is its own roadmap item ([ROADMAP.md](ROADMAP.md)).
+The Tauri shell hosts the same `frontend/web/` bundle in a native window. The two big filesystem-integration items (tunings sync + recordings library) are in [ROADMAP.md](ROADMAP.md) under Deferred. Smaller polish that doesn't need its own milestone:
 
 - **Wire `@tauri-apps/plugin-shell`.** External-link clicks in app.html already get intercepted via the `window.__TAURI__` runtime check, but the resulting `shell.open(url)` call is currently a no-op until the plugin is added to `tauri.conf.json`'s allowlist + the JS-side glue is imported. Without this the personal-site logo + "TWANGA Homepage" link don't actually open in the system browser when running under Tauri.
-- **Native CPAL backend exposed as a Tauri command.** Web Audio's AudioWorklet runs at 50-150ms latency depending on backend; CPAL gives sub-20ms on desktop. Expose `start_capture` / `stop_capture` Tauri commands that stream samples from `twanga-audio` to the JS frontend over Tauri events. Only worth doing once wait-mode lands and the latency actually matters.
-- **Filesystem access for `~/.config/twanga/tunings.toml`.** Browser uses `localStorage`; Tauri can read/write the same TOML the CLI uses. Means custom tunings sync across the CLI + desktop app without a separate user file.
+- **Native CPAL backend exposed as a Tauri command.** Web Audio's AudioWorklet runs at 50-150ms latency depending on backend; CPAL gives sub-20ms on desktop. Expose `start_capture` / `stop_capture` Tauri commands that stream samples from `twanga-audio` to the JS frontend over Tauri events. Only worth doing once the latency actually matters in practice (likely once chord/polyphonic verification lands).
 - **Hand-crafted icon set.** `cargo tauri icon` auto-converted the workspace logo. Production builds want a hand-tuned `icon.icns` / `icon.ico` with proper rounded-rect / dark-mode variants per platform's conventions.
 - **`cargo tauri build` smoke run + installer asset upload.** The release workflow currently ships only `twanga-cli`. Once a known-good `cargo tauri build` exists, add it to the release matrix so each tag also publishes desktop installers (`.msi`, `.dmg`, `.deb`, `.AppImage`).
 
@@ -131,15 +107,13 @@ Runtime stays deterministic. AI is import-time only, like OCR.
 - **"Mute this part, play it yourself" mode.** Inverse of solo-the-banjo — silence the banjo in the mix, user plays along as the missing part.
 - **Monophonic transcription on isolated stems.** Isolated banjo line → pitch contour → tab notation. Output flagged as low-confidence, user-editable.
 - **Polyphonic transcription via Basic Pitch.** Bolt-on for chord-heavy passages. Mark output as draft. Starting point for tab editor, not end product.
-- **Latency calibration wizard.** First-run flow measures end-to-end output-to-input latency (cable + buffer + reaction) and offsets `wait` mode's pitch-comparison timing. Cheap USB cables + Bluetooth headphones can push round-trip to 100ms+; without calibration the cursor sits waiting because detection arrives late. **Implementation note:** acoustic loopback (click out speakers → captured by mic) is the easy version but dies the moment the user puts headphones on, which is most of them. The fallback that works regardless is tap-along calibration: play 8 clicks, ask the user to tap their instrument on each beat, take the median offset between expected-beat and detected-impulse. Captures output + reaction + input as one number, which is what `wait` mode actually needs. Deferred to post-GUI — a first-run setup wizard has a nicer home in the GUI shell.
+- **Latency calibration wizard.** First-run flow measures end-to-end output-to-input latency (cable + buffer + reaction) and offsets `wait` mode's pitch-comparison timing. Cheap USB cables + Bluetooth headphones can push round-trip to 100ms+; without calibration the cursor sits waiting because detection arrives late. **Implementation note:** acoustic loopback (click out speakers → captured by mic) is the easy version but dies the moment the user puts headphones on, which is most of them. The fallback that works regardless is tap-along calibration: play 8 clicks, ask the user to tap their instrument on each beat, take the median offset between expected-beat and detected-impulse. Captures output + reaction + input as one number, which is what `wait` mode actually needs.
 - **Smart tuner input mode.** Detect noisy mic vs clean direct-in, adjust filter strategy.
 
 ## Tab ingestion (the import pipeline)
 
-Multiple sources funnel into one internal arrangement format with per-note confidence scores. Proprietary formats (Guitar Pro `.gp5`/`.gpx`) are explicit non-goals — see [SCOPE.md](SCOPE.md).
+Multiple sources funnel into one internal arrangement format with per-note confidence scores. Proprietary formats (Guitar Pro `.gp5`/`.gpx`) are explicit non-goals — see [SCOPE.md](SCOPE.md). Phase 1 (alphaTex parser + writer in `twanga-tabs::alphatex`) is shipped; Phase 2 (MusicXML) is on the [ROADMAP](ROADMAP.md). The rest:
 
-- **Phase 1 (shipped):** alphaTex parser + writer (`twanga-tabs::alphatex`).
-- **Phase 2:** MusicXML import — open W3C schema; Guitar Pro / MuseScore / Sibelius all export to it, so this is the realistic interop path for the existing Guitar Pro library most users have.
 - **Phase 3:** ASCII tab parser — paste from Ultimate Guitar etc., or text file. Lossier than MusicXML (have to guess timing) but covers the "I have a text file" workflow.
 - **Phase 4:** OCR for image tabs — Tesseract via Rust bindings, feed images of ASCII tabs or printed tablature.
 - **Phase 5 (stretch):** Audiveris-backed staff-to-tab — sheet music PDFs → MusicXML → fingering algorithm → tab on target instrument.
@@ -151,7 +125,7 @@ Multiple sources funnel into one internal arrangement format with per-note confi
 
 ## Self-recorded sample bank ("your own soundfont")
 
-Tuner-driven passive sample collection. The chore (tuning) becomes the data source.
+Tuner-driven passive sample collection. The chore (tuning) becomes the data source. **The "Playback engine uses bank when available" item below is the bank-aware half of the [Tab audio generation](ROADMAP.md#follows-next-big-rocks) roadmap milestone**; the synth-fallback half is unlocked first by the same milestone. The rest of this section is bank-management UX that compounds value once the playback hook exists.
 
 - **Capture when tuner is happy.** Pitch stability >0.95, <5 cents off, >300ms stable → grab the last 2s of audio, tag with pitch/string/timestamp, write to bank.
 - **Hidden capture mode behind debug flag (do this first!).** Just dump WAVs to disk while you tune. Builds a corpus before the UI exists. Future-you will thank present-you.
@@ -186,14 +160,15 @@ Tuner-driven passive sample collection. The chore (tuning) becomes the data sour
 
 - **Print/export to PDF.** Clean printable tab. Banjo/uke demographic still uses paper music stands.
 - **Folder-based sync.** Point app data at a Dropbox/iCloud/Syncthing folder for multi-machine sync. No accounts, no server.
-- **MusicXML export.** Interop with MuseScore, Guitar Pro, etc. Bidirectional via internal TwangaTab model.
+- **MusicXML export.** Interop with MuseScore, Guitar Pro, etc. Bidirectional via internal TwangaTab model. (MusicXML *import* is on the [ROADMAP](ROADMAP.md); export would land alongside.)
 
 ## Architecture / infrastructure
 
-- **CI mobile targets.** Linux/Windows/macOS already ship via the CI + release workflows. GitHub Pages deploy for the web build also ships (`pages.yml`). Mobile (iOS / Android via Tauri Mobile) is the next platform tier to add.
+- **CI mobile targets.** Linux/Windows/macOS already ship via the CI + release workflows. GitHub Pages deploy for the web build also ships (`pages.yml`). Mobile (iOS / Android via Tauri Mobile) is the next platform tier to add — see [ROADMAP](ROADMAP.md).
 - **ASIO-enabled Windows build variant.** Two Windows binaries — without ASIO (works for everyone) and with (lower latency, needs ASIO driver). Deferred on the redistribution-license question (Steinberg SDK).
 - **`twanga-trace` crate.** Continuous pitch contour comparison (DTW + pitch distance). For the Audiosurf-mode work.
 - **`twanga-import` crate?** Once OCR / Demucs / transcription pipelines arrive, isolating them in a single crate keeps the optional heavy dependencies out of the core build.
+- **Shared playback engine in Rust (bound to WASM).** Wait-mode + tick-loop bookkeeping is currently duplicated CLI ↔ web. The CLI has its own loop in Rust; the web has its own in JS. Drift has already bitten once (wait-mode column-skip was a web-only bug because the CLI uses a different state machine). Worth lifting into `twanga-tabs` or a new `twanga-playback` crate once we have a second drift incident.
 - **Single internal arrangement format (TwangaTab).** Near-superset of MusicXML with instrument-agnostic extensions (tuning per string, fingering hints, folk-specific technique tags). All importers funnel into this; all renderers/players consume it.
 - **Three serialisation formats:** TwangaTab (internal) ↔ alphaTex (human-friendly paste/edit) ↔ MusicXML (interop). One model, three faces.
 

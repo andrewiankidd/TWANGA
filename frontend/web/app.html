@@ -970,6 +970,63 @@
             border-radius: var(--radius);
             padding: 0.6rem 0.9rem;
         }
+        /* Last-session resume banner — same row layout as a library row
+           but with a thin amber accent so it doesn't blend in with the
+           list. Lives above the library list on the Playback library
+           view, hidden when there's no saved bookmark. */
+        .resume-banner {
+            display: flex;
+            align-items: center;
+            gap: 0.7rem;
+            background: var(--card);
+            border: 1px solid var(--highlight);
+            border-left-width: 3px;
+            border-radius: var(--radius);
+            padding: 0.6rem 0.9rem;
+            margin-bottom: 0.6rem;
+        }
+        .resume-banner[hidden] { display: none; }
+        .resume-banner .info {
+            display: flex;
+            flex-direction: column;
+            gap: 0.15rem;
+            min-width: 0;
+            flex: 1;
+        }
+        .resume-banner .info .title {
+            font-weight: 700;
+            color: var(--highlight);
+            font-size: 0.95rem;
+            line-height: 1.2;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .resume-banner .info .meta {
+            color: var(--muted);
+            font-size: 0.78rem;
+            font-family: monospace;
+        }
+        .resume-banner .actions {
+            display: flex;
+            gap: 0.4rem;
+        }
+        .resume-banner .actions button {
+            background: transparent;
+            border: 1px solid var(--border);
+            color: var(--text);
+            border-radius: 4px;
+            padding: 0.35rem 0.7rem;
+            font-family: inherit;
+            font-size: 0.85rem;
+            cursor: pointer;
+        }
+        .resume-banner .actions button.primary {
+            background: var(--highlight);
+            color: var(--secondary);
+            border-color: var(--highlight);
+            font-weight: 700;
+        }
         .tab-library-row .info {
             display: flex;
             flex-direction: column;
@@ -1397,6 +1454,8 @@
             <div class="row">
                 <button class="action" id="recorder-start-btn">Start recording</button>
                 <button class="action secondary" id="recorder-pause-btn" disabled>Pause</button>
+                <button class="action secondary" id="recorder-undo-col-btn" hidden disabled
+                        title="While paused, drop the last committed column and rewind one beat">Undo last column</button>
                 <button class="action secondary" id="recorder-save-btn" disabled>Save .alphatex</button>
                 <button class="action secondary" id="recorder-clear-btn">Clear</button>
             </div>
@@ -1428,6 +1487,20 @@
 
             <!-- LIBRARY VIEW — visible until a tab is loaded -->
             <div id="playback-library-view">
+                <!-- Bookmark / last-session resume. Populated by
+                     `renderPlaybackResumeBanner()` when localStorage has
+                     a saved position from a prior session; hidden
+                     otherwise. -->
+                <div class="resume-banner" id="playback-resume-banner" hidden>
+                    <div class="info">
+                        <div class="title" id="playback-resume-title">—</div>
+                        <div class="meta" id="playback-resume-meta">—</div>
+                    </div>
+                    <div class="actions">
+                        <button class="primary" type="button" id="playback-resume-btn">Resume</button>
+                        <button type="button" id="playback-resume-dismiss-btn">Dismiss</button>
+                    </div>
+                </div>
                 <div class="tab-library" id="playback-library-list"></div>
                 <div class="drop-zone" id="playback-drop-zone">
                     Drop a <code>.alphatex</code> file here, or
@@ -2981,6 +3054,7 @@
                 }
             });
             el('recorder-pause-btn').addEventListener('click', recTogglePause);
+            el('recorder-undo-col-btn').addEventListener('click', recUndoLastColumn);
             el('recorder-save-btn').addEventListener('click', recSave);
             el('recorder-clear-btn').addEventListener('click', () => {
                 if (recState.isRecording || recState.preRollActive) return;
@@ -3008,6 +3082,7 @@
         /// loop doesn't fast-forward through missed beats on resume.
         function recTogglePause() {
             if (!recState.isRecording) return;
+            const undoBtn = el('recorder-undo-col-btn');
             if (recState.isPaused) {
                 // Resuming: account for the duration we were paused so the
                 // next tick computes `expected` correctly.
@@ -3015,13 +3090,44 @@
                 recState.totalPausedMs += pausedMs;
                 recState.isPaused = false;
                 el('recorder-pause-btn').textContent = 'Pause';
+                undoBtn.hidden = true;
                 recUpdateDurationHint();
             } else {
                 recState.isPaused = true;
                 recState.pausedAtMs = performance.now();
                 el('recorder-pause-btn').textContent = 'Resume';
                 el('recorder-hint').textContent = `paused — ${recState.committedColumns} cols captured so far`;
+                undoBtn.hidden = false;
+                undoBtn.disabled = recState.committedColumns === 0;
             }
+        }
+
+        /// Pop the most-recently committed column while paused. Pairs
+        /// with the wall-clock-based tick driver: also rolls one
+        /// `msPerColumn`'s worth of time into `totalPausedMs` so that
+        /// when the user hits Resume, the tick math thinks we've
+        /// committed one fewer column AND one fewer column's worth of
+        /// wall-clock has elapsed — otherwise the resume would
+        /// instantly re-commit a column to "catch up" with the wall
+        /// clock and fire a phantom metronome click.
+        function recUndoLastColumn() {
+            if (!recState.isRecording || !recState.isPaused) return;
+            if (recState.committedColumns === 0) return;
+            recState.score.columns.pop();
+            recState.committedColumns -= 1;
+            recState.totalPausedMs += recState.msPerColumn;
+            // Blank the in-flight marks so the user gets a fresh
+            // column to play into on resume. Restoring the popped
+            // column's content would defeat the purpose of "undo".
+            recState.currentMarks = recState.tuning.getBaseLabels().map(() => null);
+            recState.rendererController?.setScore(recState.score);
+            recState.rendererController?.setPlayhead(recState.committedColumns);
+            el('recorder-hint').textContent =
+                `paused — ${recState.committedColumns} cols captured so far (undid 1)`;
+            const undoBtn = el('recorder-undo-col-btn');
+            undoBtn.disabled = recState.committedColumns === 0;
+            // Save button stays gated on having content to save.
+            el('recorder-save-btn').disabled = recState.committedColumns === 0;
         }
 
         async function recStartRecording() {
@@ -3302,6 +3408,7 @@
             el('recorder-start-btn').textContent = 'Start recording';
             el('recorder-pause-btn').disabled = true;
             el('recorder-pause-btn').textContent = 'Pause';
+            el('recorder-undo-col-btn').hidden = true;
             el('recorder-save-btn').disabled = recState.committedColumns === 0;
             el('recorder-clear-btn').disabled = false;
             el('recorder-settings').classList.remove('is-recording');
@@ -3490,7 +3597,118 @@
             waitingForCol: -1,      // column index whose note we're waiting for (-1 = not waiting)
             waitStartedAt: 0,       // performance.now() when the current wait segment began (0 = not waiting). Used to add the wait duration to `totalPausedMs` when the mic detects a match, so the column-tick math doesn't "skip ahead" by however long the user took to play the note.
             micMeter: null,         // shared mic-meter controller (see ./controllers/mic-meter.js)
+            _resumeOffsetCols: 0,   // internal: forwarded from playbackStart's resumeColumn arg to the engine kickoff
         };
+
+        // Last-session resume bookmark — saved per-tab so reopening the
+        // app and clicking "Resume" jumps back to where you left off.
+        // localStorage shape: `{ [id]: { column, when, title } }`.
+        // Bundled examples use their `bundled:<slug>` ids; user
+        // recordings use their integer IDB ids stringified. The on-
+        // screen banner shows the most-recent saved entry only.
+        const PLAYBACK_RESUME_KEY = 'twanga-playback-resume-v1';
+        function playbackResumeMap() {
+            try {
+                const raw = localStorage.getItem(PLAYBACK_RESUME_KEY);
+                return raw ? (JSON.parse(raw) ?? {}) : {};
+            } catch (e) {
+                console.warn('playback resume read failed', e);
+                return {};
+            }
+        }
+        function playbackWriteResumeMap(map) {
+            try {
+                localStorage.setItem(PLAYBACK_RESUME_KEY, JSON.stringify(map));
+            } catch (e) {
+                console.warn('playback resume write failed', e);
+            }
+        }
+        function playbackSaveBookmark(id, column, title) {
+            if (id == null) return;
+            if (!Number.isInteger(column) || column < 0) return;
+            const map = playbackResumeMap();
+            map[String(id)] = { column, when: Date.now(), title: title ?? '' };
+            playbackWriteResumeMap(map);
+        }
+        function playbackClearBookmark(id) {
+            if (id == null) return;
+            const map = playbackResumeMap();
+            if (Object.prototype.hasOwnProperty.call(map, String(id))) {
+                delete map[String(id)];
+                playbackWriteResumeMap(map);
+            }
+        }
+        function playbackMostRecentBookmark() {
+            const map = playbackResumeMap();
+            let best = null;
+            for (const [id, v] of Object.entries(map)) {
+                if (!v || !Number.isInteger(v.column)) continue;
+                if (!best || (v.when ?? 0) > (best.when ?? 0)) {
+                    best = { id, ...v };
+                }
+            }
+            return best;
+        }
+
+        /// Show / hide the resume banner above the library list based on
+        /// the most-recent bookmark. Idempotent — safe to call multiple
+        /// times. The bookmark's id is stored on the Resume button so
+        /// the click handler doesn't have to re-read localStorage.
+        function renderPlaybackResumeBanner() {
+            const banner = el('playback-resume-banner');
+            if (!banner) return;
+            const bm = playbackMostRecentBookmark();
+            if (!bm) {
+                banner.hidden = true;
+                return;
+            }
+            // The id type may be string ("bundled:foo") or numeric IDB
+            // primary key. localStorage stringifies everything; for IDB
+            // loads we need a number back. Detect + coerce.
+            const id = bm.id.startsWith?.('bundled:')
+                ? bm.id
+                : (Number.isNaN(Number(bm.id)) ? bm.id : Number(bm.id));
+            el('playback-resume-title').textContent =
+                bm.title || `Tab ${bm.id}`;
+            el('playback-resume-meta').textContent =
+                `last left at col ${bm.column + 1} · ${playbackTimeAgo(bm.when)}`;
+            const btn = el('playback-resume-btn');
+            btn.dataset.resumeId = String(id);
+            btn.dataset.resumeColumn = String(bm.column);
+            banner.hidden = false;
+        }
+
+        function wirePlaybackResumeBanner() {
+            el('playback-resume-btn').addEventListener('click', async () => {
+                const btn = el('playback-resume-btn');
+                const rawId = btn.dataset.resumeId;
+                const col = Number.parseInt(btn.dataset.resumeColumn, 10);
+                if (!rawId || !Number.isInteger(col)) return;
+                const id = rawId.startsWith('bundled:') ? rawId : Number(rawId);
+                try {
+                    await playbackLoad(id);
+                } catch (e) {
+                    // playbackLoad already toasts on failure. Clear the
+                    // bookmark in case the source tab is gone, then
+                    // refresh the banner so the user isn't stuck.
+                    playbackClearBookmark(rawId);
+                    renderPlaybackResumeBanner();
+                    return;
+                }
+                // Fire-and-forget the start; same path the Play button
+                // takes, with the resume column threaded through.
+                playbackStart({ resumeColumn: col }).catch((err) => {
+                    console.error('resume start failed', err);
+                    el('playback-hint').textContent =
+                        `failed to resume: ${err?.message ?? err}`;
+                });
+            });
+            el('playback-resume-dismiss-btn').addEventListener('click', () => {
+                const btn = el('playback-resume-btn');
+                playbackClearBookmark(btn.dataset.resumeId);
+                renderPlaybackResumeBanner();
+            });
+        }
 
         function initPlayback() {
             playbackHydrate();
@@ -3502,9 +3720,11 @@
             });
 
             renderPlaybackLibrary();
+            renderPlaybackResumeBanner();
             wirePlaybackDropZone();
             wirePlaybackTransport();
             wirePlaybackSettings();
+            wirePlaybackResumeBanner();
             el('playback-back-to-library-btn').addEventListener('click', playbackUnload);
 
             // Cross-tab IDB sync: if the user records in another tab,
@@ -3516,6 +3736,7 @@
                 if (!playbackState.loadedTab
                     && el('screen-playback').classList.contains('active')) {
                     renderPlaybackLibrary();
+                    renderPlaybackResumeBanner();
                 }
             });
 
@@ -3588,7 +3809,13 @@
         // change so they cache forever.
         const _tabSubtitleCache = new Map();
         library.subscribe((event) => {
-            if (event && event.id != null) _tabSubtitleCache.delete(event.id);
+            if (!event || event.id == null) return;
+            _tabSubtitleCache.delete(event.id);
+            // A delete in another tab should also wipe the matching
+            // resume bookmark so we don't offer to load a tab that's
+            // gone. Save events keep the bookmark intact — the saved
+            // column is still meaningful even if the alphatex changed.
+            if (event.type === 'delete') playbackClearBookmark(event.id);
         });
 
         /// Resolve a one-line "tuning · BPM" subtitle for a library
@@ -3907,6 +4134,7 @@
             el('playback-library-view').hidden = false;
             el('playback-tab-view').hidden = true;
             renderPlaybackLibrary();
+            renderPlaybackResumeBanner();
         }
 
         async function playbackDownload(id) {
@@ -4193,7 +4421,7 @@
             return { start, end, repeat: true };
         }
 
-        async function playbackStart() {
+        async function playbackStart({ resumeColumn = null } = {}) {
             if (!playbackState.loadedTab) return;
             const tab = playbackState.loadedTab.transposed;
             const totalCols = tab.columns_count();
@@ -4225,7 +4453,18 @@
             playbackState.msPerColumn = 240_000 / (bpm * resolutionDenom);
             playbackState.colsPerBeat = Math.max(1, Math.floor(resolutionDenom / 4));
 
-            playbackState.currentCol = loopBounds.start;
+            // If we're resuming from a saved bookmark, start the playhead
+            // at that column instead of the loop start. Clamp to the loop
+            // bounds so a stale resume pointing past the file's end (e.g.
+            // file was edited shorter) just falls back to loopStart.
+            let startCol = loopBounds.start;
+            if (Number.isInteger(resumeColumn)
+                && resumeColumn >= loopBounds.start
+                && resumeColumn < loopBounds.end) {
+                startCol = resumeColumn;
+            }
+            playbackState.currentCol = startCol;
+            playbackState._resumeOffsetCols = startCol - loopBounds.start;
             playbackState.totalPausedMs = 0;
             playbackState.pausedAtMs = 0;
             playbackState.waitingForCol = -1;
@@ -4329,10 +4568,23 @@
                 }
             }
 
-            // Engine kicks off.
+            // Engine kicks off. For a resumed bookmark, back-shift the
+            // virtual start time by `_resumeOffsetCols * msPerColumn` so
+            // the tick math (`elapsed / msPerColumn`) immediately reads
+            // as already-N-columns-in. The metronome catch-up loop in
+            // `playbackTick` is suppressed for this initial jump by the
+            // currentCol-already-equals-newCol check. Also push the
+            // playhead to the resume column up front so the renderer
+            // doesn't briefly flash at column 0 before the first tick.
             playbackState.isPlaying = true;
             playbackState.isPaused = false;
-            playbackState.playStartTime = performance.now();
+            const resumeBackshiftMs =
+                (playbackState._resumeOffsetCols ?? 0) * playbackState.msPerColumn;
+            playbackState.playStartTime = performance.now() - resumeBackshiftMs;
+            if (playbackState._resumeOffsetCols > 0) {
+                playbackState.rendererController?.setPlayhead(playbackState.currentCol);
+            }
+            playbackState._resumeOffsetCols = 0;
             playbackState.tickHandle = setInterval(
                 playbackTick,
                 Math.max(15, playbackState.msPerColumn / 4),
@@ -4373,6 +4625,16 @@
 
         function playbackStop(hintText) {
             if (!playbackState.isPlaying && !playbackState.preRollActive) return;
+            // Save the bookmark BEFORE resetting currentCol. Skip
+            // "finished" because reaching the end isn't a useful resume
+            // point — replaying from there would just stop immediately.
+            if (hintText !== 'finished' && playbackState.loadedTab?.id != null) {
+                playbackSaveBookmark(
+                    playbackState.loadedTab.id,
+                    playbackState.currentCol,
+                    playbackState.loadedTab.title,
+                );
+            }
             playbackState.isPlaying = false;
             playbackState.isPaused = false;
             playbackState.preRollActive = false;

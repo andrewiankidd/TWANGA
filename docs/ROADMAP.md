@@ -1,32 +1,39 @@
 # Roadmap
 
-| Milestone | Status |
-|-----------|--------|
-| Workspace scaffold | done |
-| Domain model (`Tuning`, `MidiNote`, `Frequency`) | done |
-| CLI tuner (YIN + CPAL + multi-string UI + chromatic mode) | done |
-| CLI tab recorder → alphaTex | done |
-| CLI tab playback (cursor view + metronome + wait mode + loop) | done |
-| Tuning registry (built-in TOML + user-defined `tunings.toml`) | done |
-| Capo (per-string offsets, alphaTex subtitle round-trip) | done |
-| WASM bridge crate (`twanga-web`) + cargo tests for the bindings | done |
-| Web frontend scaffold (landing + app) deployed to GitHub Pages | done |
-| Web tuner: mic capture via Web Audio + AudioWorklet → YIN via WASM | done |
-| Tauri 2 desktop shell hosting the shared `frontend/web/` bundle | done |
-| Web tuner per-string display + tuning picker (full parity with `twanga tune`) | done |
-| Web Tunings screen: built-in + user-defined merged list, inline editor, capo round-trip | done |
-| Pluggable renderer system (registry + Tab + Highway built-in plugins, same path for future third-party renderers) | done |
-| Web tab recorder — mic → fret detection → alphaTex download (full parity with `twanga record`) | done |
-| Web tab playback — library list (bundled examples + IDB-stored user recordings + drop-zone import), playhead-driven renderer, wait / loop / metronome / pre-roll / BPM override / transpose / pause | done |
-| Recorder + Playback QoL pass across CLI + GUI — title prompt on record, duration display, "couldn't fit on fretboard" indicator, metronome on record, pre-roll / count-in, pause / resume | done |
-| Shared `makeTuningController` widget consumed by Tuner + Recorder + Playback (closes the duplication backlog item) | done |
-| Custom CLI subcommand `twanga tunings remove` for parity with the GUI's delete button | done |
-| Tab editor (GUI-first) — post-capture cell-level editing of recordings with alphaTex round-trip | done |
-| Bidirectional sync of `$CONFIG/twanga/tunings.toml` ↔ `localStorage` via a Tauri command | deferred (Tauri work paused while we prove things on web) |
-| Tauri filesystem backend for the browser tab library — `library-tauri.js` reads `$CONFIG/twanga/recordings/` once the matching Tauri commands land in `twanga-app` | deferred (Tauri work paused while we prove things on web) |
-| Chord trainer with polyphonic *verification* (not transcription) | follows |
-| Slow-down practice (time-stretch via `rubato` or signalsmith-stretch) | follows |
-| Section looper / adaptive difficulty / tab fade-out | follows |
-| Right-hand pattern trainer (banjo rolls, uke strums) | follows |
-| MusicXML import in `twanga-tabs` (open-standard sheet-music interop) | follows |
-| Mobile (Tauri Mobile) | v2 |
+Forward-looking only. Everything previously listed as `done` lives in the
+[CHANGELOG](../CHANGELOG.md); this file is what's still ahead. Smaller
+adjustments, QoL polish, bugs, and "maybe" items live in
+[BACKLOG.md](BACKLOG.md) instead.
+
+## Deferred (Tauri — paused while we prove things on web)
+
+The Tauri 2 desktop shell already hosts the web bundle in a native
+window; what's deferred is the filesystem integration that would
+replace the browser's IDB + localStorage backends. We're holding off on
+that until the web build's feature surface stabilises so the desktop
+shell inherits a finished product rather than chasing a moving target.
+
+| Item |
+|------|
+| Bidirectional sync of `$CONFIG/twanga/tunings.toml` ↔ `localStorage` via a Tauri command |
+| Tauri filesystem backend for the browser tab library — `library-tauri.js` reads `$CONFIG/twanga/recordings/` once the matching Tauri commands land in `twanga-app` |
+
+## Follows (next big rocks)
+
+Each of these is genuinely new — not a polish pass on existing
+surfaces. Ordered by current best-guess ROI / scope, not by commitment.
+
+| Milestone | Notes |
+|-----------|-------|
+| **Tab audio generation** (prerequisite for slow-down + several practice mechanics) | Today Playback only scrolls a cursor + metronome — the user provides the audio. To make slow-down practice, "play this section while I listen first," or any kind of backing track meaningful, the engine needs to actually *produce sound* for the tab's notes. Two complementary paths: (a) a basic synth path in `twanga-synth` (sine + harmonic stack at the target pitch for the column's duration — already partly there for the metronome click), (b) a sample-bank path that uses captures from the tuner / recorder ([Self-recorded sample bank](BACKLOG.md#self-recorded-sample-bank-your-own-soundfont) in the backlog) when available, with the synth as fallback. The bank work is the part that's interesting long-term; the synth path is the cheap version that unblocks everything below. |
+| Slow-down practice (time-stretch via `rubato` or signalsmith-stretch) | Depends on tab audio generation above — until there's audio to slow down, the existing BPM override already covers the user-plays-themselves case. Once audio exists, `rubato`/`signalsmith-stretch` gives you time-stretch without pitch shift. |
+| Chord trainer with polyphonic *verification* (not transcription) | Biggest pedagogical win; hardest. Verification (does this match the expected chord?) stays tractable where transcription (what chord is this?) doesn't. |
+| Section looper / adaptive difficulty / tab fade-out | Builds on the existing loop + a new accuracy-tracking subsystem. Master-Mode-style. Independent of audio generation. |
+| Right-hand pattern trainer (banjo rolls, uke strums) | Strongly aligned with the project's pedagogy direction. Right-hand-only verification (rhythm, not pitch). Independent of audio generation. |
+| MusicXML import in `twanga-tabs` | Open-standard interop. Unlocks the "I have a Guitar Pro library" workflow (most engravers export to MusicXML). |
+
+## v2 (longer horizon)
+
+| Milestone |
+|-----------|
+| Mobile (Tauri Mobile) |
