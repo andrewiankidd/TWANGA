@@ -10,6 +10,39 @@ dated section.
 
 ### Added
 
+- **Six new bundled patterns** (uke baseline + waltz, banjo reverse +
+  alternating-thumb rolls, guitar boom-chick + Travis). See the
+  squashed commit message.
+
+
+- **Pattern trainer screen — first cut.** New `#patterns` screen
+  with a curated, tree-organised browser of bundled rhythm /
+  picking / strumming drills. Four patterns ship out of the
+  box, grouped by tradition:
+  - **Clawhammer (banjo)** — Bum-diddy (basic), Bum-diddy with
+    drop-thumb
+  - **Bluegrass picking (banjo)** — Forward roll
+  - **Ukulele strums** — Island strum (D D-U U-D-U)
+
+  Patterns are short `.alphatex` files at `assets/patterns/`
+  with `\title`, `\subtitle`, and `\tempo` set sensibly for
+  practice; the GUI loads them via the same playback engine
+  user recordings + bundled examples use, with **`loop=full`
+  preset** so the practice loop starts on the first Play click.
+  Each row shows a 3-star difficulty badge and the target
+  tuning. CLI parity for free: `twanga play
+  assets/patterns/bum-diddy-simple.alphatex --tuning
+  standard-banjo --loop`.
+
+  Implementation reuses the existing Playback engine
+  end-to-end — the Patterns screen is just a curated browser
+  that hands off to `playbackLoad('pattern:<slug>')`. New
+  `library.load()` id prefix `pattern:` joins `bundled:` and
+  the integer IDB key; `library.patternsManifest()` exposes
+  the grouped manifest for screen rendering. CI bundles
+  `assets/patterns/` into the deployed site alongside
+  `assets/examples/`.
+
 - **Octave-shift transpose mode** (CLI + GUI, full parity). When
   re-tuning a tab onto a different instrument, notes that don't
   fit on the target's fretboard can now be retried at

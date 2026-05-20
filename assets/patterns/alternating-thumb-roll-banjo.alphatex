@@ -1,0 +1,22 @@
+\title "Alternating-thumb roll"
+\subtitle "Bluegrass three-finger picking, open G, 1-bar loop"
+\copyright "Pattern under MIT or Apache-2.0."
+\tempo 80
+\tuning D4 B3 G3 D3 G4
+.
+// One of the foundational Scruggs rolls. The thumb does the heavy
+// lifting — it lands on every other 8th note, alternating between
+// the high drone (string 5) and the low D string (string 4) — and
+// the index + middle fingers fill the remaining off-beats from
+// the higher strings.
+//
+//   col 0  string 5 (G4 drone, thumb)
+//   col 1  string 3 (G3, index)
+//   col 2  string 4 (D3, thumb again — the "alternating" half)
+//   col 3  string 1 (D4, middle)
+//   col 4  string 5 (drone, thumb)
+//   col 5  string 3 (index)
+//   col 6  string 4 (thumb, low D)
+//   col 7  string 1 (middle)
+:8 0.5 0.3 0.4 0.1 0.5 0.3 0.4 0.1 |
+:8 0.5 0.3 0.4 0.1 0.5 0.3 0.4 0.1 |

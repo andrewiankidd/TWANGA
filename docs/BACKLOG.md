@@ -12,6 +12,26 @@ The plugin contract is stable (`{ id, name, version, create(container, options) 
 - **"Load from URL"** in the web build, with explicit user consent + content-hash check.
 - **Decentralised plugin directory** — a list of plugin-manifest URLs the user adds (like git remotes or APT sources). Anyone can host a registry; we ship a default one. Aligns with the local-first / no-walled-garden ethos. Steam Workshop is explicitly *not* the model.
 
+## Pattern trainer — content + UX
+
+The Patterns screen ships with ten bundled drills across four groups (clawhammer banjo, bluegrass picking, ukulele strums, guitar). Each pattern is a small `.alphatex` file in `assets/patterns/` plus a manifest entry — no code changes needed to add more.
+
+### Content expansion (further out)
+
+- **More clawhammer variants.** Frailing strum (single down-brush + drone, easier than bum-diddy — Level 0 entry to the group). Hammer-on / pull-off variants of bum-diddy. Galax lick. Drop-thumb on string 4 every iteration as a Level 3 capstone.
+- **More banjo rolls.** Forward-reverse roll (Level 2). Foggy Mountain roll (Level 3 — Earl Scruggs signature). Square roll.
+- **More uke strums.** Calypso / reggae offbeat (accent on the offbeats — Level 2). Fingerstyle "Lava" arpeggio (Level 2 — opens up arpeggio practice without leaving the strums group).
+- **Guitar group, deeper.** Standard `D-D-U-D-U` strum (Level 0 alongside boom-chick). 6/8 ballad strum.
+- **Drop-D guitar group.** Drone-and-melody on the low D — highlights what drop-D actually buys you over standard. New group, tuning: `drop-d-guitar`.
+- **Tenor banjo / tenor uke.** Lower-priority — the audience is smaller. Hold until requested.
+- **Mandolin chop.** Defer until a `standard-mandolin` tuning ships (not in the built-in registry yet).
+
+### UX
+
+- **Difficulty progression within a group.** Right now the bum-diddy basic → drop-thumb tree is two entries. Add a Level 3 "advanced" once the content expansion lands.
+- **Pattern descriptions in the row.** The manifest already supports `description` per group; per-pattern descriptions would let us explain "where this fits" without the user having to know the tradition.
+- **Tempo presets per pattern.** Default tempos right now are baked into the alphaTex `\tempo` line. Surfacing 3-4 tempo presets per pattern ("slow / target / fast") in the GUI would lower the activation energy of practice without forcing the user to type a BPM.
+
 ## Playback — open questions
 
 - **Transpose mode: drop vs octave-shift (maybe).** Today `transpose_to_with_report` silently drops notes that don't fit on the target tuning — the "Skipped: N notes" preamble shows what's missing. Standard practice in cross-instrument transposition (TuxGuitar, MuseScore, etc.) is to **octave-shift** out-of-range notes instead: notes below the target's lowest playable pitch jump up by 12 semitones (and equivalently for too-high notes), preserving melodic contour at the cost of register. The banjo→uke case where it actually matters is clawhammer drone work like Cripple Creek — A3/B3/G3 bass drones drop entirely on uke today, whereas an octave-shifted A4/B4/G4 would sit on the body. Right shape is probably a per-load toggle ("drop unreachable" / "shift to nearest octave"), defaulting to drop. Cheap in `twanga-tabs`: a single new branch in the existing transpose pass that retries with ±12 semitones before giving up. Maybe, not committed.

@@ -1,0 +1,103 @@
+{
+  "//": "Bundled rhythm + picking pattern library for the Patterns screen. Each pattern is a short .alphatex file that loops by default — practice the groove rather than the tune. Same format as assets/examples/manifest.json. Grouped here so the GUI can render a tree-of-difficulty browser; CLI users can play these directly via `twanga play assets/patterns/<file>.alphatex --loop`.",
+  "groups": [
+    {
+      "id": "clawhammer",
+      "title": "Clawhammer (banjo)",
+      "description": "Old-time banjo rhythmic patterns built around the bum-diddy figure: melody note + brush + drone-string pluck.",
+      "patterns": [
+        {
+          "id": "bum-diddy-simple",
+          "title": "Bum-diddy (basic)",
+          "path": "bum-diddy-simple.alphatex",
+          "tuning": "standard-banjo",
+          "difficulty": 1
+        },
+        {
+          "id": "bum-diddy-dropthumb",
+          "title": "Bum-diddy with drop-thumb",
+          "path": "bum-diddy-dropthumb.alphatex",
+          "tuning": "standard-banjo",
+          "difficulty": 2
+        }
+      ]
+    },
+    {
+      "id": "bluegrass-rolls",
+      "title": "Bluegrass picking (banjo)",
+      "description": "Three-finger picking patterns. Loop them under tempo to lock in the muscle memory before applying them to a melody.",
+      "patterns": [
+        {
+          "id": "forward-roll-banjo",
+          "title": "Forward roll",
+          "path": "forward-roll-banjo.alphatex",
+          "tuning": "standard-banjo",
+          "difficulty": 1
+        },
+        {
+          "id": "reverse-roll-banjo",
+          "title": "Reverse roll",
+          "path": "reverse-roll-banjo.alphatex",
+          "tuning": "standard-banjo",
+          "difficulty": 1
+        },
+        {
+          "id": "alternating-thumb-roll-banjo",
+          "title": "Alternating-thumb roll",
+          "path": "alternating-thumb-roll-banjo.alphatex",
+          "tuning": "standard-banjo",
+          "difficulty": 2
+        }
+      ]
+    },
+    {
+      "id": "uke-strums",
+      "title": "Ukulele strums",
+      "description": "Simple strumming patterns. The chord shape is C major (all open strings) so you can hold one shape and focus on the rhythm.",
+      "patterns": [
+        {
+          "id": "uke-baseline-strum",
+          "title": "Baseline strum (D-D-U-U-D-U)",
+          "path": "uke-baseline-strum.alphatex",
+          "tuning": "standard-ukulele",
+          "difficulty": 1
+        },
+        {
+          "id": "uke-island-strum",
+          "title": "Island strum (D D-U U-D-U)",
+          "path": "uke-island-strum.alphatex",
+          "tuning": "standard-ukulele",
+          "difficulty": 2
+        },
+        {
+          "id": "uke-waltz-strum",
+          "title": "Waltz strum (3/4)",
+          "path": "uke-waltz-strum.alphatex",
+          "tuning": "standard-ukulele",
+          "difficulty": 1
+        }
+      ]
+    },
+    {
+      "id": "guitar",
+      "title": "Guitar (standard tuning)",
+      "description": "Open-G chord shape drills. Hold the G shape (3 2 0 0 0 3 low → high) and focus on the right-hand pattern; the fretting is the same for both entries below so muscle memory transfers between them.",
+      "patterns": [
+        {
+          "id": "boom-chick-guitar",
+          "title": "Boom-chick",
+          "path": "boom-chick-guitar.alphatex",
+          "tuning": "standard-guitar",
+          "difficulty": 1
+        },
+        {
+          "id": "travis-picking-guitar",
+          "title": "Travis picking",
+          "path": "travis-picking-guitar.alphatex",
+          "tuning": "standard-guitar",
+          "difficulty": 2
+        }
+      ]
+    }
+  ]
+}

@@ -1065,6 +1065,36 @@
             text-overflow: ellipsis;
             white-space: nowrap;
         }
+        /* Patterns screen — grouped tree. Each group has a heading +
+           optional description + a list of pattern rows. Re-uses the
+           `.tab-library-row` styling so the practice browser matches
+           the Playback library visually. */
+        .patterns-group {
+            margin-bottom: 1.4rem;
+        }
+        .patterns-group h3 {
+            font-size: 1rem;
+            margin: 0 0 0.2rem 0;
+            color: var(--primary);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        .patterns-group-desc {
+            color: var(--muted);
+            font-size: 0.85rem;
+            margin: 0 0 0.6rem 0;
+            font-style: italic;
+        }
+        .patterns-list {
+            display: flex;
+            flex-direction: column;
+            gap: 0.4rem;
+        }
+        .pattern-difficulty {
+            color: var(--highlight);
+            letter-spacing: 1px;
+        }
+
         .tab-library-row .row-subtitle {
             color: var(--text);
             font-size: 0.82rem;
@@ -1318,6 +1348,10 @@
                 <button class="menu-btn" data-screen="playback">
                     <span class="title">Playback</span>
                     <span class="desc">Load a tab, play along, wait / loop / transpose</span>
+                </button>
+                <button class="menu-btn" data-screen="patterns">
+                    <span class="title">Patterns</span>
+                    <span class="desc">Bundled rhythm + picking drills (bum-diddy, rolls, strums)</span>
                 </button>
                 <button class="menu-btn" data-screen="editor">
                     <span class="title">Editor</span>
@@ -1700,6 +1734,25 @@
              place; "Save as new" always appends a fresh IDB row (the
              only path for editing bundled examples since they're
              read-only). -->
+        <!-- Patterns screen — curated browser for bundled rhythm,
+             picking, and strumming patterns. Each pattern is a short
+             .alphatex file at `assets/patterns/`. Clicking "Practice"
+             hands off to the Playback engine with loop=full preset
+             so the user just hits Play and gets a clean loop. -->
+        <section id="screen-patterns" class="screen">
+            <div class="back-row">
+                <button class="back-btn" data-back>← Menu</button>
+            </div>
+            <h2>Patterns</h2>
+            <p class="subtitle">
+                Bundled rhythm + picking drills. Each one is a short loop —
+                lock in the groove without worrying about a tune. Tempo and
+                metronome are on by default; lower the BPM until you can
+                play it cleanly, then bring it back up.
+            </p>
+            <div id="patterns-library"></div>
+        </section>
+
         <section id="screen-editor" class="screen">
             <div class="back-row">
                 <button class="back-btn" data-back>← Menu</button>
@@ -2008,6 +2061,11 @@
             // round-trips back through `serialize_recording` (the same
             // path the recorder uses on save).
             initEditor();
+
+            // Patterns screen — curated bundled rhythm / picking /
+            // strumming drills. Loads on demand; clicking Practice
+            // hands off to the Playback engine with loop=full preset.
+            initPatterns();
 
             // Menu navigation.
             document.querySelectorAll('[data-screen]').forEach((btn) => {
@@ -5306,6 +5364,151 @@
                     editorUpdateDirty(true);
                 }
             });
+        }
+
+        // ----------------------------------------------------------------
+        // PATTERNS (bundled rhythm + picking drills)
+        // ----------------------------------------------------------------
+        //
+        // Curated browser for the files at `assets/patterns/`. The
+        // manifest groups patterns by tradition (clawhammer, bluegrass
+        // rolls, uke strums) so the user can pick a drill at the
+        // appropriate difficulty without scrolling through a flat
+        // list. Click "Practice" → hand off to the existing Playback
+        // engine via `playbackLoad('pattern:<slug>')` with `loop=full`
+        // preset, since the whole point of a pattern is to loop.
+
+        function initPatterns() {
+            renderPatternsLibrary();
+        }
+
+        async function renderPatternsLibrary() {
+            const root = el('patterns-library');
+            root.replaceChildren();
+            let manifest;
+            try {
+                manifest = await library.patternsManifest();
+            } catch (e) {
+                const err = document.createElement('div');
+                err.className = 'empty-state';
+                err.textContent = `couldn't load patterns library: ${e?.message ?? e}`;
+                root.appendChild(err);
+                return;
+            }
+            if (!manifest.groups || manifest.groups.length === 0) {
+                const empty = document.createElement('div');
+                empty.className = 'empty-state';
+                empty.textContent = 'no patterns bundled yet';
+                root.appendChild(empty);
+                return;
+            }
+            for (const group of manifest.groups) {
+                root.appendChild(renderPatternGroup(group));
+            }
+        }
+
+        function renderPatternGroup(group) {
+            const wrap = document.createElement('div');
+            wrap.className = 'patterns-group';
+
+            const title = document.createElement('h3');
+            title.textContent = group.title ?? group.id;
+            wrap.appendChild(title);
+
+            if (group.description) {
+                const desc = document.createElement('p');
+                desc.className = 'patterns-group-desc';
+                desc.textContent = group.description;
+                wrap.appendChild(desc);
+            }
+
+            const list = document.createElement('div');
+            list.className = 'patterns-list';
+            for (const p of (group.patterns ?? [])) {
+                list.appendChild(renderPatternRow(p));
+            }
+            wrap.appendChild(list);
+            return wrap;
+        }
+
+        function renderPatternRow(pattern) {
+            const row = document.createElement('div');
+            row.className = 'tab-library-row';
+
+            const info = document.createElement('div');
+            info.className = 'info';
+            const title = document.createElement('div');
+            title.className = 'title';
+            title.textContent = pattern.title;
+            info.appendChild(title);
+
+            const meta = document.createElement('div');
+            meta.className = 'meta';
+            if (pattern.tuning) {
+                const t = document.createElement('span');
+                t.textContent = pattern.tuning;
+                meta.appendChild(t);
+            }
+            if (Number.isInteger(pattern.difficulty) && pattern.difficulty > 0) {
+                const d = document.createElement('span');
+                d.className = 'pattern-difficulty';
+                // Three-star scale; clamp anything higher so a "level 5"
+                // entry doesn't blow out the row. The CHALLENGE label
+                // could be added later if we add genuinely-harder
+                // patterns, but for the first cut keep it visual + simple.
+                const stars = Math.min(3, Math.max(1, pattern.difficulty));
+                d.textContent = '★'.repeat(stars) + '☆'.repeat(3 - stars);
+                d.title = `Difficulty: ${stars} / 3`;
+                meta.appendChild(d);
+            }
+            info.appendChild(meta);
+            row.appendChild(info);
+
+            const actions = document.createElement('div');
+            actions.className = 'actions';
+            const btn = document.createElement('button');
+            btn.className = 'primary';
+            btn.type = 'button';
+            btn.textContent = 'Practice';
+            btn.addEventListener('click', () => startPatternPractice(pattern.id));
+            actions.appendChild(btn);
+            row.appendChild(actions);
+            return row;
+        }
+
+        /// Hand-off into Playback: load the pattern via the same
+        /// `playbackLoad(id)` path bundled examples + user recordings
+        /// take, then pre-set the loop to "full" so the user just
+        /// needs to hit Play. Patterns are built around looping —
+        /// they'd be useless one-shot.
+        async function startPatternPractice(patternId) {
+            const fullId = `pattern:${patternId}`;
+            // Pre-set loop=full BEFORE loading so the load-time UI
+            // reset doesn't undo it. The dropdown UI is updated to
+            // match.
+            playbackState._loopSpecText = 'full';
+            show('playback');
+            try {
+                await playbackLoad(fullId);
+            } catch (e) {
+                console.error('pattern load failed', e);
+                showToast({
+                    message: `Couldn't load pattern: ${e?.message ?? e}`,
+                    actions: [],
+                });
+                show('patterns');
+                return;
+            }
+            // playbackLoad resets the loop UI to 'off' as part of its
+            // per-tab cleanup. Re-apply our 'full' choice after the
+            // load completes so the user sees a clean loop on the
+            // Play button click.
+            playbackState._loopSpecText = 'full';
+            const loopMode = el('playback-loop-mode');
+            if (loopMode) loopMode.value = 'full';
+            el('playback-loop-start').hidden = true;
+            el('playback-loop-end').hidden = true;
+            el('playback-loop-sep').hidden = true;
         }
 
         main().catch((e) => {

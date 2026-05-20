@@ -1,0 +1,23 @@
+\title "Island strum (D D-U U-D-U)"
+\subtitle "Ukulele, all open strings (C major), 1-bar loop"
+\copyright "Pattern under MIT or Apache-2.0."
+\tempo 90
+\tuning A4 E4 C4 G4
+.
+// Classic island / calypso strum: a down on beats 1 and 2, a
+// down-up on the and-of-2, then up-down-up across beats 3 and 4.
+// Hold all four strings open (a C major chord with the reentrant
+// high G) and focus entirely on the rhythm — switching chords is
+// a separate skill.
+//
+// Per-column (1/8 resolution, 8 columns per bar):
+//   col 0  D    (downbeat 1)
+//   col 1  rest (the and-of-1)
+//   col 2  D    (downbeat 2)
+//   col 3  U    (the and-of-2)
+//   col 4  rest (downbeat 3)
+//   col 5  U    (the and-of-3)
+//   col 6  D    (downbeat 4)
+//   col 7  U    (the and-of-4)
+:8 (0.1 0.2 0.3 0.4) r (0.1 0.2 0.3 0.4) (0.1 0.2 0.3 0.4) r (0.1 0.2 0.3 0.4) (0.1 0.2 0.3 0.4) (0.1 0.2 0.3 0.4) |
+:8 (0.1 0.2 0.3 0.4) r (0.1 0.2 0.3 0.4) (0.1 0.2 0.3 0.4) r (0.1 0.2 0.3 0.4) (0.1 0.2 0.3 0.4) (0.1 0.2 0.3 0.4) |

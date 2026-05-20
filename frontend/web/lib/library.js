@@ -124,6 +124,54 @@ async function loadBundledAlphatex(path) {
     return await r.text();
 }
 
+// ---- Bundled patterns -----------------------------------------------
+//
+// Pattern files (clawhammer bum-diddy, bluegrass rolls, uke strums) live
+// at `assets/patterns/` and are surfaced by the Patterns screen via
+// `patternsManifest()`. They're also `load()`-able via the
+// `pattern:<slug>` id prefix so the Playback engine can play them
+// without a separate code path. They DO NOT appear in `list()` —
+// patterns are a curated browsing experience, not a flat library.
+
+let _patternsPromise = null;
+
+function loadPatternsManifest() {
+    if (_patternsPromise) return _patternsPromise;
+    _patternsPromise = fetch('assets/patterns/manifest.json', { cache: 'force-cache' })
+        .then((r) => {
+            if (!r.ok) throw new Error(`patterns manifest fetch failed: ${r.status}`);
+            return r.json();
+        })
+        .then((json) => json && Array.isArray(json.groups) ? json : { groups: [] })
+        .catch((e) => {
+            console.warn('failed to load patterns manifest', e);
+            return { groups: [] };
+        });
+    return _patternsPromise;
+}
+
+async function loadPatternAlphatex(path) {
+    const r = await fetch(`assets/patterns/${path}`, { cache: 'force-cache' });
+    if (!r.ok) throw new Error(`pattern fetch failed: ${r.status}`);
+    return await r.text();
+}
+
+async function findPattern(slug) {
+    const manifest = await loadPatternsManifest();
+    for (const group of manifest.groups) {
+        const p = (group.patterns ?? []).find((p) => p.id === slug);
+        if (p) return { ...p, group };
+    }
+    return null;
+}
+
+/// Returns the full patterns manifest (`{ groups: [...] }`) for the
+/// Patterns screen to render. Caches the fetch so navigating back and
+/// forth is free.
+export async function patternsManifest() {
+    return loadPatternsManifest();
+}
+
 // ---- Public API ------------------------------------------------------
 
 /// All tabs in the library — bundled examples first, then user
@@ -158,6 +206,13 @@ export async function list() {
 /// Load full content for a single tab. Returns
 /// `{ id, title, source, alphatex, createdAt, lastBackedUpAt }`.
 /// Throws if the id doesn't exist.
+///
+/// Three id shapes:
+///   - `bundled:<slug>` — bundled examples (assets/examples/manifest.json)
+///   - `pattern:<slug>` — bundled rhythm/picking patterns
+///                        (assets/patterns/manifest.json). These don't
+///                        appear in `list()` — use `patternsManifest()`.
+///   - integer          — IndexedDB user recording
 export async function load(id) {
     if (typeof id === 'string' && id.startsWith('bundled:')) {
         const slug = id.slice('bundled:'.length);
@@ -169,6 +224,20 @@ export async function load(id) {
             id,
             title: entry.title,
             source: 'bundled',
+            alphatex,
+            createdAt: null,
+            lastBackedUpAt: null,
+        };
+    }
+    if (typeof id === 'string' && id.startsWith('pattern:')) {
+        const slug = id.slice('pattern:'.length);
+        const entry = await findPattern(slug);
+        if (!entry) throw new Error(`unknown pattern: ${id}`);
+        const alphatex = await loadPatternAlphatex(entry.path);
+        return {
+            id,
+            title: entry.title,
+            source: 'pattern',
             alphatex,
             createdAt: null,
             lastBackedUpAt: null,

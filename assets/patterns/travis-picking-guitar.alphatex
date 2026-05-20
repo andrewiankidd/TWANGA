@@ -1,0 +1,26 @@
+\title "Travis picking"
+\subtitle "Guitar (standard tuning), G major chord shape"
+\copyright "Pattern under MIT or Apache-2.0."
+\tempo 80
+\tuning E4 B3 G3 D3 A2 E2
+.
+// Merle Travis / Chet Atkins fingerstyle pattern. The thumb keeps
+// a steady alternating bass between the root (low G, string 6
+// fret 3) and the 5th (open D, string 4), playing on every beat.
+// The index + middle fingers fill the off-beats with notes from
+// the chord's upper strings — same open G shape as the boom-chick
+// pattern, so muscle memory transfers.
+//
+// Hold open G: 3 2 0 0 0 3. The drill is purely about the
+// thumb-fills-fingers timing.
+//
+//   col 0  thumb → bass G    (3.6)
+//   col 1  index → string 3  (open G3)
+//   col 2  thumb → bass D    (0.4)
+//   col 3  middle → string 1 (3.1, high G)
+//   col 4  thumb → bass G
+//   col 5  index → string 3
+//   col 6  thumb → bass D
+//   col 7  middle → string 1
+:8 3.6 0.3 0.4 3.1 3.6 0.3 0.4 3.1 |
+:8 3.6 0.3 0.4 3.1 3.6 0.3 0.4 3.1 |

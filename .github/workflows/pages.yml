@@ -64,17 +64,19 @@ jobs:
             target/wasm32-unknown-unknown/release/twanga_web.wasm
           ls -lh frontend/web/pkg/
 
-      # The bundled alphaTex examples live at `assets/examples/` (so the
-      # CLI can play them via `twanga play assets/examples/...`), but the
-      # browser library fetches them from `assets/examples/` *relative to
-      # the deploy root*. Pages only uploads `frontend/web/`, so we copy
-      # the examples into the bundle here. Same gitignored-build-artifact
-      # pattern as `frontend/web/pkg/`.
-      - name: Bundle alphaTex examples into the site
+      # The bundled alphaTex examples + patterns live at `assets/`
+      # (so the CLI can play them via `twanga play assets/examples/...`
+      # or `assets/patterns/...`), but the browser library fetches
+      # them relative to the deploy root. Pages only uploads
+      # `frontend/web/`, so we copy them into the bundle here. Same
+      # gitignored-build-artifact pattern as `frontend/web/pkg/`.
+      - name: Bundle alphaTex examples + patterns into the site
         run: |
           mkdir -p frontend/web/assets
           cp -r assets/examples frontend/web/assets/
+          cp -r assets/patterns frontend/web/assets/
           ls -lh frontend/web/assets/examples/
+          ls -lh frontend/web/assets/patterns/
 
       - uses: actions/configure-pages@v5
 

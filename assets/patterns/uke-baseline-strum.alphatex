@@ -1,0 +1,22 @@
+\title "Baseline strum (D-D-U-U-D-U)"
+\subtitle "Ukulele, all open strings (C major), 1-bar loop"
+\copyright "Pattern under MIT or Apache-2.0."
+\tempo 90
+\tuning A4 E4 C4 G4
+.
+// The canonical "down-down-up-up-down-up" strum — the rhythmic
+// floor every uke player builds from. Same chord shape as the
+// Island strum (all four strings open = C major with reentrant
+// high G), the difference is rhythmic placement only.
+//
+// Per-column (1/8 resolution, 8 columns per bar):
+//   col 0  D    (downbeat 1)
+//   col 1  rest (and-of-1)
+//   col 2  D    (downbeat 2)
+//   col 3  U    (and-of-2)
+//   col 4  U    (downbeat 3, played upward)
+//   col 5  rest (and-of-3)
+//   col 6  D    (downbeat 4)
+//   col 7  U    (and-of-4)
+:8 (0.1 0.2 0.3 0.4) r (0.1 0.2 0.3 0.4) (0.1 0.2 0.3 0.4) (0.1 0.2 0.3 0.4) r (0.1 0.2 0.3 0.4) (0.1 0.2 0.3 0.4) |
+:8 (0.1 0.2 0.3 0.4) r (0.1 0.2 0.3 0.4) (0.1 0.2 0.3 0.4) (0.1 0.2 0.3 0.4) r (0.1 0.2 0.3 0.4) (0.1 0.2 0.3 0.4) |

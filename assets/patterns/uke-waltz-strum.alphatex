@@ -1,0 +1,20 @@
+\title "Waltz strum (3/4)"
+\subtitle "Ukulele, all open strings (C major), 3-beat bar"
+\copyright "Pattern under MIT or Apache-2.0."
+\tempo 120
+\tuning A4 E4 C4 G4
+.
+// Three-beat waltz: a single down on beat 1, then a down-up
+// figure on beats 2 and 3. Same C-major-open chord shape as the
+// other uke strums — this drill is purely about feeling 3/4
+// after spending all your time in 4/4.
+//
+// Per-column (1/8 resolution, 6 columns per bar = 3 beats):
+//   col 0  D    (beat 1)
+//   col 1  rest (and-of-1)
+//   col 2  D    (beat 2)
+//   col 3  U    (and-of-2)
+//   col 4  D    (beat 3)
+//   col 5  U    (and-of-3)
+:8 (0.1 0.2 0.3 0.4) r (0.1 0.2 0.3 0.4) (0.1 0.2 0.3 0.4) (0.1 0.2 0.3 0.4) (0.1 0.2 0.3 0.4) |
+:8 (0.1 0.2 0.3 0.4) r (0.1 0.2 0.3 0.4) (0.1 0.2 0.3 0.4) (0.1 0.2 0.3 0.4) (0.1 0.2 0.3 0.4) |

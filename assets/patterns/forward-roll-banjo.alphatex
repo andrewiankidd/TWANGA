@@ -1,0 +1,13 @@
+\title "Forward roll"
+\subtitle "Bluegrass three-finger picking, open G, 1-bar loop"
+\copyright "Pattern under MIT or Apache-2.0."
+\tempo 80
+\tuning D4 B3 G3 D3 G4
+.
+// Classic Earl Scruggs forward roll. Eight 1/8 notes per bar; the
+// fingers cycle through strings 5 (drone, thumb) → 3 (G3, index) →
+// 1 (D4, middle) repeated. The pattern doesn't quite divide
+// evenly into 8 steps, so the last note lands on string 1 to wrap
+// the loop. Loop slowly with the metronome — speed comes later.
+:8 0.5 0.3 0.1 0.5 0.3 0.1 0.5 0.1 |
+:8 0.5 0.3 0.1 0.5 0.3 0.1 0.5 0.1 |

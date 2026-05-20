@@ -1,0 +1,26 @@
+\title "Boom-chick"
+\subtitle "Guitar (standard tuning), G major chord shape"
+\copyright "Pattern under MIT or Apache-2.0."
+\tempo 90
+\tuning E4 B3 G3 D3 A2 E2
+.
+// The rhythmic backbone of country, folk, and old-time guitar
+// accompaniment. "Boom" = a single bass note, "chick" = a brush
+// across the top strings of the chord. The bass alternates
+// between the root (low G, string 6 fret 3) and the 5th (open D,
+// string 4) for forward motion.
+//
+// Hold a standard open-G shape: 3 2 0 0 0 3 (low → high). All the
+// notation below assumes that fretting hand is set; the drill is
+// rhythmic.
+//
+//   col 0  bass G        (3.6)
+//   col 1  brush top     (3.1 0.2 0.3)
+//   col 2  bass D (5th)  (0.4)
+//   col 3  brush top
+//   col 4  bass G
+//   col 5  brush top
+//   col 6  bass D
+//   col 7  brush top
+:8 3.6 (3.1 0.2 0.3) 0.4 (3.1 0.2 0.3) 3.6 (3.1 0.2 0.3) 0.4 (3.1 0.2 0.3) |
+:8 3.6 (3.1 0.2 0.3) 0.4 (3.1 0.2 0.3) 3.6 (3.1 0.2 0.3) 0.4 (3.1 0.2 0.3) |

@@ -1,0 +1,15 @@
+\title "Bum-diddy with drop-thumb"
+\subtitle "Clawhammer banjo, open G drone, 2-bar loop"
+\copyright "Pattern under MIT or Apache-2.0."
+\tempo 70
+\tuning D4 B3 G3 D3 G4
+.
+// Variation on the basic bum-diddy: instead of resting on the up-
+// beat of beat 1, the thumb drops to a lower string (string 4 = D3,
+// the low D), giving a fuller "bum-DUM-di-dy" feel.
+//   bum         = melody on string 1 (0.1, D4)
+//   drop-thumb  = string 4 open (0.4, D3) — same pitch class as bum
+//   di          = brush of strings 1-2-3
+//   dy          = thumb on the drone string (0.5, g4)
+:8 0.1 0.4 (0.1 0.2 0.3) 0.5 0.1 0.4 (0.1 0.2 0.3) 0.5 |
+:8 0.1 0.4 (0.1 0.2 0.3) 0.5 0.1 0.4 (0.1 0.2 0.3) 0.5 |
