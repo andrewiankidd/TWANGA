@@ -2128,6 +2128,9 @@
         }
 
         if (typeof window.__TAURI__ !== 'undefined') {
+            // Capture-phase so we run BEFORE any bubble-phase listener
+            // that might also handle the click; preventDefault here
+            // stops the webview's default <a> navigation.
             document.addEventListener('click', (e) => {
                 const anchor = e.target.closest('a');
                 if (!anchor) return;
@@ -2137,25 +2140,33 @@
                 // routed correctly by the platform.
                 if (!href || !/^https?:\/\//i.test(href)) return;
                 e.preventDefault();
-                const shellOpen = window.__TAURI__.shell?.open
-                              ?? window.__TAURI__.opener?.openUrl;
-                if (shellOpen) {
-                    shellOpen(href);
+                e.stopPropagation();
+                // Tauri 2: shell plugin's `open` is reached via the IPC
+                // invoke at `plugin:shell|open`, NOT via a JS global —
+                // plugin globals only get auto-exposed when their JS
+                // bindings package (@tauri-apps/plugin-shell) is bundled
+                // into the frontend, which we don't do (no bundler).
+                // The previous `window.__TAURI__.shell?.open` lookup
+                // silently failed in Tauri 2 — link click preventDefault
+                // fired but nothing opened, and the user thought clicks
+                // were doing nothing. (On a fresh page reload, the
+                // default <a> behaviour can re-fire faster than the
+                // interceptor; the e.stopPropagation + capture-phase
+                // listener above closes that race.)
+                const invoke = window.__TAURI__.core?.invoke
+                            ?? window.__TAURI__.invoke;
+                if (invoke) {
+                    invoke('plugin:shell|open', { path: href })
+                        .catch((err) => console.error(
+                            'plugin:shell|open failed for', href, err
+                        ));
                 } else {
-                    // Tauri present but the shell plugin didn't register
-                    // (unexpected — the plugin is wired in
-                    // crates/twanga-app/src/lib.rs with the matching
-                    // permission in capabilities/default.json). Log it
-                    // loudly so we notice if a Tauri upgrade breaks the
-                    // global; the click stays prevented so we don't
-                    // strand the user with a broken navigation.
                     console.warn(
-                        'Tauri detected but shell.open unavailable — ' +
-                        'check tauri-plugin-shell registration:',
-                        href
+                        'Tauri detected but `core.invoke` unavailable — ' +
+                        'cannot open external URL:', href
                     );
                 }
-            });
+            }, /* useCapture */ true);
         }
 
         // Roll a fresh splash line into the menu hero. Cheap (a `Math.random`
