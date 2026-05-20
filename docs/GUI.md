@@ -7,9 +7,12 @@ served two ways:
   [andrewiankidd.github.io/TWANGA/app](https://andrewiankidd.github.io/TWANGA/app/).
   Same bundle the desktop shell hosts; no install needed.
 - **Desktop (Tauri)** — [`crates/twanga-app/`](../crates/twanga-app/)
-  wraps the same bundle in a native window. Work-paused while web
-  parity is being proven first; the architecture is set up so any
-  feature that ships on web ships unchanged in the desktop shell.
+  wraps the same bundle in a native window. The shell now reads + writes
+  the same filesystem the CLI does: recordings land in
+  `$CONFIG/twanga/recordings/` (visible to `twanga play` immediately),
+  user tunings sync with `$CONFIG/twanga/tunings.toml` (the file
+  `twanga tunings add` writes), and external-link clicks open in the
+  OS browser via the shell plugin.
 
 Feature parity with the CLI ([docs/CLI.md](CLI.md)) is enforced — every
 flag on `twanga` has an equivalent GUI control, and vice versa.
@@ -61,19 +64,23 @@ it locally.
 
 Documented in
 [`crates/twanga-app/README.md`](../crates/twanga-app/README.md).
-Work paused — the moment-to-moment plan is to land features on the
-web build (instant iteration, same bundle 1:1) and then wire up Tauri
-once the surface area is stable.
+Build with `cargo tauri dev` for a hot-reload dev loop, or `cargo
+tauri build` for a release installer (`.msi` / `.dmg` / `.deb` /
+`.AppImage`). The same `frontend/web/` bundle the deployed web app
+serves is what Tauri shows; the only delta is filesystem access — IDB
+swaps for `$CONFIG/twanga/recordings/`, localStorage tunings swap for
+`tunings.toml`. See the shell README for the full Tauri command
+list.
 
 ## Storage notes
 
-The browser-only build stores user data in two places:
+The browser build stores user data in two places:
 
 - **`localStorage`** — user-defined tunings, last-used picker state per
   screen, renderer plugin choice, BPM / loop / pre-roll preferences.
-  Schema mirrors the CLI's `$CONFIG/twanga/tunings.toml` file format so
-  a future Tauri sync command can read either side without
-  translation.
+  Schema mirrors the CLI's `$CONFIG/twanga/tunings.toml` file format
+  exactly (same `PresetEntry` shape) so the Tauri shell's bootstrap
+  reads either source without translation.
 - **IndexedDB** (`twanga-tabs-v1` / `tabs`) — recorded `.alphatex`
   blobs, imported drops, and the Editor's edits. Bundled examples ship
   with the app and aren't stored.
@@ -82,9 +89,17 @@ A **storage warning** sits at the top of the Recorder + Playback +
 Editor screens reminding the user that browser storage can be evicted
 ("Clear browsing data", quota pressure). The Library exposes a
 **Download** button per user entry so you can keep a real file copy;
-each entry shows a "Backed up &lt;when&gt; / Never backed up" tag. The desktop
-(Tauri) shell reads from / writes to the filesystem directly and hides
-this warning.
+each entry shows a "Backed up &lt;when&gt; / Never backed up" tag.
+
+**The Tauri desktop shell swaps both backends for the filesystem.**
+Recordings live at `$CONFIG/twanga/recordings/` and user tunings at
+`$CONFIG/twanga/tunings.toml` — the same paths `twanga record` /
+`twanga tunings add` use. The storage warning is hidden under Tauri
+(no eviction possible). A new tuning defined in the GUI shows up in
+`twanga tunings list` immediately; a tab recorded via `twanga record`
+appears in the GUI's Playback library. See
+[`crates/twanga-app/README.md`](../crates/twanga-app/README.md) for
+the Tauri command list.
 
 ## Cross-tab sync
 

@@ -32,6 +32,16 @@ export function saveUserTunings(entries) {
     } catch (e) {
         console.warn('localStorage write failed; user tuning will not persist', e);
     }
+    // Write-through to the filesystem under Tauri. Fire-and-forget — the
+    // in-memory localStorage state is already correct; this just
+    // persists across app restarts AND makes the GUI's tunings visible
+    // to the CLI's `twanga tunings list`. The bootstrap that reads
+    // tunings.toml at startup lives in `user-tunings-tauri.js`.
+    if (typeof window !== 'undefined' && window.__TAURI__) {
+        import('./user-tunings-tauri.js')
+            .then((m) => m.mirrorToDisk(entries))
+            .catch((e) => console.warn('tauri mirror failed', e));
+    }
 }
 
 /// Look up a user tuning by slug. Returns `null` for the chromatic

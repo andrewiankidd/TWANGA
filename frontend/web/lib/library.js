@@ -172,12 +172,57 @@ export async function patternsManifest() {
     return loadPatternsManifest();
 }
 
+// ---- Runtime dispatcher (browser IDB vs Tauri filesystem) -----------
+//
+// The web build uses IndexedDB (the bulk of this file). The Tauri
+// desktop shell talks to the filesystem via the commands defined in
+// `crates/twanga-app/src/commands.rs`. Same public API on both — the
+// shim at `./library-tauri.js` exports the same names. We pick the
+// backend lazily on first call and cache.
+//
+// `bundledRows` (examples) + patterns are sourced through the same
+// `fetch()`-based path on both, because Tauri's `frontendDist` serves
+// the assets via tauri://localhost — same relative paths work. So the
+// dispatcher only kicks in for user-recording ops.
+
+let _tauriShim = null;
+let _tauriShimLoading = null;
+async function tauriShim() {
+    if (_tauriShim) return _tauriShim;
+    if (!_tauriShimLoading) {
+        _tauriShimLoading = import('./library-tauri.js').then((m) => {
+            _tauriShim = m;
+            return m;
+        });
+    }
+    return _tauriShimLoading;
+}
+function isTauri() {
+    return typeof window !== 'undefined' && window.__TAURI__ != null;
+}
+
 // ---- Public API ------------------------------------------------------
 
 /// All tabs in the library — bundled examples first, then user
 /// recordings (newest first). Returns metadata only (no alphatex
 /// content — call `load(id)` for that).
 export async function list() {
+    if (isTauri()) {
+        // Bundled examples still come from the manifest (Tauri serves
+        // them via frontendDist), then merge with user files from disk.
+        const [bundled, users] = await Promise.all([
+            loadBundledManifest(),
+            tauriShim().then((s) => s.list()),
+        ]);
+        const bundledRows = bundled.map((b) => ({
+            id: `bundled:${b.id}`,
+            title: b.title,
+            source: 'bundled',
+            createdAt: null,
+            lastBackedUpAt: null,
+        }));
+        return [...bundledRows, ...users];
+    }
     const [bundled, users] = await Promise.all([
         loadBundledManifest(),
         tx('readonly', (store) => reqAsPromise(store.getAll())),
@@ -214,6 +259,9 @@ export async function list() {
 ///                        appear in `list()` — use `patternsManifest()`.
 ///   - integer          — IndexedDB user recording
 export async function load(id) {
+    // Bundled + pattern ids work the same on both backends (they're
+    // served from `frontendDist` under Tauri, just like in the
+    // browser). Only user-recording ids dispatch.
     if (typeof id === 'string' && id.startsWith('bundled:')) {
         const slug = id.slice('bundled:'.length);
         const manifest = await loadBundledManifest();
@@ -243,6 +291,9 @@ export async function load(id) {
             lastBackedUpAt: null,
         };
     }
+    if (isTauri()) {
+        return await (await tauriShim()).load(id);
+    }
     const row = await tx('readonly', (store) => reqAsPromise(store.get(id)));
     if (!row) throw new Error(`tab id ${id} not found`);
     return {
@@ -262,6 +313,11 @@ export async function load(id) {
 export async function save({ title, alphatex, source = 'user' }) {
     if (typeof alphatex !== 'string' || alphatex.length === 0) {
         throw new Error('save: alphatex content is required');
+    }
+    if (isTauri()) {
+        const id = await (await tauriShim()).save({ title, alphatex, source });
+        _notify({ type: 'save', id });
+        return id;
     }
     const row = {
         title: typeof title === 'string' ? title.trim() : '',
@@ -285,6 +341,11 @@ export async function update({ id, title, alphatex }) {
     }
     if (typeof alphatex !== 'string' || alphatex.length === 0) {
         throw new Error('update: alphatex content is required');
+    }
+    if (isTauri()) {
+        await (await tauriShim()).update({ id, title, alphatex });
+        _notify({ type: 'save', id });
+        return;
     }
     await tx('readwrite', (store) => new Promise((resolve, reject) => {
         const getReq = store.get(id);
@@ -314,6 +375,11 @@ export async function deleteTab(id) {
     if (typeof id === 'string' && id.startsWith('bundled:')) {
         return; // bundled examples are read-only
     }
+    if (isTauri()) {
+        await (await tauriShim()).deleteTab(id);
+        _notify({ type: 'delete', id });
+        return;
+    }
     await tx('readwrite', (store) => reqAsPromise(store.delete(id)));
     _notify({ type: 'delete', id });
 }
@@ -323,6 +389,12 @@ export async function deleteTab(id) {
 /// <when>" hints. Bundled examples ignore the call.
 export async function markDownloaded(id, when = Date.now()) {
     if (typeof id === 'string' && id.startsWith('bundled:')) return;
+    if (isTauri()) {
+        // Filesystem-backed library has no "backed up" concept — the
+        // file IS the backup. The download button's no-op-on-Tauri
+        // behaviour is documented in the GUI feature page.
+        return;
+    }
     await tx('readwrite', (store) => new Promise((resolve, reject) => {
         const getReq = store.get(id);
         getReq.onsuccess = () => {
@@ -347,6 +419,7 @@ export async function markDownloaded(id, when = Date.now()) {
 /// called once on first save; safe to call repeatedly. Does nothing
 /// useful on Tauri (filesystem is already persistent).
 export async function requestPersistence() {
+    if (isTauri()) return true; // filesystem is always persistent
     if (!navigator.storage || typeof navigator.storage.persist !== 'function') {
         return false;
     }

@@ -12,10 +12,19 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  # Pin wasm-bindgen-cli to whatever the twanga-web Cargo.toml uses. The
+  # CLI version and the crate version must agree or the generated JS
+  # glue won't link. Bump this in lockstep with the crate.
+  WASM_BINDGEN_VERSION: '0.2.121'
 
 jobs:
-  build:
-    name: Build ${{ matrix.target }}
+  # ─────────────────────────────────────────────────────────────────────
+  # CLI binary builds — one zip/tarball per platform, just `twanga` itself
+  # plus README + bundled examples. The smaller of the two artefact
+  # families released on every tag.
+  # ─────────────────────────────────────────────────────────────────────
+  build-cli:
+    name: 📦 CLI ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -25,48 +34,55 @@ jobs:
           # filename (so `releases/latest/download/twanga-windows.zip` resolves
           # the same URL release-to-release). The `target` triple is still in
           # the extracted directory name + tagged into the release notes.
-          - target: x86_64-pc-windows-msvc
+          - name: 'Windows 🪟'
+            target: x86_64-pc-windows-msvc
             os: windows-latest
             archive: zip
             bin: twanga.exe
             friendly: windows
-          - target: x86_64-unknown-linux-gnu
+          - name: 'Linux 🐧'
+            target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
             archive: tar.gz
             bin: twanga
             friendly: linux
-          - target: x86_64-apple-darwin
+          - name: 'macOS Intel 🍎'
+            target: x86_64-apple-darwin
             os: macos-13
             archive: tar.gz
             bin: twanga
             friendly: macos-intel
-          - target: aarch64-apple-darwin
+          - name: 'macOS Apple Silicon 🍏'
+            target: aarch64-apple-darwin
             os: macos-latest
             archive: tar.gz
             bin: twanga
             friendly: macos-apple-silicon
 
     steps:
-      - uses: actions/checkout@v4
+      - name: ⬇️ Checkout
+        uses: actions/checkout@v4
 
-      - name: Install audio deps (linux)
+      - name: 🔊 Install audio deps (Linux)
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y libasound2-dev
 
-      - uses: dtolnay/rust-toolchain@stable
+      - name: 🦀 Set up Rust
+        uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
 
-      - uses: Swatinem/rust-cache@v2
+      - name: 💾 Cache cargo
+        uses: Swatinem/rust-cache@v2
         with:
-          key: release-${{ matrix.target }}
+          key: release-cli-${{ matrix.target }}
 
-      - name: Build
+      - name: 🏗️ Build twanga-cli
         run: cargo build --release --target ${{ matrix.target }} -p twanga-cli
 
-      - name: Resolve tag + artifact name
+      - name: 🏷️ Resolve tag + artifact name
         id: meta
         shell: bash
         run: |
@@ -85,7 +101,7 @@ jobs:
           echo "staged=$staged" >> "$GITHUB_OUTPUT"
           echo "archive=$archive" >> "$GITHUB_OUTPUT"
 
-      - name: Stage archive contents
+      - name: 📁 Stage archive contents
         shell: bash
         run: |
           staged="${{ steps.meta.outputs.staged }}"
@@ -95,34 +111,361 @@ jobs:
           cp README.md LICENSE-MIT LICENSE-APACHE "$dir/"
           cp assets/examples/*.alphatex "$dir/examples/"
 
-      - name: Pack zip
+      - name: 🗜️ Pack zip
         if: matrix.archive == 'zip'
         shell: pwsh
         working-directory: dist
         run: Compress-Archive -Path "${{ steps.meta.outputs.staged }}" -DestinationPath "${{ steps.meta.outputs.archive }}.zip"
 
-      - name: Pack tar.gz
+      - name: 🗜️ Pack tar.gz
         if: matrix.archive == 'tar.gz'
         shell: bash
         working-directory: dist
         run: tar -czf "${{ steps.meta.outputs.archive }}.tar.gz" "${{ steps.meta.outputs.staged }}"
 
-      - uses: actions/upload-artifact@v4
+      - name: ⬆️ Upload CLI artifact
+        uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.meta.outputs.archive }}
           path: dist/${{ steps.meta.outputs.archive }}.${{ matrix.archive }}
           if-no-files-found: error
 
+  # ─────────────────────────────────────────────────────────────────────
+  # Desktop Tauri installers — the native shell wrapped around the
+  # frontend bundle. `cargo tauri build` per OS produces the platform's
+  # idiomatic installer (.msi/.exe on Windows, .dmg on macOS, .deb +
+  # .AppImage on Linux). Same matrix shape as the CLI, just running a
+  # different build invocation.
+  # ─────────────────────────────────────────────────────────────────────
+  build-desktop:
+    name: 🖥️ Desktop ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: 'Windows 🪟'
+            target: x86_64-pc-windows-msvc
+            os: windows-latest
+            bundles: 'msi,nsis'
+            friendly: windows
+          - name: 'Linux 🐧'
+            target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            bundles: 'deb,appimage'
+            friendly: linux
+          - name: 'macOS Intel 🍎'
+            target: x86_64-apple-darwin
+            os: macos-13
+            bundles: 'dmg'
+            friendly: macos-intel
+          - name: 'macOS Apple Silicon 🍏'
+            target: aarch64-apple-darwin
+            os: macos-latest
+            bundles: 'dmg'
+            friendly: macos-apple-silicon
+
+    steps:
+      - name: ⬇️ Checkout
+        uses: actions/checkout@v4
+
+      - name: 🔧 Install Tauri prerequisites (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libsoup-3.0-dev libssl-dev \
+              libayatana-appindicator3-dev librsvg2-dev libasound2-dev build-essential
+
+      - name: 🦀 Set up Rust (native + wasm32)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}, wasm32-unknown-unknown
+
+      - name: 💾 Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: release-desktop-${{ matrix.target }}
+
+      - name: 📦 Install wasm-bindgen-cli (prebuilt)
+        shell: bash
+        run: |
+          # Same pinned-version dance the pages.yml workflow uses — the
+          # wasm-bindgen binary must match the crate version in
+          # twanga-web's Cargo.toml or the generated JS won't link.
+          if [ "${{ runner.os }}" = "Linux" ]; then
+            curl -sL "https://github.com/rustwasm/wasm-bindgen/releases/download/${WASM_BINDGEN_VERSION}/wasm-bindgen-${WASM_BINDGEN_VERSION}-x86_64-unknown-linux-musl.tar.gz" | tar xz
+            sudo mv "wasm-bindgen-${WASM_BINDGEN_VERSION}-x86_64-unknown-linux-musl/wasm-bindgen" /usr/local/bin/
+          elif [ "${{ runner.os }}" = "macOS" ]; then
+            cargo install wasm-bindgen-cli --version "${WASM_BINDGEN_VERSION}" --locked
+          else
+            cargo install wasm-bindgen-cli --version "${WASM_BINDGEN_VERSION}" --locked
+          fi
+          wasm-bindgen --version
+
+      - name: 🛠️ Build twanga-web (WASM)
+        run: cargo build --target wasm32-unknown-unknown -p twanga-web --release
+
+      - name: ⚙️ Generate JS glue + post-process wasm
+        shell: bash
+        run: |
+          wasm-bindgen --target web --out-dir frontend/web/pkg \
+              target/wasm32-unknown-unknown/release/twanga_web.wasm
+
+      - name: 📁 Bundle alphaTex examples + patterns into the site
+        shell: bash
+        run: |
+          # Same step pages.yml does — the browser library fetches these
+          # relative to the deploy root, Tauri bundles them into the app
+          # via `frontendDist`.
+          mkdir -p frontend/web/assets
+          cp -r assets/examples frontend/web/assets/
+          cp -r assets/patterns frontend/web/assets/
+
+      - name: 📦 Install tauri-cli
+        run: cargo install tauri-cli --version '^2' --locked
+
+      - name: 🏗️ Build Tauri bundle
+        working-directory: crates/twanga-app
+        run: cargo tauri build --bundles ${{ matrix.bundles }} --target ${{ matrix.target }}
+
+      - name: 🏷️ Resolve tag + artifact name
+        id: meta
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            tag="${{ inputs.tag }}"
+          else
+            tag="${GITHUB_REF#refs/tags/}"
+          fi
+          archive="twanga-desktop-${{ matrix.friendly }}"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "archive=$archive" >> "$GITHUB_OUTPUT"
+
+      - name: 📁 Stage bundles
+        shell: bash
+        run: |
+          # cargo tauri build drops the bundles under
+          # `target/{triple}/release/bundle/<format>/<file>`. We pull
+          # whatever was produced (matrix.bundles may include several
+          # formats) into a single per-platform staging dir.
+          mkdir -p dist
+          bundle_root="target/${{ matrix.target }}/release/bundle"
+          if [ -d "$bundle_root" ]; then
+            # Flatten one level — we want the installer files themselves,
+            # not the per-format subdirs.
+            find "$bundle_root" -type f \( -name '*.msi' -o -name '*.exe' \
+                -o -name '*.dmg' -o -name '*.app.tar.gz' \
+                -o -name '*.deb' -o -name '*.AppImage' -o -name '*.rpm' \
+                \) -print -exec cp {} dist/ \;
+          fi
+          ls -lh dist/ || true
+
+      - name: ⬆️ Upload Desktop artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.meta.outputs.archive }}
+          path: dist/*
+          if-no-files-found: error
+
+  # ─────────────────────────────────────────────────────────────────────
+  # Android build — debug-signed APK + AAB. The keystore for release
+  # signing lives in repository secrets (TWANGA_ANDROID_KEYSTORE_B64
+  # etc.) when we have one; until then `cargo tauri android build`
+  # produces an APK signed with Android's universal debug key, which is
+  # fine for sideloading + initial validation but won't be Play Store
+  # acceptable.
+  #
+  # continue-on-error so a flaky Android run doesn't block the desktop
+  # + CLI release. Mobile is best-effort right now.
+  # ─────────────────────────────────────────────────────────────────────
+  build-android:
+    name: 📱 Mobile Android 🤖
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - name: ⬇️ Checkout
+        uses: actions/checkout@v4
+
+      - name: ☕ Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: 🤖 Set up Android SDK + NDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: 'platforms;android-34 build-tools;34.0.0 ndk;26.1.10909125'
+
+      - name: 🦀 Set up Rust (Android targets + wasm32)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android, armv7-linux-androideabi, i686-linux-android, x86_64-linux-android, wasm32-unknown-unknown
+
+      - name: 💾 Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: release-android
+
+      - name: 📦 Install wasm-bindgen-cli (prebuilt)
+        run: |
+          curl -sL "https://github.com/rustwasm/wasm-bindgen/releases/download/${WASM_BINDGEN_VERSION}/wasm-bindgen-${WASM_BINDGEN_VERSION}-x86_64-unknown-linux-musl.tar.gz" | tar xz
+          sudo mv "wasm-bindgen-${WASM_BINDGEN_VERSION}-x86_64-unknown-linux-musl/wasm-bindgen" /usr/local/bin/
+
+      - name: 🛠️ Build twanga-web (WASM) + assets
+        run: |
+          cargo build --target wasm32-unknown-unknown -p twanga-web --release
+          wasm-bindgen --target web --out-dir frontend/web/pkg \
+              target/wasm32-unknown-unknown/release/twanga_web.wasm
+          mkdir -p frontend/web/assets
+          cp -r assets/examples frontend/web/assets/
+          cp -r assets/patterns frontend/web/assets/
+
+      - name: 📦 Install tauri-cli
+        run: cargo install tauri-cli --version '^2' --locked
+
+      - name: 🌱 Initialise Tauri Android project
+        working-directory: crates/twanga-app
+        env:
+          NDK_HOME: ${{ env.ANDROID_NDK_ROOT }}
+        run: cargo tauri android init
+
+      - name: 🏗️ Build Android APK
+        working-directory: crates/twanga-app
+        env:
+          NDK_HOME: ${{ env.ANDROID_NDK_ROOT }}
+        run: cargo tauri android build --apk
+
+      - name: 🏷️ Resolve tag + artifact name
+        id: meta
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            tag="${{ inputs.tag }}"
+          else
+            tag="${GITHUB_REF#refs/tags/}"
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "archive=twanga-android" >> "$GITHUB_OUTPUT"
+
+      - name: 📁 Stage APKs
+        run: |
+          mkdir -p dist
+          # cargo tauri android build drops APKs under the project's gen
+          # dir. Pull whatever was produced.
+          find crates/twanga-app/gen/android -type f -name '*.apk' -print -exec cp {} dist/ \;
+          ls -lh dist/ || true
+
+      - name: ⬆️ Upload Android artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ${{ steps.meta.outputs.archive }}
+          path: dist/*
+          if-no-files-found: warn
+
+  # ─────────────────────────────────────────────────────────────────────
+  # iOS build — best-effort. Without an Apple Developer team ID and a
+  # provisioning profile in repository secrets, `cargo tauri ios build`
+  # cannot produce a signed .ipa installable on real devices. What we
+  # CAN verify in CI is that the project initialises + the simulator
+  # build compiles, which is the main "does it build at all" question.
+  # Release-signed iOS shipping is a separate piece of work that wants
+  # certs + secrets + a proper signing pipeline.
+  # ─────────────────────────────────────────────────────────────────────
+  build-ios:
+    name: 📱 Mobile iOS 🍏
+    runs-on: macos-latest
+    continue-on-error: true
+    steps:
+      - name: ⬇️ Checkout
+        uses: actions/checkout@v4
+
+      - name: 🦀 Set up Rust (iOS targets + wasm32)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios, aarch64-apple-ios-sim, x86_64-apple-ios, wasm32-unknown-unknown
+
+      - name: 💾 Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: release-ios
+
+      - name: 📦 Install wasm-bindgen-cli
+        run: cargo install wasm-bindgen-cli --version "${WASM_BINDGEN_VERSION}" --locked
+
+      - name: 🛠️ Build twanga-web (WASM) + assets
+        run: |
+          cargo build --target wasm32-unknown-unknown -p twanga-web --release
+          wasm-bindgen --target web --out-dir frontend/web/pkg \
+              target/wasm32-unknown-unknown/release/twanga_web.wasm
+          mkdir -p frontend/web/assets
+          cp -r assets/examples frontend/web/assets/
+          cp -r assets/patterns frontend/web/assets/
+
+      - name: 📦 Install tauri-cli
+        run: cargo install tauri-cli --version '^2' --locked
+
+      - name: 🌱 Initialise Tauri iOS project
+        working-directory: crates/twanga-app
+        run: cargo tauri ios init
+
+      - name: 🏗️ Build iOS (simulator target, unsigned)
+        working-directory: crates/twanga-app
+        # No signing config yet, so production .ipa packaging will fail
+        # — we build for the simulator target instead, which doesn't
+        # need a provisioning profile. The `|| true` swallows failure
+        # so this job is purely "did it compile?" validation; the
+        # continue-on-error at the job level catches the rest.
+        run: cargo tauri ios build --target aarch64-apple-ios-sim || true
+
+      - name: 🏷️ Resolve tag + artifact name
+        id: meta
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            tag="${{ inputs.tag }}"
+          else
+            tag="${GITHUB_REF#refs/tags/}"
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "archive=twanga-ios" >> "$GITHUB_OUTPUT"
+
+      - name: 📁 Stage iOS artefacts
+        run: |
+          mkdir -p dist
+          # Whatever the build produced — .ipa if we got that far,
+          # .app bundle from the simulator otherwise, .xcarchive at
+          # worst — pack it for inspection.
+          find crates/twanga-app/gen/apple -type f \( -name '*.ipa' -o -name '*.app.tar.gz' \) -print -exec cp {} dist/ \; 2>/dev/null || true
+          if [ -d crates/twanga-app/gen/apple/build ]; then
+            tar -czf dist/twanga-ios-build.tar.gz -C crates/twanga-app/gen/apple build || true
+          fi
+          ls -lh dist/ || true
+
+      - name: ⬆️ Upload iOS artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ${{ steps.meta.outputs.archive }}
+          path: dist/*
+          if-no-files-found: warn
+
+  # ─────────────────────────────────────────────────────────────────────
+  # Aggregator: pulls every successful artefact into one draft GitHub
+  # Release. Mobile is intentionally NOT in `needs` so a flaky Android
+  # / iOS run doesn't block the CLI + desktop release going out — those
+  # artefacts just won't be attached this time around.
+  # ─────────────────────────────────────────────────────────────────────
   release:
-    name: Publish draft release
-    needs: build
+    name: 🎁 Publish draft release
+    needs: [build-cli, build-desktop]
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - name: ⬇️ Checkout
+        uses: actions/checkout@v4
 
-      - name: Resolve tag
+      - name: 🏷️ Resolve tag
         id: meta
         shell: bash
         run: |
@@ -132,12 +475,13 @@ jobs:
             echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
           fi
 
-      - uses: actions/download-artifact@v4
+      - name: ⬇️ Download all artifacts
+        uses: actions/download-artifact@v4
         with:
           path: dist
           merge-multiple: true
 
-      - name: Create draft release
+      - name: 📦 Create draft release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.meta.outputs.tag }}

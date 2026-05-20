@@ -5,19 +5,6 @@ Forward-looking only. Everything previously listed as `done` lives in the
 adjustments, QoL polish, bugs, and "maybe" items live in
 [BACKLOG.md](BACKLOG.md) instead.
 
-## Deferred (Tauri — paused while we prove things on web)
-
-The Tauri 2 desktop shell already hosts the web bundle in a native
-window; what's deferred is the filesystem integration that would
-replace the browser's IDB + localStorage backends. We're holding off on
-that until the web build's feature surface stabilises so the desktop
-shell inherits a finished product rather than chasing a moving target.
-
-| Item |
-|------|
-| Bidirectional sync of `$CONFIG/twanga/tunings.toml` ↔ `localStorage` via a Tauri command |
-| Tauri filesystem backend for the browser tab library — `library-tauri.js` reads `$CONFIG/twanga/recordings/` once the matching Tauri commands land in `twanga-app` |
-
 ## Follows (next big rocks)
 
 Each of these is genuinely new — not a polish pass on existing

@@ -5,7 +5,6 @@
   "identifier": "uk.co.andrewkidd.twanga",
   "build": {
     "frontendDist": "../../frontend/web",
-    "devUrl": "http://localhost:8080",
     "beforeDevCommand": "",
     "beforeBuildCommand": ""
   },

@@ -7,10 +7,27 @@ arrive via Tauri Mobile once Tauri Mobile lands as stable.
 
 The desktop story is "one frontend, shipped two ways": the exact same
 HTML/JS/WASM bundle that loads in a browser at the deployed URL also
-loads inside this app's webview. No separate native UI. The only thing
-this crate does is open the window and (eventually) expose Tauri
-commands for things the browser sandbox can't do — lower-latency native
-audio capture via CPAL, filesystem access for `~/.config/twanga/`, etc.
+loads inside this app's webview. No separate native UI.
+
+What this crate adds on top of the browser:
+
+- **Filesystem-backed library** at `$CONFIG/twanga/recordings/`. The
+  Playback / Editor library lists files from this dir instead of IDB;
+  Save writes them there. Tabs recorded via `twanga record` appear in
+  the GUI library, and tabs saved in the GUI are playable via
+  `twanga play`. See `src/commands.rs`.
+- **Filesystem-backed user tunings** at `$CONFIG/twanga/tunings.toml`
+  — the same file `twanga tunings add` writes. A bootstrap on app
+  startup pulls the TOML into the existing `localStorage` cache the
+  sync consumers read from; `saveUserTunings()` write-throughs back
+  on every change. Tunings cross the CLI ↔ GUI boundary cleanly.
+- **`tauri-plugin-shell`** — external link clicks in the webview get
+  intercepted and handed to the OS's default browser (rather than
+  navigating the app window away from `app.html`).
+
+Future native commands (lower-latency CPAL backend, filesystem-watch
+event source for cross-process notifications) live on the
+[backlog](../../docs/BACKLOG.md#tauri-desktop-polish).
 
 Tauri 2's recommended `lib.rs` + `main.rs` split is in place so the same
 `run()` entry point will work for the future mobile build without
@@ -93,14 +110,37 @@ Produces platform-native installers (`.msi` on Windows, `.dmg` on macOS,
 
 ## Tauri commands
 
-None exposed yet — the frontend is currently self-sufficient (Web Audio
-for capture, WASM for DSP). When we need to drop into native code (e.g.
-the CPAL backend for sub-20ms input latency on desktop, or filesystem
-access to read `~/.config/twanga/tunings.toml`), commands go in
-[`src/lib.rs`](src/lib.rs) and get registered with the builder.
+Defined in [`src/commands.rs`](src/commands.rs) and registered via
+`invoke_handler` in [`src/lib.rs`](src/lib.rs). Frontend wrappers
+live at [`frontend/web/lib/library-tauri.js`](../../frontend/web/lib/library-tauri.js)
+and [`frontend/web/lib/user-tunings-tauri.js`](../../frontend/web/lib/user-tunings-tauri.js).
 
-- **Depends on**: `twanga-core` (today), `tauri`, `tauri-build`. Will add
-  `twanga-audio` / `twanga-dsp` once native commands need them.
+Recording library:
+
+- `list_recordings()` — returns the contents of
+  `$CONFIG/twanga/recordings/` as `Vec<RecordingRow>` (id = filename,
+  title from the file's `\title` directive, mtime as `createdAt`).
+- `load_recording(id)` — returns the file's alphaTex body.
+- `save_recording(title, alphatex, source?)` — derives a filename from
+  the title, writes to the recordings dir, returns the id.
+- `update_recording(id, title?, alphatex)` — in-place overwrite.
+- `delete_recording(id)` — removes the file. No-op if absent.
+
+User tunings sync:
+
+- `read_tunings_toml()` — returns the contents of
+  `$CONFIG/twanga/tunings.toml` (empty string if missing).
+- `write_tunings_toml(contents)` — overwrites the file. Frontend
+  serialises its `localStorage` map back into the CLI's schema first.
+
+Permissions live in [`capabilities/default.json`](capabilities/default.json).
+Path-traversal protection (no `..`, no path separators) lives on the
+Rust side so a hostile or buggy frontend can't escape the recordings
+dir.
+
+- **Depends on**: `tauri`, `tauri-build`, `tauri-plugin-shell`,
+  `serde`, `directories`, `anyhow`. (Other twanga crates aren't pulled
+  in here — the commands stay self-contained file I/O.)
 - **Used by**: nothing inside the workspace (top of the dependency graph
   on the desktop side; the future Tauri Mobile builds reuse the same
   `lib.rs` entry point).

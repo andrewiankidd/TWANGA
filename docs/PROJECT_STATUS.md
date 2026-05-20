@@ -52,11 +52,16 @@ Backed by:
 4. **Section looper / adaptive difficulty / tab fade-out** —
    Master-Mode style; independent of audio generation.
 
-**Deferred** (paused while we prove things on web first): the two big
-Tauri-shell items (filesystem-backed library + bidirectional
-tunings.toml sync). The architecture is set up so anything that ships
-on web ships unchanged in the desktop shell once the filesystem
-backends land.
+**Tauri desktop shell** is now feature-complete on the filesystem
+axis: recordings live at `$CONFIG/twanga/recordings/` (visible to
+`twanga play` immediately), user tunings round-trip with
+`$CONFIG/twanga/tunings.toml`, external links open in the OS browser.
+Remaining Tauri polish (native CPAL backend for sub-20ms latency,
+hand-crafted per-platform icons, installer build in the release
+workflow) is on the [BACKLOG](BACKLOG.md#tauri-desktop-polish).
+**Mobile (Tauri Mobile)** stays on the [ROADMAP](ROADMAP.md) v2
+tier — Android / iOS path-resolution + audio-permission flows differ
+enough to warrant a separate pass.
 
 **Backlog** — see [BACKLOG.md](BACKLOG.md) for smaller adjustments,
 QoL polish, content expansions, and longer-horizon directions

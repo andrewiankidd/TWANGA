@@ -1,0 +1,11 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Default permission set for the TWANGA shell. Includes core webview + the shell plugin's open() so the external-link interceptor can hand http(s) URLs to the OS browser. Custom Tauri commands (list_recordings, load_recording, etc.) declared via invoke_handler in lib.rs are accessible by default; this capability file is here for the plugin permissions and any future granular locking down.",
+  "local": true,
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "shell:allow-open"
+  ]
+}

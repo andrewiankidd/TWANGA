@@ -2128,13 +2128,16 @@
                 if (shellOpen) {
                     shellOpen(href);
                 } else {
-                    // Tauri present but shell plugin not yet wired (we
-                    // haven't run `cargo tauri init` at the time of writing).
-                    // Better to no-op than navigate the webview to oblivion;
-                    // once the plugin is added this branch becomes dead code.
+                    // Tauri present but the shell plugin didn't register
+                    // (unexpected — the plugin is wired in
+                    // crates/twanga-app/src/lib.rs with the matching
+                    // permission in capabilities/default.json). Log it
+                    // loudly so we notice if a Tauri upgrade breaks the
+                    // global; the click stays prevented so we don't
+                    // strand the user with a broken navigation.
                     console.warn(
-                        'Tauri detected but shell.open unavailable; ' +
-                        'add @tauri-apps/plugin-shell to fix:',
+                        'Tauri detected but shell.open unavailable — ' +
+                        'check tauri-plugin-shell registration:',
                         href
                     );
                 }
@@ -2155,6 +2158,18 @@
 
         async function main() {
             await init();
+
+            // Under Tauri, sync the user tunings file at $CONFIG/twanga/
+            // tunings.toml into the localStorage cache that every sync
+            // consumer (Tuner picker, Recorder picker, tuning-controller…)
+            // reads from. This is a write-through cache: the bootstrap
+            // populates from disk on startup; saveUserTunings() mirrors
+            // back on every write. Browser build skips this — bootstrap
+            // is a no-op when window.__TAURI__ is undefined.
+            if (typeof window.__TAURI__ !== 'undefined') {
+                const { bootstrapFromDisk } = await import('./lib/user-tunings-tauri.js');
+                await bootstrapFromDisk();
+            }
 
             // Initial splash, plus a periodic re-roll while the menu is
             // visible. The hashchange listener below also re-rolls on every

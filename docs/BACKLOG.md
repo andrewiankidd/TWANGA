@@ -46,12 +46,13 @@ The editor screen is shipped (cell-level fret editing on the same Tab renderer P
 
 ## Tauri desktop polish
 
-The Tauri shell hosts the same `frontend/web/` bundle in a native window. The two big filesystem-integration items (tunings sync + recordings library) are in [ROADMAP.md](ROADMAP.md) under Deferred. Smaller polish that doesn't need its own milestone:
+The Tauri shell hosts the same `frontend/web/` bundle in a native window. Filesystem-backed library + tunings sync + plugin-shell wiring are all shipped (see [CHANGELOG](../CHANGELOG.md)). Remaining polish:
 
-- **Wire `@tauri-apps/plugin-shell`.** External-link clicks in app.html already get intercepted via the `window.__TAURI__` runtime check, but the resulting `shell.open(url)` call is currently a no-op until the plugin is added to `tauri.conf.json`'s allowlist + the JS-side glue is imported. Without this the personal-site logo + "TWANGA Homepage" link don't actually open in the system browser when running under Tauri.
 - **Native CPAL backend exposed as a Tauri command.** Web Audio's AudioWorklet runs at 50-150ms latency depending on backend; CPAL gives sub-20ms on desktop. Expose `start_capture` / `stop_capture` Tauri commands that stream samples from `twanga-audio` to the JS frontend over Tauri events. Only worth doing once the latency actually matters in practice (likely once chord/polyphonic verification lands).
 - **Hand-crafted icon set.** `cargo tauri icon` auto-converted the workspace logo. Production builds want a hand-tuned `icon.icns` / `icon.ico` with proper rounded-rect / dark-mode variants per platform's conventions.
 - **`cargo tauri build` smoke run + installer asset upload.** The release workflow currently ships only `twanga-cli`. Once a known-good `cargo tauri build` exists, add it to the release matrix so each tag also publishes desktop installers (`.msi`, `.dmg`, `.deb`, `.AppImage`).
+- **Filesystem-watch-driven cross-process sync.** Today the GUI bootstraps user tunings from `tunings.toml` on startup and write-throughs on every save, but doesn't notice if the CLI mutates the file while the GUI is running. A `notify`-crate watcher + a Tauri event would close that gap. Same idea for the recordings dir (Playback library refresh on external file add). Not high-priority — desktop users tend to be in one app at a time and a manual refresh works.
+- **Browser-storage warning banner under Tauri.** Already CSS-hidden via the `body.is-tauri` class (because the filesystem doesn't evict). Verify it stays hidden as the GUI evolves.
 
 ## Practice mechanics — compounding over time
 

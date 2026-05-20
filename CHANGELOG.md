@@ -10,6 +10,70 @@ dated section.
 
 ### Added
 
+- **Release workflow builds all platforms.** `.github/workflows/release.yml`
+  grew three new build jobs on top of the existing CLI matrix:
+  - **`build-desktop`** — `cargo tauri build` per OS, producing
+    `.msi` + `.exe` (Windows), `.dmg` (macOS Intel + Apple Silicon),
+    `.deb` + `.AppImage` (Linux). Same four platforms the CLI matrix
+    already covers, so every tag now ships both the CLI binary AND
+    a native desktop installer.
+  - **`build-android`** — Tauri Mobile via `cargo tauri android
+    build --apk`. Ubuntu runner with JDK 17 + Android SDK + NDK
+    pinned to `26.1.10909125`. APK is debug-signed for now;
+    release signing pending a keystore in repo secrets.
+  - **`build-ios`** — Tauri Mobile via `cargo tauri ios build`
+    targeting the simulator triple (no Apple Developer cert /
+    provisioning profile required for "does it build at all"
+    validation). macOS runner. Best-effort; release-quality iOS
+    distribution wants the signing pipeline that'll come later.
+  
+  Mobile jobs use `continue-on-error: true` so a flaky Android /
+  iOS run doesn't block the desktop + CLI release. Matrix entries
+  carry `name:` fields with emoji labels (🪟 / 🐧 / 🍎 / 🍏 / 🤖)
+  so the workflow output is scannable. Step names follow the same
+  pattern (📦 install, 🦀 rust, 🏗️ build, 🗜️ pack, ⬆️ upload).
+
+- **Tauri desktop shell now reads + writes the same filesystem the
+  CLI does.** The "Deferred" items on the ROADMAP have shipped:
+  - **Recordings library** — `frontend/web/lib/library-tauri.js`
+    is no longer a stub. New Tauri commands
+    (`list_recordings` / `load_recording` / `save_recording` /
+    `update_recording` / `delete_recording`) in
+    `crates/twanga-app/src/commands.rs` read + write
+    `.alphatex` files under `$CONFIG/twanga/recordings/` — the
+    same directory `twanga record` writes to. Tabs made on the
+    CLI appear in the GUI Playback library; tabs made in the
+    GUI are playable via `twanga play`. Path-traversal
+    protection on the Rust side: recording ids must be bare
+    filenames.
+  - **User tunings sync** — new commands
+    `read_tunings_toml` / `write_tunings_toml` reading +
+    writing `$CONFIG/twanga/tunings.toml` (the same file
+    `twanga tunings add` writes). A new
+    `frontend/web/lib/user-tunings-tauri.js` bootstrap module
+    populates the existing `localStorage` cache from the TOML
+    file at startup; `saveUserTunings()` write-throughs back to
+    disk on every change. A custom tuning defined in the GUI
+    is immediately visible to `twanga tunings list`, and a
+    tuning added via the CLI shows up on next GUI startup.
+  - **Dispatcher** — `library.js` now picks the IDB or Tauri
+    backend at runtime based on `window.__TAURI__`. Bundled
+    examples + patterns continue to load via `fetch()` on both
+    paths (Tauri serves `frontendDist` through the same
+    relative URLs the browser uses).
+  - **`tauri-plugin-shell` wired** in `crates/twanga-app/src/lib.rs`
+    + a default capability in `capabilities/default.json`. The
+    external-link interceptor that already existed in
+    `app.html` now actually opens URLs in the OS browser
+    instead of warning about a missing plugin.
+
+  Net effect: the desktop shell graduates from "webview that
+  hosts the same bundle" to "native app that shares filesystem
+  state with the CLI." Mobile (Tauri Mobile) is still on the
+  v2 roadmap tier — the filesystem path will need an
+  app-specific dir, but the JS dispatcher already handles the
+  Tauri runtime check correctly.
+
 - **Closes the last three CLI ↔ GUI parity gaps.** Three GUI polish
   items that had shipped without CLI counterparts now have full
   parity:
@@ -42,16 +106,73 @@ dated section.
   the "intentional asymmetry" bucket.
 
 - **`twanga patterns` subcommand + bare-`twanga play` picker.**
-  CLI mirror of the GUI's Patterns screen + Playback library list.
-  See squashed commit message.
+  Closes the last CLI / GUI parity gap on the file libraries —
+  the GUI has Playback's library list + the Patterns screen; the
+  CLI now mirrors both.
+  - **`twanga play` with no path** opens an interactive picker
+    that scans bundled examples, bundled patterns, and
+    `./recordings/` and lets you pick from a merged menu —
+    same library the GUI's Playback screen shows. Each row is
+    prefixed `[example]` / `[pattern · <group> · <pips>]` /
+    `[recording]` so the source is clear.
+  - **`twanga patterns`** (bare) — interactive picker over the
+    bundled patterns tree, sorted by difficulty within each
+    group. Plays the chosen pattern with `--loop full`
+    defaulted.
+  - **`twanga patterns list`** — catalog dump grouped by
+    tradition with difficulty pips (★★☆☆). Scriptable.
+  - **`twanga patterns play <id>`** — non-interactive play by
+    manifest id. Flags: `--bpm`, `--no-metronome`, `--wait`,
+    `--no-loop` (default is to loop).
+  - **`twanga patterns path`** — print the manifest path.
+  - **Backed by a new `bundled` module** in twanga-cli with
+    serde_json-based manifest loaders + a `./recordings/`
+    scanner. 6 cargo tests cover the missing-manifest
+    fall-through, JSON parsing for both manifests, difficulty
+    sort + pip rendering, and the recordings directory scan.
+  - Embedded docs (`twanga docs patterns`, `docs/features/patterns.md`,
+    [`crates/twanga-cli/README.md`](crates/twanga-cli/README.md))
+    updated to describe the new commands.
 
-- **Six new bundled patterns** (uke baseline + waltz, banjo reverse +
-  alternating-thumb rolls, guitar boom-chick + Travis). See the
-  squashed commit message.
+- **Six new bundled patterns** — closes the obvious gaps across the
+  existing default tunings and opens a new `guitar` group entirely.
+  No code changes; each is a small `.alphatex` file + a manifest
+  entry. Library count goes from 4 → 10:
+  - **Ukulele strums** — adds `Baseline (D-D-U-U-D-U)` (the canonical
+    pattern, now Level 1) and `Waltz strum (3/4)` (introduces a
+    non-4/4 time signature without leaving the group). Existing
+    Island strum bumped to Level 2 — it's syncopated, genuinely
+    harder than the baseline.
+  - **Bluegrass picking** — adds `Reverse roll` (natural pair to the
+    forward roll, Level 1) and `Alternating-thumb roll` (Level 2 —
+    thumb on every other 8th, alternating drone and low-D bass).
+  - **Guitar (standard tuning)** — new group. `Boom-chick` (Level 1,
+    bass-strum-bass-strum over open G shape, the country/folk
+    rhythmic backbone) and `Travis picking` (Level 2, alternating
+    thumb bass with fingers filling between, same chord shape so
+    muscle memory transfers between the two).
 
-- **Tests for the docs system.** 7 Rust tests + 25 Node tests
-  covering the markdown renderer + docs slug sync point. See
-  squashed commit message.
+- **Tests for the docs system.** Two new test surfaces:
+  - **Rust** — `docs_tests` module in `crates/twanga-cli/src/main.rs`
+    (7 tests): every embedded page starts with an H1; slugs are
+    unique; `docs_page_text()` returns the body for known slugs
+    case-insensitively and errors with a helpful message for
+    unknown ones; `docs_listing_text()` includes every slug; and
+    a sync-point assertion that pins the slug set (Rust `DOCS_PAGES`
+    ↔ JS `DOCS_FEATURES` ↔ `pages.yml` bundle copy) so adding a
+    feature surfaces as a deliberate cross-file edit. Required a
+    small refactor: `run_docs` now delegates to two pure helpers
+    (`docs_listing_text` / `docs_page_text`) so tests don't have
+    to capture stdout.
+  - **JS** — `frontend/web/lib/markdown.test.js`, 25 tests covering
+    every renderer feature (headings, paragraphs, emphasis, code
+    spans + fences, lists, tables, links, blockquotes, hr, XSS
+    escaping, `javascript:` URL defence). Plus a smoke test that
+    runs every shipped `docs/features/*.md` through the renderer
+    and asserts non-empty H1 output. Uses Node 18+'s built-in
+    `node:test` + `node:assert/strict` — no installed deps. Wired
+    into `ci.yml` as a new step in the existing `test` matrix:
+    `node --test "frontend/web/**/*.test.js"`.
 
 - **Per-feature docs (Tuner / Recorder / Playback / Patterns / Editor
   / Tunings), embedded on all three surfaces.** New
