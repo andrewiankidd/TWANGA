@@ -1,7 +1,7 @@
 mod tunings;
 
 use anyhow::{Context, Result, anyhow};
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
 use std::fs::{self, File};
 use std::io::BufWriter;
 use std::path::{Path, PathBuf};
@@ -27,8 +27,12 @@ const DEFAULT_BLOCK_WIDTH: usize = 32;
 #[derive(Parser)]
 #[command(name = "twanga", about = "TWANGA CLI", version)]
 struct Cli {
+    /// Subcommand is optional so `twanga` with no args reaches `main`
+    /// (rather than clap exiting with "missing subcommand" before the
+    /// banner can print). The None case is handled in `main` by
+    /// printing the banner + clap's standard long-help.
     #[command(subcommand)]
-    command: Command,
+    command: Option<Command>,
 }
 
 #[derive(Subcommand)]
@@ -1144,7 +1148,18 @@ fn main() -> Result<()> {
     // piped stdout (e.g. `twanga devices | grep USB`, `twanga tunings path`
     // inside a `$()`) stays clean; interactive users see a consistent splash.
     twanga_tui::motd::print_banner()?;
-    match cli.command {
+    // Bare `twanga` with no subcommand: banner has already printed; follow
+    // it with clap's standard long-help so the user sees the splash AND
+    // the same usage text clap's missing-subcommand error would have
+    // shown. Exit 0 because typing `twanga` to discover what's available
+    // isn't an error.
+    let Some(command) = cli.command else {
+        let mut cmd = Cli::command();
+        cmd.print_long_help()?;
+        println!();
+        return Ok(());
+    };
+    match command {
         Command::Tune { tuning, capo } => {
             let mode = resolve_mode(tuning)?;
             let mode = match mode {

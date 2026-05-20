@@ -10,6 +10,28 @@ dated section.
 
 ### Added
 
+- **Dedicated GUI + CLI docs.** Top-level README now leads with a
+  Getting Started section featuring both first-class surfaces side
+  by side: a screenshot of the GUI main menu and a code block of
+  `cargo run -p twanga-cli` showing the splash banner + commands.
+  Detail moved to [`docs/GUI.md`](docs/GUI.md) (per-screen tour +
+  storage notes + local-dev steps) and [`docs/CLI.md`](docs/CLI.md)
+  (subcommand tour with sample output + bundled-example references).
+  Existing per-flag reference at
+  [`crates/twanga-cli/README.md`](crates/twanga-cli/README.md) is
+  unchanged.
+
+### Fixed
+
+- **Bare `twanga` now prints the MOTD banner.** Running the CLI
+  with no subcommand previously hit clap's "missing subcommand"
+  error and exited with code 2 *before* `print_banner()` got a
+  chance to fire. `command` is now an `Option<Command>`; the
+  `None` case prints the banner first, then clap's standard
+  long-help, then exits 0.
+
+### Added
+
 - **Tab editor — first cut.** New `#editor` screen lets you open
   any recording from the library and edit it directly on the
   same Tab renderer Playback uses, just with `interactive: true`:
