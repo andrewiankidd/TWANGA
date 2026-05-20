@@ -23,6 +23,41 @@ dated section.
 
 ### Fixed
 
+- **Wait-mode no longer skips columns after a pause.** Web Playback's
+  wait mode used to let the wall clock keep ticking while waiting for
+  the user to play the expected note; the next `playbackTick` saw a
+  large elapsed-time delta and jumped the playhead multiple columns
+  forward (effectively "where the user should be by now"). Fixed by
+  recording `waitStartedAt` on wait entry and rolling
+  `now - waitStartedAt` into `totalPausedMs` when the mic detects the
+  match — same shape as the explicit Pause/Resume bookkeeping. Pause
+  pressed *during* wait closes out the current wait segment first to
+  avoid double-counting; resume starts a fresh wait segment if still
+  waiting. The CLI was unaffected — wait state lives in a different
+  loop on that side. (Worth flagging that the playback engine is
+  duplicated CLI ↔ web; a future "Rust playback engine bound to WASM"
+  pass would let them share again.)
+
+### Changed
+
+- **Playback + Editor library rows now show the tuning / instrument
+  subtitle** beneath each row's title. Same shape as the loaded-tab
+  header (`<subtitle> · <bpm> BPM`, falling back to the matched
+  registry tuning's display name, then the raw note names). Resolved
+  async per row so the list paints instantly and the subtitle line
+  fills in once parsing finishes; cached per-id (cleared on cross-tab
+  save/delete) so re-renders don't reparse. Shared
+  `attachRowSubtitle` used by both library views.
+
+- **Loop control on Playback is a dropdown.** Replaced the freetext
+  "off / full / 0:20" input with a dropdown of `off` / `full` /
+  `range…`; selecting `range…` reveals two number inputs for the
+  start + end columns. The underlying spec text the engine parses
+  is unchanged ("off" / "full" / "START:END"), so the CLI flag
+  syntax is still 1:1.
+
+### Fixed
+
 - **Bare `twanga` now prints the MOTD banner.** Running the CLI
   with no subcommand previously hit clap's "missing subcommand"
   error and exited with code 2 *before* `print_banner()` got a

@@ -986,6 +986,15 @@
             text-overflow: ellipsis;
             white-space: nowrap;
         }
+        .tab-library-row .row-subtitle {
+            color: var(--text);
+            font-size: 0.82rem;
+            line-height: 1.2;
+            opacity: 0.85;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
         .tab-library-row .meta {
             color: var(--muted);
             font-size: 0.72rem;
@@ -1478,8 +1487,17 @@
                         <button class="capo-btn" id="playback-bpm-reset" aria-label="Reset to file tempo" title="Reset to file tempo">↺</button>
                     </div>
                     <div class="rec-setting">
-                        <label for="playback-loop">Loop</label>
-                        <input type="text" id="playback-loop" placeholder="off / full / 0:20" value="off">
+                        <label for="playback-loop-mode">Loop</label>
+                        <select id="playback-loop-mode">
+                            <option value="off">off</option>
+                            <option value="full">full</option>
+                            <option value="range">range…</option>
+                        </select>
+                        <input type="number" id="playback-loop-start" min="0" step="1" value="0"
+                               placeholder="start" title="loop start column (0-indexed)" hidden>
+                        <span id="playback-loop-sep" hidden>:</span>
+                        <input type="number" id="playback-loop-end" min="1" step="1" value="20"
+                               placeholder="end" title="loop end column (exclusive)" hidden>
                     </div>
                 </div>
 
@@ -3470,6 +3488,7 @@
             tickHandle: null,
             chromaticTuner: null,   // WebTuner for wait-mode pitch detection
             waitingForCol: -1,      // column index whose note we're waiting for (-1 = not waiting)
+            waitStartedAt: 0,       // performance.now() when the current wait segment began (0 = not waiting). Used to add the wait duration to `totalPausedMs` when the mic detects a match, so the column-tick math doesn't "skip ahead" by however long the user took to play the note.
             micMeter: null,         // shared mic-meter controller (see ./controllers/mic-meter.js)
         };
 
@@ -3562,6 +3581,61 @@
             }
         }
 
+        // Per-id cache for parsed tab subtitles so re-renders of the
+        // library don't re-parse the alphatex every time. Cleared on
+        // BroadcastChannel `save` / `delete` events so an edit in
+        // another tab invalidates the snippet. Bundled ids never
+        // change so they cache forever.
+        const _tabSubtitleCache = new Map();
+        library.subscribe((event) => {
+            if (event && event.id != null) _tabSubtitleCache.delete(event.id);
+        });
+
+        /// Resolve a one-line "tuning · BPM" subtitle for a library
+        /// row. Prefers the alphatex `\subtitle` field if present;
+        /// otherwise falls back to the tuning's display name
+        /// (matched against the registry) plus tempo. Cached by id.
+        async function resolveTabRowSubtitle(entryId) {
+            if (_tabSubtitleCache.has(entryId)) return _tabSubtitleCache.get(entryId);
+            let parsed = null;
+            try {
+                const loaded = await library.load(entryId);
+                parsed = parse_alphatex(loaded.alphatex);
+                const explicit = parsed.subtitle_display();
+                const names = parsed.tuning_names();
+                const bpm = parsed.tempo();
+                let label = explicit;
+                if (!label) {
+                    const slug = matchRegistrySlugForTuningNames(names);
+                    const friendly = slug ? preset_display_name(slug) : null;
+                    label = friendly ?? names.join(' ');
+                }
+                const text = `${label} · ${bpm} BPM`;
+                _tabSubtitleCache.set(entryId, text);
+                return text;
+            } catch (e) {
+                console.warn('row subtitle resolve failed', entryId, e);
+                return null;
+            } finally {
+                parsed?.free?.();
+            }
+        }
+
+        /// Async-fill a row's `.row-subtitle` element. Safe to call
+        /// after the row is already in the DOM; the row remains
+        /// rendered with the placeholder while parsing happens.
+        function attachRowSubtitle(row, entry) {
+            const subEl = document.createElement('div');
+            subEl.className = 'row-subtitle';
+            subEl.textContent = 'loading tuning…';
+            // Insert right after the title.
+            const titleEl = row.querySelector('.info .title');
+            titleEl?.after(subEl);
+            resolveTabRowSubtitle(entry.id).then((text) => {
+                subEl.textContent = text ?? '—';
+            });
+        }
+
         function renderLibraryRow(entry) {
             const row = document.createElement('div');
             row.className = 'tab-library-row';
@@ -3624,6 +3698,7 @@
             }
 
             row.appendChild(actions);
+            attachRowSubtitle(row, entry);
             return row;
         }
 
@@ -3714,7 +3789,10 @@
             playbackState.bpmOverride = null;
             playbackState._loopSpecText = 'off';
             el('playback-bpm').value = String(parsed.tempo());
-            el('playback-loop').value = 'off';
+            el('playback-loop-mode').value = 'off';
+            el('playback-loop-start').hidden = true;
+            el('playback-loop-end').hidden = true;
+            el('playback-loop-sep').hidden = true;
 
             // Swap views
             el('playback-library-view').hidden = true;
@@ -3935,7 +4013,10 @@
 
         function wirePlaybackSettings() {
             const bpmInput = el('playback-bpm');
-            const loopInput = el('playback-loop');
+            const loopMode = el('playback-loop-mode');
+            const loopStart = el('playback-loop-start');
+            const loopEnd = el('playback-loop-end');
+            const loopSep = el('playback-loop-sep');
             const metToggle = el('playback-metronome-toggle');
             const prInput = el('playback-preroll-input');
             const waitToggle = el('playback-wait-toggle');
@@ -3979,14 +4060,55 @@
                 playbackSaveToStorage();
             });
 
-            loopInput.addEventListener('change', () => {
+            // Loop selector — dropdown drives whether the range inputs
+            // show, and the combination resolves to the same
+            // `_loopSpecText` string the parser already understands
+            // ("off" / "full" / "START:END") so playback-start is
+            // unchanged.
+            const syncLoopRangeVisibility = () => {
+                const showRange = loopMode.value === 'range';
+                loopStart.hidden = !showRange;
+                loopEnd.hidden = !showRange;
+                loopSep.hidden = !showRange;
+            };
+            const syncLoopSpecFromInputs = () => {
+                if (loopMode.value === 'off') {
+                    playbackState._loopSpecText = 'off';
+                } else if (loopMode.value === 'full') {
+                    playbackState._loopSpecText = 'full';
+                } else {
+                    const s = Number.parseInt(loopStart.value, 10);
+                    const e = Number.parseInt(loopEnd.value, 10);
+                    // Keep the freetext shape so the existing parser
+                    // (which still emits friendly errors at playback
+                    // start) does the validation in one place.
+                    playbackState._loopSpecText =
+                        `${Number.isFinite(s) ? s : 0}:${Number.isFinite(e) ? e : 0}`;
+                }
+            };
+            loopMode.addEventListener('change', () => {
                 if (playbackState.isPlaying) {
-                    loopInput.value = playbackState._loopSpecText ?? 'off';
+                    // Restore prior selection — we don't allow mid-play edits.
+                    loopMode.value = playbackLoopModeFromSpec(playbackState._loopSpecText);
                     return;
                 }
-                playbackState._loopSpecText = loopInput.value.trim() || 'off';
-                playbackSaveToStorage();
+                syncLoopRangeVisibility();
+                syncLoopSpecFromInputs();
             });
+            [loopStart, loopEnd].forEach((inp) => {
+                inp.addEventListener('change', () => {
+                    if (playbackState.isPlaying) {
+                        // Restore from spec so a typo-then-Play doesn't
+                        // get committed.
+                        const parts = (playbackState._loopSpecText ?? '0:0').split(':');
+                        loopStart.value = parts[0] ?? '0';
+                        loopEnd.value = parts[1] ?? '20';
+                        return;
+                    }
+                    syncLoopSpecFromInputs();
+                });
+            });
+            syncLoopRangeVisibility();
 
             metToggle.addEventListener('change', () => {
                 playbackState.metronome = metToggle.checked;
@@ -4045,6 +4167,16 @@
         /// Parse the user's loop input (`'off'` / `'full'` / `'START:END'`)
         /// into `{ start, end, repeat }`. Throws on invalid input — same
         /// shape as the CLI's `parse_loop_spec`.
+        /// Map a `_loopSpecText` ("off" / "full" / "X:Y") back to the
+        /// dropdown's value. Used when restoring UI from state — e.g.
+        /// after loading a tab, or after a mid-play edit gets ignored.
+        function playbackLoopModeFromSpec(text) {
+            const t = (text ?? 'off').trim().toLowerCase();
+            if (t === 'full') return 'full';
+            if (t.includes(':')) return 'range';
+            return 'off';
+        }
+
         function playbackParseLoopSpec(text, totalCols) {
             const trimmed = (text ?? 'off').trim().toLowerCase();
             if (trimmed === 'off' || trimmed === '') return { start: 0, end: totalCols, repeat: false };
@@ -4074,7 +4206,7 @@
             let loopBounds;
             try {
                 loopBounds = playbackParseLoopSpec(
-                    playbackState._loopSpecText ?? el('playback-loop').value,
+                    playbackState._loopSpecText ?? 'off',
                     totalCols,
                 );
             } catch (e) {
@@ -4097,6 +4229,7 @@
             playbackState.totalPausedMs = 0;
             playbackState.pausedAtMs = 0;
             playbackState.waitingForCol = -1;
+            playbackState.waitStartedAt = 0;
 
             // Lock settings + tuning controls.
             playbackState.tuning?.setEnabled(false);
@@ -4128,6 +4261,17 @@
                             if (playbackState.waitingForCol < 0) return;
                             for (const r of readings) {
                                 if (playbackWaitMatches(r.detected_hz, playbackState.waitingForCol)) {
+                                    // Close out the wait segment: roll the
+                                    // time we spent waiting into the
+                                    // cumulative pause budget so the next
+                                    // `playbackTick` doesn't see "elapsed"
+                                    // jump multiple columns ahead of where
+                                    // the user actually is.
+                                    if (playbackState.waitStartedAt > 0) {
+                                        playbackState.totalPausedMs +=
+                                            performance.now() - playbackState.waitStartedAt;
+                                        playbackState.waitStartedAt = 0;
+                                    }
                                     playbackState.waitingForCol = -1;
                                     break;
                                 }
@@ -4202,9 +4346,23 @@
                 const pausedDur = performance.now() - playbackState.pausedAtMs;
                 playbackState.totalPausedMs += pausedDur;
                 playbackState.isPaused = false;
+                // If we were waiting when pause began, restart a fresh
+                // wait segment from the resume point so the elapsed-time
+                // accounting stays accurate when the note finally lands.
+                if (playbackState.waitingForCol >= 0) {
+                    playbackState.waitStartedAt = performance.now();
+                }
                 el('playback-pause-btn').textContent = 'Pause';
                 playbackUpdateHint();
             } else {
+                // Close out any in-flight wait segment first so its
+                // duration doesn't get double-counted on top of the
+                // pause duration we're about to start accumulating.
+                if (playbackState.waitStartedAt > 0) {
+                    playbackState.totalPausedMs +=
+                        performance.now() - playbackState.waitStartedAt;
+                    playbackState.waitStartedAt = 0;
+                }
                 playbackState.isPaused = true;
                 playbackState.pausedAtMs = performance.now();
                 el('playback-pause-btn').textContent = 'Resume';
@@ -4219,6 +4377,7 @@
             playbackState.isPaused = false;
             playbackState.preRollActive = false;
             playbackState.waitingForCol = -1;
+            playbackState.waitStartedAt = 0;
             if (playbackState.tickHandle) {
                 clearInterval(playbackState.tickHandle);
                 playbackState.tickHandle = null;
@@ -4293,6 +4452,7 @@
                     const col = playbackState.loadedTab.transposed.column_at(newCol);
                     if (col && Array.isArray(col.hits) && col.hits.length > 0) {
                         playbackState.waitingForCol = newCol;
+                        playbackState.waitStartedAt = performance.now();
                     }
                 }
             }
@@ -4558,6 +4718,7 @@
             editBtn.addEventListener('click', () => editorLoad(entry.id));
             actions.appendChild(editBtn);
             row.appendChild(actions);
+            attachRowSubtitle(row, entry);
             return row;
         }
 

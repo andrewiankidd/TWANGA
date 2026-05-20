@@ -35,6 +35,8 @@ Most of this section shipped in the 2026-05-19 cross-cutting QoL batch (metronom
 
 - **Library "Last session" auto-resume.** The library tracks `createdAt` + `lastBackedUpAt` per entry; adding a `lastPlayedAt` + `lastColumn` would let Playback offer "Resume your last tab where you left off" on screen entry. Bookmark behaviour.
 
+- **Transpose mode: drop vs octave-shift (maybe).** Today `transpose_to_with_report` silently drops notes that don't fit on the target tuning — the "Skipped: N notes" preamble shows what's missing. Standard practice in cross-instrument transposition (TuxGuitar, MuseScore, etc.) is to **octave-shift** out-of-range notes instead: notes below the target's lowest playable pitch jump up by 12 semitones (and equivalently for too-high notes), preserving melodic contour at the cost of register. The banjo→uke case where it actually matters is clawhammer drone work like Cripple Creek — A3/B3/G3 bass drones drop entirely on uke today, whereas an octave-shifted A4/B4/G4 would sit on the body. Right shape is probably a per-load toggle ("drop unreachable" / "shift to nearest octave"), defaulting to drop. Cheap in `twanga-tabs`: a single new branch in the existing transpose pass that retries with ±12 semitones before giving up. Maybe, not committed.
+
 ## Tab editor (eventual, GUI-first)
 
 A dedicated screen for hand-editing the column-grid score after recording (or from scratch). Distinct from the Recorder: the recorder captures live input; the editor lets you fix up what got captured (or didn't). Same column-grid + alphaTex round-trip the rest of the stack uses, so saved files round-trip through `twanga play`.
