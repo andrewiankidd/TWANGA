@@ -507,13 +507,14 @@ jobs:
         working-directory: crates/twanga-app
         # No signing config yet, so production .ipa packaging will fail
         # — we build for the simulator target instead, which doesn't
-        # need a provisioning profile. The build is allowed to fail at
+        # need a provisioning profile. `cargo tauri ios build`'s
+        # `--target` takes the Tauri shorthand (`aarch64-sim` /
+        # `aarch64` / `x86_64`), not the rustc triple
+        # (`aarch64-apple-ios-sim`). The build is allowed to fail at
         # the job level via `continue-on-error: true` (Mobile is best-
-        # effort right now), but we no longer paper over failures with
-        # `|| true` — if the step fails, the job shows red and the next
-        # steps that depend on the .app being present will skip via
-        # GHA's default "on failure, skip" behaviour.
-        run: cargo tauri ios build --target aarch64-apple-ios-sim
+        # effort), but we no longer swallow the result with `|| true`
+        # so genuine failures show as red rather than fake-passing.
+        run: cargo tauri ios build --target aarch64-sim
 
       - name: 🏷️ Resolve tag + artifact name
         id: meta
