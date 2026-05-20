@@ -124,7 +124,7 @@ jobs:
         run: tar -czf "${{ steps.meta.outputs.archive }}.tar.gz" "${{ steps.meta.outputs.staged }}"
 
       - name: ⬆️ Upload CLI artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ steps.meta.outputs.archive }}
           path: dist/${{ steps.meta.outputs.archive }}.${{ matrix.archive }}
@@ -261,7 +261,7 @@ jobs:
           ls -lh dist/ || true
 
       - name: ⬆️ Upload Desktop artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ steps.meta.outputs.archive }}
           path: dist/*
@@ -356,7 +356,7 @@ jobs:
           ls -lh dist/ || true
 
       - name: ⬆️ Upload Android artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: ${{ steps.meta.outputs.archive }}
@@ -442,7 +442,7 @@ jobs:
           ls -lh dist/ || true
 
       - name: ⬆️ Upload iOS artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: ${{ steps.meta.outputs.archive }}
