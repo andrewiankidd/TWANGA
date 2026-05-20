@@ -24,6 +24,31 @@ Latency is end-to-end (input → detection); the lower the number, the
 more responsive [wait-mode playback](playback.md) feels and the less
 chance of the cursor "running ahead" because detection arrived late.
 
+## What the author uses
+
+For grounding, my own setup splits by instrument:
+
+- **Banjo** — [KNA BP-1](https://www.knapickups.com/en/folk-instruments/bp-1-kna):
+  a passive, wooden-cased piezo sensor that clamps to the side
+  of the bridge. Designed as a removable, non-invasive pickup,
+  so I just cable-tie the output jack assembly to one of the pot
+  brackets and leave it there → Realtone cable (the 1/4" to USB
+  instrument cable originally shipped with Rocksmith) handles
+  the A/D conversion at the USB end. Roughly Option 3 territory
+  below.
+- **Ukulele** — cheap adhesive piezo disc, stuck to the
+  underside of the uke head with the jack dangling out of the
+  back of the body → cheap USB DAC with a 3.5mm input. The DAC
+  gives the OS a USB audio device; the piezo gives a usable
+  pickup signal for under a fiver. Crude, but it beats trying
+  to mic a uke's quiet acoustic body.
+
+Both paths cost well under £50 total. Neither is the "best" option
+in raw signal-quality terms (a real interface — Option 4 — wins on
+preamp headroom and noise floor), but both clear the latency budget
+for [wait mode](playback.md) comfortably and require zero room
+treatment.
+
 ## Option 1 — Built-in laptop / phone microphone
 
 The path of least resistance. Nothing to plug in.
