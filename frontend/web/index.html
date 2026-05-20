@@ -177,6 +177,7 @@
             font-weight: 700;
             color: var(--text);
             transition: background 0.15s, border-color 0.15s;
+            cursor: pointer;
         }
         .btn:hover {
             background: var(--highlight);
@@ -195,6 +196,62 @@
             cursor: not-allowed;
             pointer-events: none;
         }
+
+        /* Platform dropdown — click the button, get a panel of options
+           (CLI / Portable / Installer where applicable). Uses native
+           <details>/<summary> so no JS needed for the toggle. */
+        .download-platform {
+            position: relative;
+        }
+        .download-platform > summary {
+            list-style: none;
+            user-select: none;
+        }
+        .download-platform > summary::-webkit-details-marker,
+        .download-platform > summary::marker { display: none; }
+        .download-platform .chevron {
+            font-size: 0.7rem;
+            opacity: 0.7;
+            transition: transform 0.15s;
+        }
+        .download-platform[open] .chevron { transform: rotate(180deg); }
+        .download-options {
+            position: absolute;
+            top: calc(100% + 6px);
+            left: 0;
+            min-width: 100%;
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            box-shadow: 0 6px 18px rgba(0,0,0,0.35);
+            z-index: 20;
+            overflow: hidden;
+            white-space: nowrap;
+        }
+        .download-option {
+            display: flex;
+            justify-content: space-between;
+            align-items: baseline;
+            gap: 1.2rem;
+            padding: 0.55rem 0.95rem;
+            color: var(--text);
+            font-size: 0.85rem;
+            border-bottom: 1px solid var(--border);
+        }
+        .download-option:last-child { border-bottom: none; }
+        .download-option:hover {
+            background: var(--highlight);
+            color: var(--background);
+        }
+        .download-option .opt-kind {
+            font-weight: 700;
+        }
+        .download-option .opt-ext {
+            color: var(--muted);
+            font-size: 0.75rem;
+            font-family: monospace;
+        }
+        .download-option:hover .opt-ext { color: var(--background); opacity: 0.85; }
 
         .features h2 {
             font-size: 1.2rem;
@@ -305,29 +362,81 @@
                 <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/></svg>
                 Play in Browser
             </a>
-            <a class="btn" data-download="twanga-windows.zip">
-                <svg viewBox="0 0 24 24"><path d="M0 3.449L9.75 2.1v9.451H0m10.949-9.602L24 0v11.4H10.949M0 12.6h9.75v9.451L0 20.699M10.949 12.6H24V24l-12.9-1.801"/></svg>
-                Windows
-            </a>
-            <a class="btn" data-download="twanga-macos-apple-silicon.tar.gz">
-                <svg viewBox="0 0 24 24"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/></svg>
-                macOS (Apple Silicon)
-            </a>
-            <a class="btn" data-download="twanga-macos-intel.tar.gz">
-                <svg viewBox="0 0 24 24"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/></svg>
-                macOS (Intel)
-            </a>
-            <a class="btn" data-download="twanga-linux.tar.gz">
-                <svg viewBox="0 0 24 24"><path d="M12.504 0c-.155 0-.315.008-.48.021-4.226.333-3.105 4.807-3.17 6.298-.076 1.092-.323 1.396-1.743 2.461-1.028.772-1.862 2.168-2.083 3.399-.204 1.135.108 2.162.634 2.741.527.58 1.2.735 1.2.735s-.396.891-.158 1.573c.238.682.926 1.109.926 1.109s-.253.624.04 1.204c.294.581.858.752.858.752s-.228.451-.09.882c.138.432.555.67.555.67s-.263.378-.077.748c.186.37.639.502.639.502s.161 1.077.974 1.587c.812.51 1.784.478 1.784.478l.453-.001c.684-.004 1.523-.083 2.244-.467.72-.384 1.255-.954 1.464-1.752.208-.794.082-1.328.082-1.328l.135-.05c.238-.09.573-.28.84-.616.266-.336.379-.681.379-.681l.13-.056c.382-.17.868-.526 1.121-1.122.253-.596.191-1.085.191-1.085l.09-.063c.327-.235.734-.655.912-1.275.178-.62.082-1.147.082-1.147l.075-.063c.2-.169.456-.509.582-.962.126-.452.047-.837.047-.837s.548-.584.594-1.456c.046-.872-.254-1.463-.254-1.463s.455-.897.155-1.956c-.3-1.059-1.124-1.467-1.124-1.467s.212-.822-.138-1.581c-.35-.76-1.088-1.019-1.088-1.019S15.906.044 14.1.003c-.536-.012-.984.005-1.596-.003z"/></svg>
-                Linux
-            </a>
-            <a class="btn disabled" title="Coming in v2 — Tauri Mobile build">
+            <!-- One <details> per desktop platform; click the summary
+                 button to reveal CLI / Portable / Installer options. The
+                 existing data-download script (further down) rewrites
+                 each <a data-download="..."> href to the GitHub release
+                 download URL on page load. Mobile platforms collapse to
+                 a single button each — no portable/installer dichotomy
+                 there. -->
+
+            <details class="download-platform">
+                <summary class="btn">
+                    <svg viewBox="0 0 24 24"><path d="M0 3.449L9.75 2.1v9.451H0m10.949-9.602L24 0v11.4H10.949M0 12.6h9.75v9.451L0 20.699M10.949 12.6H24V24l-12.9-1.801"/></svg>
+                    Windows
+                    <span class="chevron">▾</span>
+                </summary>
+                <div class="download-options">
+                    <a class="download-option" data-download="twanga-desktop-windows-setup.msi">
+                        <span class="opt-kind">Desktop Installer</span><span class="opt-ext">.msi</span>
+                    </a>
+                    <a class="download-option" data-download="twanga-desktop-windows-setup.exe">
+                        <span class="opt-kind">Desktop Installer (NSIS)</span><span class="opt-ext">.exe</span>
+                    </a>
+                    <a class="download-option" data-download="twanga-desktop-windows-portable.zip">
+                        <span class="opt-kind">Desktop Portable</span><span class="opt-ext">.zip</span>
+                    </a>
+                    <a class="download-option" data-download="twanga-cli-windows.zip">
+                        <span class="opt-kind">CLI Tool</span><span class="opt-ext">.zip</span>
+                    </a>
+                </div>
+            </details>
+
+            <details class="download-platform">
+                <summary class="btn">
+                    <svg viewBox="0 0 24 24"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/></svg>
+                    macOS
+                    <span class="chevron">▾</span>
+                </summary>
+                <div class="download-options">
+                    <a class="download-option" data-download="twanga-desktop-macos-setup.dmg">
+                        <span class="opt-kind">Desktop Installer</span><span class="opt-ext">.dmg · universal</span>
+                    </a>
+                    <a class="download-option" data-download="twanga-desktop-macos-portable.app.tar.gz">
+                        <span class="opt-kind">Desktop Portable</span><span class="opt-ext">.app · universal</span>
+                    </a>
+                    <a class="download-option" data-download="twanga-cli-macos.tar.gz">
+                        <span class="opt-kind">CLI Tool</span><span class="opt-ext">.tar.gz · universal</span>
+                    </a>
+                </div>
+            </details>
+
+            <details class="download-platform">
+                <summary class="btn">
+                    <svg viewBox="0 0 24 24"><path d="M12.504 0c-.155 0-.315.008-.48.021-4.226.333-3.105 4.807-3.17 6.298-.076 1.092-.323 1.396-1.743 2.461-1.028.772-1.862 2.168-2.083 3.399-.204 1.135.108 2.162.634 2.741.527.58 1.2.735 1.2.735s-.396.891-.158 1.573c.238.682.926 1.109.926 1.109s-.253.624.04 1.204c.294.581.858.752.858.752s-.228.451-.09.882c.138.432.555.67.555.67s-.263.378-.077.748c.186.37.639.502.639.502s.161 1.077.974 1.587c.812.51 1.784.478 1.784.478l.453-.001c.684-.004 1.523-.083 2.244-.467.72-.384 1.255-.954 1.464-1.752.208-.794.082-1.328.082-1.328l.135-.05c.238-.09.573-.28.84-.616.266-.336.379-.681.379-.681l.13-.056c.382-.17.868-.526 1.121-1.122.253-.596.191-1.085.191-1.085l.09-.063c.327-.235.734-.655.912-1.275.178-.62.082-1.147.082-1.147l.075-.063c.2-.169.456-.509.582-.962.126-.452.047-.837.047-.837s.548-.584.594-1.456c.046-.872-.254-1.463-.254-1.463s.455-.897.155-1.956c-.3-1.059-1.124-1.467-1.124-1.467s.212-.822-.138-1.581c-.35-.76-1.088-1.019-1.088-1.019S15.906.044 14.1.003c-.536-.012-.984.005-1.596-.003z"/></svg>
+                    Linux
+                    <span class="chevron">▾</span>
+                </summary>
+                <div class="download-options">
+                    <a class="download-option" data-download="twanga-desktop-linux-setup.deb">
+                        <span class="opt-kind">Desktop Installer</span><span class="opt-ext">.deb</span>
+                    </a>
+                    <a class="download-option" data-download="twanga-desktop-linux-portable.AppImage">
+                        <span class="opt-kind">Desktop Portable</span><span class="opt-ext">.AppImage</span>
+                    </a>
+                    <a class="download-option" data-download="twanga-cli-linux.tar.gz">
+                        <span class="opt-kind">CLI Tool</span><span class="opt-ext">.tar.gz</span>
+                    </a>
+                </div>
+            </details>
+
+            <a class="btn" data-download="twanga-mobile-android.apk" title="Sideload APK — unsigned debug build">
                 <svg viewBox="0 0 24 24"><path d="M17.523 15.341a1.018 1.018 0 0 1 0-2.036 1.018 1.018 0 0 1 0 2.036m-11.046 0a1.018 1.018 0 0 1 0-2.036 1.018 1.018 0 0 1 0 2.036m11.4-6.697l2.01-3.48a.418.418 0 0 0-.152-.571.418.418 0 0 0-.572.15l-2.035 3.527a12.58 12.58 0 0 0-5.128-1.074c-1.84 0-3.56.394-5.128 1.074L4.847 4.743a.418.418 0 0 0-.572-.15.418.418 0 0 0-.152.571l2.01 3.48C2.695 10.582.5 13.894.5 17.692h23c0-3.798-2.195-7.11-5.623-9.048z"/></svg>
-                Android (v2)
+                Android
             </a>
-            <a class="btn disabled" title="Coming in v2 — Tauri Mobile build">
+            <a class="btn disabled" title="Pending — needs Apple Developer signing pipeline; only simulator builds today">
                 <svg viewBox="0 0 24 24"><path d="M17.05 20.28c-.98.95-2.05.8-3.08.35-1.09-.46-2.09-.48-3.24 0-1.44.62-2.2.44-3.06-.35C2.79 15.25 3.51 7.59 9.05 7.31c1.35.07 2.29.74 3.08.8 1.18-.24 2.31-.93 3.57-.84 1.51.12 2.65.72 3.4 1.8-3.12 1.87-2.38 5.98.48 7.13-.57 1.5-1.31 2.99-2.53 4.08zM12 7.25c-.15-2.23 1.66-4.07 3.74-4.25.29 2.58-2.34 4.5-3.74 4.25z"/></svg>
-                iOS (v2)
+                iOS (pending signing)
             </a>
         </div>
 
@@ -397,12 +506,38 @@
             });
         }
 
+        // Point at the rolling `latest-main` pre-release so every push
+        // to main refreshes the downloads. Once we cut a v* tag we'll
+        // either flip this to /releases/latest/download/ (always points
+        // at the newest non-prerelease) or honour a `data-release` attr
+        // per link. For now everything uses latest-main.
+        var RELEASE_TAG = "latest-main";
         document.querySelectorAll("[data-download]").forEach(function(el) {
             var file = el.getAttribute("data-download");
+            var tag = el.getAttribute("data-release") || RELEASE_TAG;
             if (isGitHub) {
-                el.href = "https://github.com/andrewiankidd/TWANGA/releases/latest/download/" + file;
+                el.href = "https://github.com/andrewiankidd/TWANGA/releases/download/" + tag + "/" + file;
             } else {
                 el.href = "/downloads/" + file;
+            }
+        });
+
+        // Only one platform dropdown open at a time, and clicking
+        // outside any dropdown closes them all. Native <details> doesn't
+        // do this by default — but a small chunk of UX glue is enough.
+        var platformDetails = document.querySelectorAll("details.download-platform");
+        platformDetails.forEach(function(d) {
+            d.addEventListener("toggle", function() {
+                if (d.open) {
+                    platformDetails.forEach(function(other) {
+                        if (other !== d) other.open = false;
+                    });
+                }
+            });
+        });
+        document.addEventListener("click", function(e) {
+            if (!e.target.closest("details.download-platform")) {
+                platformDetails.forEach(function(d) { d.open = false; });
             }
         });
 
