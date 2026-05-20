@@ -61,8 +61,7 @@ fn config_dir() -> Result<PathBuf> {
 /// `$CONFIG/twanga/recordings/`. Created on demand.
 fn recordings_dir() -> Result<PathBuf> {
     let dir = config_dir()?.join("recordings");
-    fs::create_dir_all(&dir)
-        .with_context(|| format!("failed to create {}", dir.display()))?;
+    fs::create_dir_all(&dir).with_context(|| format!("failed to create {}", dir.display()))?;
     Ok(dir)
 }
 
@@ -118,9 +117,7 @@ pub fn list_recordings() -> std::result::Result<Vec<RecordingRow>, String> {
 fn list_recordings_impl() -> Result<Vec<RecordingRow>> {
     let dir = recordings_dir()?;
     let mut rows: Vec<(RecordingRow, SystemTime)> = Vec::new();
-    for entry in fs::read_dir(&dir)
-        .with_context(|| format!("failed to read {}", dir.display()))?
-    {
+    for entry in fs::read_dir(&dir).with_context(|| format!("failed to read {}", dir.display()))? {
         let entry = entry?;
         let path = entry.path();
         if path.extension().and_then(|s| s.to_str()) != Some("alphatex") {
@@ -168,8 +165,8 @@ fn load_recording_impl(id: &str) -> Result<RecordingFull> {
     if !path.exists() {
         return Err(anyhow!("no recording with id '{id}'"));
     }
-    let alphatex = fs::read_to_string(&path)
-        .with_context(|| format!("failed to read {}", path.display()))?;
+    let alphatex =
+        fs::read_to_string(&path).with_context(|| format!("failed to read {}", path.display()))?;
     let title = title_or_stem(&path);
     let created_at = mtime_millis(&path);
     Ok(RecordingFull {
@@ -210,8 +207,7 @@ fn save_recording_impl(title: &str, alphatex: &str) -> Result<String> {
         format!("{slug}-{ts}.alphatex")
     };
     let path = recordings_dir()?.join(&filename);
-    fs::write(&path, alphatex)
-        .with_context(|| format!("failed to write {}", path.display()))?;
+    fs::write(&path, alphatex).with_context(|| format!("failed to write {}", path.display()))?;
     Ok(filename)
 }
 
@@ -234,8 +230,7 @@ fn update_recording_impl(id: &str, alphatex: &str) -> Result<()> {
     if !path.exists() {
         return Err(anyhow!("no recording with id '{id}'"));
     }
-    fs::write(&path, alphatex)
-        .with_context(|| format!("failed to write {}", path.display()))?;
+    fs::write(&path, alphatex).with_context(|| format!("failed to write {}", path.display()))?;
     Ok(())
 }
 
@@ -251,8 +246,7 @@ fn delete_recording_impl(id: &str) -> Result<()> {
     if !path.exists() {
         return Ok(());
     }
-    fs::remove_file(&path)
-        .with_context(|| format!("failed to delete {}", path.display()))?;
+    fs::remove_file(&path).with_context(|| format!("failed to delete {}", path.display()))?;
     Ok(())
 }
 
@@ -270,8 +264,7 @@ fn read_tunings_toml_impl() -> Result<String> {
     if !path.exists() {
         return Ok(String::new());
     }
-    fs::read_to_string(&path)
-        .with_context(|| format!("failed to read {}", path.display()))
+    fs::read_to_string(&path).with_context(|| format!("failed to read {}", path.display()))
 }
 
 /// `write_tunings_toml(contents)` — overwrite `$CONFIG/twanga/tunings.toml`
@@ -288,8 +281,7 @@ fn write_tunings_toml_impl(contents: &str) -> Result<()> {
         fs::create_dir_all(parent)
             .with_context(|| format!("failed to create {}", parent.display()))?;
     }
-    fs::write(&path, contents)
-        .with_context(|| format!("failed to write {}", path.display()))?;
+    fs::write(&path, contents).with_context(|| format!("failed to write {}", path.display()))?;
     Ok(())
 }
 

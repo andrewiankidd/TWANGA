@@ -169,9 +169,7 @@ pub mod alphatex {
                             });
                             continue;
                         }
-                        if let Some(placement) =
-                            place_with_mode(target, abs_midi, max_fret, mode)
-                        {
+                        if let Some(placement) = place_with_mode(target, abs_midi, max_fret, mode) {
                             new_hits.push(placement);
                         } else {
                             dropped.push(DroppedNote {
@@ -1111,11 +1109,8 @@ pub mod alphatex {
                 "OctaveShift should rescue some notes Drop would lose"
             );
 
-            let (_drop_t, drop_dropped) = parsed.transpose_to_with_mode(
-                &uke,
-                20,
-                TransposeMode::Drop,
-            );
+            let (_drop_t, drop_dropped) =
+                parsed.transpose_to_with_mode(&uke, 20, TransposeMode::Drop);
             // Drop mode definitely loses it (B8 isn't reachable on a
             // 20-fret uke at the source pitch).
             assert_eq!(drop_dropped.len(), 1);

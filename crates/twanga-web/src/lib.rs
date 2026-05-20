@@ -299,9 +299,11 @@ impl WebParsedTab {
         let entry: twanga_core::PresetEntry = serde_wasm_bindgen::from_value(preset_json)
             .map_err(|e| format!("malformed tuning shape: {e}"))?;
         let target = entry.to_tuning();
-        let (transposed, _dropped) =
-            self.inner
-                .transpose_to_with_mode(&target, max_fret, parse_transpose_mode(mode.as_deref()));
+        let (transposed, _dropped) = self.inner.transpose_to_with_mode(
+            &target,
+            max_fret,
+            parse_transpose_mode(mode.as_deref()),
+        );
         Ok(WebParsedTab { inner: transposed })
     }
 
@@ -322,9 +324,11 @@ impl WebParsedTab {
         let entry: twanga_core::PresetEntry = serde_wasm_bindgen::from_value(preset_json)
             .map_err(|e| format!("malformed tuning shape: {e}"))?;
         let target = entry.to_tuning();
-        let (_transposed, dropped) =
-            self.inner
-                .transpose_to_with_mode(&target, max_fret, parse_transpose_mode(mode.as_deref()));
+        let (_transposed, dropped) = self.inner.transpose_to_with_mode(
+            &target,
+            max_fret,
+            parse_transpose_mode(mode.as_deref()),
+        );
         let js_dropped: Vec<DroppedNoteJs> = dropped
             .into_iter()
             .map(|d| DroppedNoteJs {

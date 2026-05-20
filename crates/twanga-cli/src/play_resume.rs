@@ -53,8 +53,8 @@ pub fn load_at(path: &Path) -> Result<Vec<ResumeBookmark>> {
     if !path.exists() {
         return Ok(Vec::new());
     }
-    let text = fs::read_to_string(path)
-        .with_context(|| format!("failed to read {}", path.display()))?;
+    let text =
+        fs::read_to_string(path).with_context(|| format!("failed to read {}", path.display()))?;
     let parsed: BookmarksFile = toml::from_str(&text)
         .with_context(|| format!("failed to parse {} as TOML", path.display()))?;
     Ok(parsed.bookmarks)
@@ -82,8 +82,7 @@ pub fn save_at(path: &Path, bookmarks: &[ResumeBookmark]) -> Result<()> {
     let file = BookmarksFile {
         bookmarks: bookmarks.to_vec(),
     };
-    let body = toml::to_string_pretty(&file)
-        .context("failed to serialise bookmarks to TOML")?;
+    let body = toml::to_string_pretty(&file).context("failed to serialise bookmarks to TOML")?;
     fs::write(path, body).with_context(|| format!("failed to write {}", path.display()))?;
     Ok(())
 }

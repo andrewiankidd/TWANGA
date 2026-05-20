@@ -158,9 +158,7 @@ pub fn scan_recordings_at(dir: &Path) -> Result<Vec<RecordingEntry>> {
         return Ok(Vec::new());
     }
     let mut entries: Vec<(PathBuf, std::time::SystemTime)> = Vec::new();
-    for ent in fs::read_dir(dir)
-        .with_context(|| format!("failed to read dir {}", dir.display()))?
-    {
+    for ent in fs::read_dir(dir).with_context(|| format!("failed to read dir {}", dir.display()))? {
         let ent = ent?;
         let path = ent.path();
         if path.extension().and_then(|s| s.to_str()) != Some("alphatex") {

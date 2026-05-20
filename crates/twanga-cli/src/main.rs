@@ -245,11 +245,7 @@ enum EditAction {
     /// pitch / top of the tab); `column` is 0-based. `fret` is any
     /// non-negative integer (no upper cap — extended-range
     /// instruments use whatever they need).
-    Set {
-        column: usize,
-        string: u8,
-        fret: u8,
-    },
+    Set { column: usize, string: u8, fret: u8 },
     /// Clear a single cell. Same indexing as `set`.
     Clear { column: usize, string: u8 },
     /// Clear every cell in the given column (rest the entire beat).
@@ -832,13 +828,12 @@ fn resolve_resume_choice(
         total_cols,
         humanise_resume_age(bm.when),
     );
-    let accept: bool = twanga_tui::prompt_parsed(&prompt, true, |s| {
-        match s.trim().to_lowercase().as_str() {
+    let accept: bool =
+        twanga_tui::prompt_parsed(&prompt, true, |s| match s.trim().to_lowercase().as_str() {
             "" | "y" | "yes" => Ok(true),
             "n" | "no" => Ok(false),
             other => Err(format!("expected y/yes or n/no, got '{other}'")),
-        }
-    })?;
+        })?;
     Ok(if accept { Some(bm.column) } else { None })
 }
 
@@ -1265,9 +1260,7 @@ fn run_recorder(
     eprintln!("Saving to:  {}", recording_path.display());
     eprintln!();
     eprintln!("─────────────────────────────────────────────────");
-    eprintln!(
-        "  Controls: 'q' stop · 'p' pause/resume · 'u' undo last col (while paused)"
-    );
+    eprintln!("  Controls: 'q' stop · 'p' pause/resume · 'u' undo last col (while paused)");
     eprintln!("─────────────────────────────────────────────────");
     eprintln!();
 
@@ -1329,9 +1322,7 @@ fn run_recorder(
                     match recorder.undo_last_column() {
                         Some(_marks) => {
                             total_columns = total_columns.saturating_sub(1);
-                            eprintln!(
-                                "[undid last column — {total_columns} columns remaining]"
-                            );
+                            eprintln!("[undid last column — {total_columns} columns remaining]");
                         }
                         None => {
                             eprintln!("[nothing to undo]");
@@ -1576,12 +1567,32 @@ const DOC_TUNINGS: &str = include_str!("../../../docs/features/tunings.md");
 /// Slug → embedded markdown body. Order here is the listing order shown
 /// to the user when they run `twanga docs` with no arg.
 const DOCS_PAGES: &[(&str, &str, &str)] = &[
-    ("tuner", "Live pitch detection vs your chosen tuning.", DOC_TUNER),
-    ("recorder", "Capture played notes as an alphaTex tab.", DOC_RECORDER),
-    ("playback", "Play a tab with metronome, wait, loop, transpose.", DOC_PLAYBACK),
+    (
+        "tuner",
+        "Live pitch detection vs your chosen tuning.",
+        DOC_TUNER,
+    ),
+    (
+        "recorder",
+        "Capture played notes as an alphaTex tab.",
+        DOC_RECORDER,
+    ),
+    (
+        "playback",
+        "Play a tab with metronome, wait, loop, transpose.",
+        DOC_PLAYBACK,
+    ),
     ("patterns", "Bundled rhythm + picking drills.", DOC_PATTERNS),
-    ("editor", "Post-capture cell-level edits to recordings.", DOC_EDITOR),
-    ("tunings", "Built-in + user-defined tuning registry.", DOC_TUNINGS),
+    (
+        "editor",
+        "Post-capture cell-level edits to recordings.",
+        DOC_EDITOR,
+    ),
+    (
+        "tunings",
+        "Built-in + user-defined tuning registry.",
+        DOC_TUNINGS,
+    ),
 ];
 
 /// Pure helper: format the listing shown by `twanga docs` (no arg).
@@ -1612,9 +1623,7 @@ fn docs_page_text(slug: &str) -> Result<&'static str> {
         .iter()
         .find(|(s, _, _)| *s == normalised)
         .map(|(_, _, body)| *body)
-        .ok_or_else(|| {
-            anyhow!("unknown docs page '{slug}' — try `twanga docs` for the list")
-        })
+        .ok_or_else(|| anyhow!("unknown docs page '{slug}' — try `twanga docs` for the list"))
 }
 
 fn run_docs(feature: Option<String>) -> Result<()> {
@@ -1714,9 +1723,7 @@ fn prompt_play_target() -> Result<Option<PathBuf>> {
             bundled::patterns_manifest_path().display(),
             bundled::recordings_dir_path().display(),
         );
-        eprintln!(
-            "Pass a `.alphatex` path explicitly (e.g. `twanga play path/to/file.alphatex`),"
-        );
+        eprintln!("Pass a `.alphatex` path explicitly (e.g. `twanga play path/to/file.alphatex`),");
         eprintln!("or run from a directory that has one of the above.");
         return Ok(None);
     }
@@ -1864,8 +1871,7 @@ fn run_patterns_play(
     let path = bundled::resolve_pattern_path(&pattern)?;
     let content = fs::read_to_string(&path)
         .with_context(|| format!("failed to read '{}'", path.display()))?;
-    let parsed =
-        alphatex::parse(&content).map_err(|e| anyhow!("failed to parse alphaTex: {e}"))?;
+    let parsed = alphatex::parse(&content).map_err(|e| anyhow!("failed to parse alphaTex: {e}"))?;
     if parsed.columns.is_empty() {
         return Err(anyhow!("pattern '{}' has no notes to play", id));
     }
@@ -1905,8 +1911,8 @@ fn run_patterns_play(
 fn run_edit(path: PathBuf, out: Option<PathBuf>, action: EditAction) -> Result<()> {
     let content = fs::read_to_string(&path)
         .with_context(|| format!("failed to read '{}'", path.display()))?;
-    let mut parsed = alphatex::parse(&content)
-        .map_err(|e| anyhow!("failed to parse alphaTex: {e}"))?;
+    let mut parsed =
+        alphatex::parse(&content).map_err(|e| anyhow!("failed to parse alphaTex: {e}"))?;
     // Construct the working `Tuning` from the file's `\tuning` header,
     // then override its `name` with the file's original subtitle so
     // the AlphaTexWriter round-trips the subtitle line instead of
@@ -2043,7 +2049,8 @@ fn run_edit(path: PathBuf, out: Option<PathBuf>, action: EditAction) -> Result<(
                     row[idx] = Some(*fret);
                 }
             }
-            w.write_column(&row).map_err(|e| anyhow!("write column: {e}"))?;
+            w.write_column(&row)
+                .map_err(|e| anyhow!("write column: {e}"))?;
         }
         w.finalize().map_err(|e| anyhow!("finalize: {e}"))?;
     }
@@ -2188,7 +2195,11 @@ fn run_playback(
                 .as_ref()
                 .and_then(|c| c.offsets.get(i).copied())
                 .unwrap_or(0);
-            if off > 0 { format!(" +{off}") } else { String::new() }
+            if off > 0 {
+                format!(" +{off}")
+            } else {
+                String::new()
+            }
         })
         .collect();
     let labels: Vec<String> = tab
@@ -2299,8 +2310,7 @@ fn run_playback(
                                   col: usize|
      -> Result<()> {
         // Best-effort — bookmark failure shouldn't blow up the stop.
-        if let Err(e) = play_resume::record(path, col as u64, parsed_title.map(|s| s.to_string()))
-        {
+        if let Err(e) = play_resume::record(path, col as u64, parsed_title.map(|s| s.to_string())) {
             eprintln!("(couldn't save resume bookmark: {e})");
         }
         Ok(())
@@ -2690,7 +2700,10 @@ mod docs_tests {
         let err = docs_page_text("not-a-feature").expect_err("should error");
         let msg = err.to_string();
         assert!(msg.contains("not-a-feature"), "unexpected message: {msg}");
-        assert!(msg.contains("twanga docs"), "should hint at the listing: {msg}");
+        assert!(
+            msg.contains("twanga docs"),
+            "should hint at the listing: {msg}"
+        );
     }
 
     #[test]
@@ -2711,7 +2724,9 @@ mod docs_tests {
     /// change here is a deliberate sync point with the JS side.
     #[test]
     fn slug_set_matches_expected_features() {
-        let expected = ["tuner", "recorder", "playback", "patterns", "editor", "tunings"];
+        let expected = [
+            "tuner", "recorder", "playback", "patterns", "editor", "tunings",
+        ];
         let actual: Vec<&str> = DOCS_PAGES.iter().map(|(s, _, _)| *s).collect();
         assert_eq!(
             actual, expected,
