@@ -1512,6 +1512,20 @@
 
             <div class="strings" id="strings"></div>
 
+            <!-- Mic-level meter — same shared component the Recorder and
+                 Playback (wait mode) screens use, third consumer of the
+                 makeMicMeter factory. Visible only while the tuner owns
+                 the mic; gives the user a diagnostic signal so "no
+                 reading" is distinguishable from "no audio reaching the
+                 mic". -->
+            <div class="mic-meter" id="tuner-mic-meter" hidden>
+                <span class="mic-meter-label">mic</span>
+                <div class="mic-meter-bar">
+                    <div class="mic-meter-fill" id="tuner-mic-meter-fill"></div>
+                </div>
+                <span class="mic-meter-db" id="tuner-mic-meter-db">—</span>
+            </div>
+
             <p class="tuner-hint" id="tuner-hint">click Start mic to begin</p>
 
             <div class="row">
@@ -2312,6 +2326,7 @@
             tuner: null,            // active WebTuner instance
             rowsByLabel: new Map(), // string label → row element (string mode only)
             sampleRate: 48_000,
+            micMeter: null,         // shared mic-meter controller; lazy-initialised in startMic
         };
         // The Tuner's tuning + capo state lives in `tunerController` (an
         // instance of `makeTuningController`). The controller owns the
@@ -2578,11 +2593,25 @@
 
         async function startMic() {
             el('tuner-hint').textContent = 'requesting microphone…';
+            // Lazy-init the meter on first start; the makeMicMeter
+            // factory hides itself when a different consumer owns the
+            // session (`getActiveConsumer`), so the same instance is
+            // safe to reuse across start/stop cycles.
+            if (!tunerState.micMeter) {
+                tunerState.micMeter = makeMicMeter({
+                    meterId: 'tuner-mic-meter',
+                    fillId: 'tuner-mic-meter-fill',
+                    dbId: 'tuner-mic-meter-db',
+                    consumerName: 'tuner',
+                    getActiveConsumer: () => micSession.consumerName,
+                });
+            }
             const sr = await micSession.start({
                 consumerName: 'tuner',
                 onSamples: (samples) => {
                     if (!tunerState.tuner) return;
                     tunerState.tuner.feed(samples);
+                    tunerState.micMeter?.feed(samples);
                     const readings = tunerState.tuner.take_readings();
                     if (readings.length > 0) applyReadings(readings);
                 },
@@ -2593,6 +2622,7 @@
             // ~80 cents flat.
             tunerState.sampleRate = sr;
             rebuildTuner();
+            tunerState.micMeter.start();
             el('mic-btn').textContent = 'Stop mic';
             el('tuner-hint').textContent = `listening… (${Math.round(sr)} Hz mic)`;
         }
@@ -2602,6 +2632,7 @@
             // over via screen navigation, don't clobber its UI.
             if (micSession.consumerName !== 'tuner') return;
             micSession.stop();
+            tunerState.micMeter?.stop();
             el('mic-btn').textContent = 'Start mic';
             el('tuner-hint').textContent = 'mic stopped';
         }
