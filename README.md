@@ -20,7 +20,7 @@ TWANGA ships **two first-class surfaces** — a GUI and a CLI, with the same fea
 
 ### GUI
 
-Open the deployed app at **[andrewiankidd.github.io/TWANGA/app](https://andrewiankidd.github.io/TWANGA/app/)** — no install.
+Open the deployed app at **[andrewiankidd.github.io/TWANGA](https://andrewiankidd.github.io/TWANGA/)** — no install.
 
 ![TWANGA GUI — main menu](assets/screencaps/gui-menu.png)
 
