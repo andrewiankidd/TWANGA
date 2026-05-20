@@ -93,6 +93,7 @@ Multi-crate Cargo workspace. Each crate has a narrow, deliberately-enforced resp
 - [Per-feature pages](docs/features/) — each feature documented with its CLI + GUI surfaces side by side.
 - [GUI guide](docs/GUI.md) — every screen, storage notes, deploy steps.
 - [CLI guide](docs/CLI.md) — quickstart + subcommand tour with sample output.
+- [Distribution](docs/DISTRIBUTION.md) — what we ship per platform, signing status, how the release matrix works.
 - [Project status](docs/PROJECT_STATUS.md) — what works today, what's next.
 - [Roadmap](docs/ROADMAP.md) — committed future milestones.
 - [Backlog](docs/BACKLOG.md) — everything else worth not forgetting.

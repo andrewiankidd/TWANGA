@@ -209,6 +209,35 @@ the browser overhead is the difference — switch to CLI or wait for
 the Tauri desktop shell's native CPAL backend to land (see
 [ROADMAP](../ROADMAP.md)).
 
+## Common gotchas
+
+A handful of footguns that aren't bugs in TWANGA but feel like ones:
+
+- **Sample-rate mismatch.** TWANGA reads at whatever rate the OS
+  exposes the device at (typically 44.1 or 48 kHz). If the input
+  device advertises one rate and the OS resamples to another behind
+  the scenes, pitch detection still works but wait-mode can feel
+  laggy because the buffer cadence stutters. If wait-mode feels
+  wrong on one device but tight on another, check Sound settings:
+  same rate on input + output of the device avoids the resampler
+  hop.
+- **USB hub power budget.** Audio interfaces (and some USB mics)
+  draw enough current that a passive hub starves them — symptoms
+  are dropouts, the device disappearing mid-session, or refusing
+  to enumerate after sleep. Plug audio gear into a powered hub or
+  directly into a host port.
+- **Multiple input devices, ambiguous default.** When more than
+  one input is present (built-in mic + USB mic + interface),
+  TWANGA uses the OS default. `twanga devices` shows the list;
+  pick a specific one with `twanga tune --device "<name>"`
+  (substring match) if the wrong one is winning. On Windows,
+  the "default device" in Sound settings is what matters — not
+  the "default communications device".
+- **Bluetooth audio.** Don't. Bluetooth headsets add 100–300 ms
+  of additional latency in HFP mode (the only mode that opens a
+  mic), more than wait-mode can tolerate. Use any wired path
+  instead.
+
 ## Verifying your setup
 
 ```bash

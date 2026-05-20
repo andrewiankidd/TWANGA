@@ -10,6 +10,87 @@ dated section.
 
 ### Added
 
+- **Portable desktop variants alongside installers.** Each desktop
+  platform now ships two flavours next to each other on the
+  Releases page:
+  - Windows: `twanga-desktop-windows-setup.msi` and
+    `twanga-desktop-windows-setup.exe` (NSIS) for installers; a new
+    `twanga-desktop-windows-portable.zip` (raw `twanga-app.exe` +
+    README + licences) for no-install use.
+  - macOS: `twanga-desktop-macos-setup.dmg` plus a new
+    `twanga-desktop-macos-portable.app.tar.gz` (the `.app` bundle
+    Tauri builds before wrapping into the DMG — drag-and-drop
+    installable). Requires `--bundles app,dmg` so Tauri doesn't
+    delete the intermediate `.app` after DMG packaging.
+  - Linux: `twanga-desktop-linux-setup.deb` for the package path;
+    the existing AppImage is now named `…-portable.AppImage` to
+    match the convention. AppImage IS the Linux portable form;
+    no raw-ELF tarball is shipped (Tauri needs libwebkit2gtk-4.1
+    at runtime, so a bare ELF wouldn't be portable).
+
+- **Platform-grouped download picker on the landing page.**
+  `frontend/web/index.html` now renders a single button per platform
+  (Windows / macOS / Linux); clicking opens a small dropdown of
+  the available choices (CLI Tool / Desktop Portable / Desktop
+  Installer + Windows's NSIS variant). Built on native
+  `<details>` / `<summary>` — no framework, no JS toggle code,
+  just CSS. Outside-click + open-another closes the previous. Also
+  fixes the URL pattern to deep-link into the `latest-main` rolling
+  pre-release rather than `/releases/latest/` (which 404s while we
+  don't have a versioned tag).
+
+- **Mic-level meter on the Tuner screen.** Tuner is the primary
+  mic-consumer in the app but was the only screen WITHOUT the
+  shared mic-meter that Recorder + Playback (wait mode) have.
+  Wired as the third consumer of `makeMicMeter({...})` — same RMS
+  bar, same dB readout, same "no signal" hint after 2 s of no
+  audio chunks. "No reading" is now distinguishable from "no audio
+  reaching the mic" (permission denied, OS-level mute, suspended
+  `AudioContext`, dead cable).
+
+- **macOS ad-hoc codesigning + Gatekeeper instructions inside the
+  artefacts.** `bundle.macOS.signingIdentity = "-"` in
+  `tauri.conf.json` makes Tauri ad-hoc sign the `.app` during the
+  bundle step — without this, Gatekeeper shows "is damaged and
+  can't be opened" and even the right-click → Open workaround
+  fails. A new `crates/twanga-app/dist/MACOS-README.txt` ships
+  inside both the DMG (injected via `hdiutil convert` to UDRW →
+  mount → drop file → unmount → re-compress to UDZO) and the
+  portable `.app.tar.gz`, so users who download via a deep link
+  still see the workaround (Privacy & Security → "Open Anyway",
+  or `xattr -d com.apple.quarantine /Applications/TWANGA.app`).
+  Full Apple Developer ID notarisation is still future work.
+
+- **Author's personal-setup section in the Hardware doc.**
+  Concrete examples between the TL;DR table and Option 1:
+  - Banjo — [KNA BP-1](https://www.knapickups.com/en/folk-instruments/bp-1-kna)
+    passive wooden-cased piezo sensor clamped to the bridge
+    (output jack assembly cable-tied to a pot bracket) → Realtone
+    cable.
+  - Ukulele — cheap adhesive piezo disc stuck to the underside
+    of the body, jack dangling out the back → cheap USB DAC with
+    a 3.5 mm input.
+  Both clear the wait-mode latency budget; neither costs much.
+
+- **Hardware doc "Common gotchas" section.** Four real footguns
+  that aren't TWANGA bugs but feel like them — sample-rate
+  mismatch making wait-mode laggy, USB hub power-budget issues,
+  ambiguous-default-device when multiple inputs are present
+  (with the `twanga tune --device "<name>"` substring match
+  fix), and a hard "don't use Bluetooth headsets" note (HFP mic
+  mode adds 100–300 ms beyond wait-mode's tolerance).
+
+- **New [`docs/DISTRIBUTION.md`](docs/DISTRIBUTION.md).** Human-
+  facing summary of what TWANGA ships per platform, what's signed
+  vs unsigned, what warnings users will see and why, and what the
+  release matrix actually does. Tables for per-platform artefact
+  names, signing status, and the trigger → workflow mapping; a
+  step-by-step "cutting a versioned release" recipe; and a
+  future-work list (Apple Developer ID, Android release keystore,
+  iOS signing pipeline, Windows EV cert — all deferred until
+  there's demand justifying the recurring cost). Linked from
+  README's Project docs section.
+
 - **New Hardware setup guide** at
   [`docs/features/hardware.md`](docs/features/hardware.md). Cross-
   cutting reference page (not really a feature, but lives in the
@@ -28,27 +109,52 @@ dated section.
   card on the index) and via `twanga docs hardware`.
 
 - **Release workflow builds all platforms.** `.github/workflows/release.yml`
-  grew three new build jobs on top of the existing CLI matrix:
-  - **`build-desktop`** — `cargo tauri build` per OS, producing
-    `.msi` + `.exe` (Windows), `.dmg` (macOS Intel + Apple Silicon),
-    `.deb` + `.AppImage` (Linux). Same four platforms the CLI matrix
-    already covers, so every tag now ships both the CLI binary AND
-    a native desktop installer.
+  produces a complete cross-platform release on every push to main
+  (refreshing the rolling `latest-main` pre-release) and on every
+  `v*` tag (a draft versioned release). Final matrix shape:
+  - **`build-platform`** — one job per desktop OS (Windows / Linux /
+    macOS) that produces BOTH the CLI archive AND the Tauri desktop
+    bundles in the same runner. Combined because `cargo tauri build`
+    already compiles the entire workspace, so adding
+    `cargo build -p twanga-cli` to the same job is nearly free
+    thanks to incremental compilation on shared `target/`.
+    Replaces the earlier `build-cli` + `build-desktop` split.
+  - **macOS is a universal build** (`--target universal-apple-darwin`
+    for Tauri; `lipo`-merged aarch64 + x86_64 CLI). Single DMG +
+    single `.app.tar.gz` + single CLI tarball that all run natively
+    on both Apple Silicon and Intel — the `macos-13` runner entry
+    is gone (GitHub's Intel macOS capacity has multi-hour queues
+    and the universal build sidesteps it entirely).
   - **`build-android`** — Tauri Mobile via `cargo tauri android
-    build --apk`. Ubuntu runner with JDK 17 + Android SDK + NDK
-    pinned to `26.1.10909125`. APK is debug-signed for now;
-    release signing pending a keystore in repo secrets.
-  - **`build-ios`** — Tauri Mobile via `cargo tauri ios build`
-    targeting the simulator triple (no Apple Developer cert /
-    provisioning profile required for "does it build at all"
-    validation). macOS runner. Best-effort; release-quality iOS
-    distribution wants the signing pipeline that'll come later.
-  
-  Mobile jobs use `continue-on-error: true` so a flaky Android /
-  iOS run doesn't block the desktop + CLI release. Matrix entries
-  carry `name:` fields with emoji labels (🪟 / 🐧 / 🍎 / 🍏 / 🤖)
-  so the workflow output is scannable. Step names follow the same
-  pattern (📦 install, 🦀 rust, 🏗️ build, 🗜️ pack, ⬆️ upload).
+    build --apk --debug`. Debug-signed (Android's auto-generated
+    debug keystore) so the APK sideloads cleanly; a real release
+    keystore is a future step.
+  - **`build-ios`** — best-effort Tauri Mobile simulator build via
+    `cargo tauri ios build --target aarch64-sim`. macOS runner.
+    Will produce a `.app.tar.gz` if the simulator build compiles;
+    proper `.ipa` distribution needs Apple Developer signing,
+    pending. Job is `continue-on-error: true` so iOS failures
+    don't block the release going out, but honest red/green now —
+    the previous `|| true` paper-over was removed and
+    `if-no-files-found: error` makes empty artefacts surface
+    properly.
+  - **Aggregators wait for mobile too.** `release-rolling` and
+    `release-tag` use `needs: [build-platform, build-android,
+    build-ios]` + `if: always() && needs.build-platform.result ==
+    'success'`, so Android + iOS finish uploading before the
+    release is cut (avoids a race where mobile artefacts missed
+    the release) while still allowing iOS to fail without
+    blocking.
+
+  Artefact names follow `twanga-{cli,desktop,mobile}-{platform}.{ext}`
+  with `-setup` / `-portable` suffixes — so a glance at the
+  Releases page tells you which file is what. See "Portable desktop
+  variants alongside installers" above for the full layout.
+
+  Matrix entries carry `name:` fields with emoji labels (🪟 / 🐧 /
+  🍎 / 🍏 / 🤖) so the workflow output is scannable; step names
+  follow the same pattern (📦 install, 🦀 rust, 🏗️ build, 🗜️ pack,
+  ⬆️ upload).
 
 - **Tauri desktop shell now reads + writes the same filesystem the
   CLI does.** The "Deferred" items on the ROADMAP have shipped:
@@ -310,6 +416,16 @@ dated section.
 
 ### Changed
 
+- **Per-feature docs are bundled into desktop + mobile builds, not
+  just the Pages site.** `pages.yml` had been copying
+  `docs/features/*.md` into `frontend/web/assets/docs/` for a while
+  so the in-app docs viewer can fetch them in the browser; the
+  Tauri desktop / Android / iOS jobs in `release.yml` never did the
+  same copy, so any doc the user added showed up on Pages but was
+  missing from every native build. Hardware was the first case to
+  expose this; tuner / recorder / playback / patterns / editor /
+  tunings had been bundled-only-on-the-web too.
+
 - **ROADMAP and BACKLOG are future-only.** Everything previously
   marked `done` lives in the CHANGELOG; the ROADMAP now lists only
   Deferred + Follows + v2 items, and the BACKLOG has shed all
@@ -333,6 +449,78 @@ dated section.
   unchanged.
 
 ### Fixed
+
+- **External links in the Tauri webview now actually open in the OS
+  browser.** The interceptor in `frontend/web/app.html` was looking
+  up `window.__TAURI__.shell?.open` — which doesn't exist in Tauri 2
+  unless the `@tauri-apps/plugin-shell` JS package is bundled (we
+  don't use a bundler). The lookup silently fell through to a
+  warning; meanwhile `e.preventDefault()` fired but a race with the
+  webview's default anchor handling let the navigation happen anyway,
+  stranding the user inside the embedded site with no back button.
+  Switched to the IPC invoke path (`invoke('plugin:shell|open', ...)`)
+  that the rest of the codebase already uses successfully, moved
+  the listener to capture phase, and added `stopPropagation` to
+  close the race.
+
+- **macOS app no longer trips Gatekeeper's "is damaged" path.**
+  Without ANY signature, the `.app` was getting flagged as
+  unreadable and even the right-click → Open workaround failed
+  on macOS Sequoia+. Ad-hoc signing during the bundle step (via
+  `signingIdentity = "-"` in `tauri.conf.json`) means the .app
+  inside the DMG now carries a signature — Gatekeeper still warns
+  the developer is unidentified, but the Privacy & Security →
+  "Open Anyway" and `xattr -d com.apple.quarantine` workarounds
+  both work. See the new MACOS-README.txt that ships in the
+  artefacts under "Added".
+
+- **Android APK now actually installs.**
+  `cargo tauri android build --apk` defaults to release mode,
+  which produces an UNSIGNED APK that Android refuses to install
+  ("package appears to be invalid"). Added `--debug` so the build
+  uses Android's auto-generated debug keystore — sideloadable for
+  dev distribution. Real release-keystore signing is future work.
+
+- **iOS build no longer fails on the target name.** Tauri's iOS
+  CLI takes shorthand (`aarch64-sim` / `aarch64` / `x86_64`), not
+  the full rustc triple (`aarch64-apple-ios-sim`). Previous runs
+  errored out immediately with `invalid value for --target`.
+
+- **iOS + Android jobs no longer fake-pass on empty output.**
+  Removed the `|| true` after `cargo tauri ios build` (so a real
+  compile failure surfaces as a failed step, not a green
+  checkmark on an empty artifact). Switched the artifact-upload
+  step to `if-no-files-found: error` so a missed `.app` / `.apk`
+  fails loudly. iOS staging now finds `.app` *directories* under
+  `gen/apple/build`, tars each one, and explicitly fails with an
+  `::error::` annotation if neither a `.app` nor `.ipa` was
+  produced.
+
+- **macOS portable `.app.tar.gz` now exists.** Tauri's bundler
+  deletes the intermediate `TWANGA.app` after wrapping it into
+  the DMG when only `dmg` is requested as a bundle target
+  (visible in logs as `Cleaning .../bundle/macos/TWANGA.app`).
+  Asking for `app,dmg` instead keeps the `.app` around for the
+  portable tarball.
+
+- **Mobile artefacts now actually make the rolling release.**
+  `release-rolling` previously only `needs: [build-platform]`, so
+  it could fire before `build-android` finished uploading — the
+  17 MB APK existed as a workflow artifact but never got into
+  the release. Added `build-android` + `build-ios` to `needs:`
+  with `if: always() && needs.build-platform.result == 'success'`
+  so the aggregator waits for mobile to settle, and a failing iOS
+  build still doesn't block the desktop + CLI release.
+
+- **README homepage link** now points at
+  `https://andrewiankidd.github.io/TWANGA/` (the marketing landing
+  page, 200) rather than `/TWANGA/app/` (404 — there's no `app/`
+  directory; the deployed site serves `app.html` directly).
+
+- **Tauri Windows MSI bundling** now succeeds — added `.ico` (plus
+  `.icns` and sized PNGs) to `tauri.conf.json`'s
+  `bundle.icon` array. The previous single-`.png` entry made the
+  Windows bundler error out with "Couldn't find a .ico icon".
 
 - **Wait-mode no longer skips columns after a pause.** Web Playback's
   wait mode used to let the wall clock keep ticking while waiting for
