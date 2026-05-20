@@ -96,7 +96,11 @@ jobs:
             os: macos-latest
             archive: tar.gz
             bin: twanga
-            bundles: 'dmg'
+            # `app,dmg` rather than just `dmg` because Tauri deletes the
+            # intermediate `TWANGA.app` after wrapping it into the DMG
+            # when only `dmg` is requested. Asking for both keeps the
+            # .app around so we can tar it as the portable artifact.
+            bundles: 'app,dmg'
             friendly: macos
 
     steps:
@@ -587,8 +591,13 @@ jobs:
 
   release-tag:
     name: 🎁 Publish draft release (tag)
-    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
-    needs: [build-platform]
+    # `if: always() && ...` so we still run when Android/iOS fail
+    # (continue-on-error). The success gate stays on build-platform —
+    # CLI + Desktop must compile for there to be anything worth shipping.
+    if: |
+      always() && needs.build-platform.result == 'success' &&
+      (github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v'))
+    needs: [build-platform, build-android, build-ios]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -623,8 +632,14 @@ jobs:
 
   release-rolling:
     name: 🔄 Refresh latest-main release
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [build-platform]
+    # `if: always() && ...` so the mobile builds finishing (or failing —
+    # continue-on-error) doesn't skip this job. The success gate stays
+    # on build-platform because CLI + Desktop must compile for there
+    # to be anything worth shipping.
+    if: |
+      always() && needs.build-platform.result == 'success' &&
+      github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [build-platform, build-android, build-ios]
     runs-on: ubuntu-latest
     permissions:
       contents: write
