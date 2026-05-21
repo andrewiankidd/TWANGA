@@ -264,14 +264,19 @@ jobs:
         # during the bundle step (which is critical because the .dmg
         # wraps the signed .app — signing AFTER the build would leave
         # the DMG copy unsigned). This step verifies the signature
-        # exists and re-signs if it somehow didn't.
+        # exists and re-signs if it somehow didn't. The fallback also
+        # passes --entitlements so a fresh sign here gets the same
+        # microphone permission as Tauri's primary sign step — without
+        # it, WKWebView would strip `navigator.mediaDevices` and the
+        # tuner would silently fail on the resulting .app.
         run: |
           set -e
           bundle_root="target/${{ matrix.tauri_target }}/release/bundle"
+          entitlements="crates/twanga-app/Entitlements.plist"
           for app in "$bundle_root"/macos/*.app; do
               if ! codesign --verify --deep --strict "$app" 2>/dev/null; then
                   echo "::warning::no signature on $app — applying ad-hoc fallback"
-                  codesign --force --deep --sign - "$app"
+                  codesign --force --deep --sign - --entitlements "$entitlements" "$app"
               fi
               codesign --verify --deep --strict "$app"
               echo "verified: $app"

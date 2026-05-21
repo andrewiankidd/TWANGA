@@ -626,6 +626,31 @@ dated section.
   `NotReadableError` after grant. See `tauri-apps/tauri#10846` for
   the underlying constraint.
 
+- **macOS `.app` now declares microphone entitlements + usage
+  description.** The released bundle was throwing
+  `undefined is not an object (evaluating
+  'navigator.mediaDevices.getUserMedia')` on launch, blocking the
+  tuner before it could even prompt for consent. The cause is the
+  same family of problem as the Android entry above, but the fix
+  is cleaner: WKWebView strips the `mediaDevices` object entirely
+  (not just denies `getUserMedia()`) when the bundle lacks the
+  `com.apple.security.device.audio-input` entitlement, and macOS
+  refuses to surface a consent prompt at all without an
+  `NSMicrophoneUsageDescription` Info.plist string. Two new files
+  at [`crates/twanga-app/Entitlements.plist`](crates/twanga-app/Entitlements.plist)
+  and [`crates/twanga-app/Info.plist`](crates/twanga-app/Info.plist)
+  declare them; `tauri.conf.json` now points at the entitlements
+  file via `bundle.macOS.entitlements`, and Tauri 2 auto-merges
+  the Info.plist keys at bundle time (no `release.yml` hack
+  needed — unlike Android, the macOS schema has a first-class
+  config surface for both). Tauri's ad-hoc `codesign` step picks
+  up the entitlements during `cargo tauri build` so the signed
+  `.app` inside the DMG actually carries them; the CI fallback
+  `codesign` line was updated to pass `--entitlements` too so a
+  re-sign (if it ever fires) keeps parity. First-launch UX on
+  macOS now matches every other native audio app: one consent
+  prompt, then tuning works.
+
 - **External links in the Tauri webview now actually open in the OS
   browser.** The interceptor in `frontend/web/app.html` was looking
   up `window.__TAURI__.shell?.open` — which doesn't exist in Tauri 2
