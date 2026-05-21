@@ -466,6 +466,11 @@ struct StringInfoJs {
     label: String,
     open_hz: f32,
     midi: u8,
+    /// Per-string lowest-physical-fret offset (5 on the banjo high-G drone,
+    /// 0 elsewhere). The frontend needs this for pitch math when computing
+    /// the live-note for a fretted drone — `open + fret` is wrong on offset
+    /// strings; the correct formula is `open + max(0, fret - fret_offset)`.
+    fret_offset: u8,
 }
 
 #[wasm_bindgen]
@@ -605,6 +610,7 @@ impl WebTuner {
                     label: s.name.clone(),
                     open_hz: s.open.to_frequency().hz(),
                     midi: s.open.0,
+                    fret_offset: s.fret_offset,
                 })
                 .collect(),
             twanga_dsp::TunerMode::Chromatic => Vec::new(),
@@ -906,26 +912,32 @@ mod tests {
                 PresetString {
                     name: "D4".into(),
                     midi: 62,
+                    fret_offset: 0,
                 },
                 PresetString {
                     name: "A3".into(),
                     midi: 57,
+                    fret_offset: 0,
                 },
                 PresetString {
                     name: "F#3".into(),
                     midi: 54,
+                    fret_offset: 0,
                 },
                 PresetString {
                     name: "D3".into(),
                     midi: 50,
+                    fret_offset: 0,
                 },
                 PresetString {
                     name: "A2".into(),
                     midi: 45,
+                    fret_offset: 0,
                 },
                 PresetString {
                     name: "D2".into(),
                     midi: 38,
+                    fret_offset: 0,
                 },
             ],
         }

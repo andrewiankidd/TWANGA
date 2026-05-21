@@ -119,6 +119,21 @@ impl MidiNote {
 pub struct TunedString {
     pub name: String,
     pub open: MidiNote,
+    /// Lowest physical fret on the neck where this string actually starts.
+    /// 0 for every normal string. 5 for the 5-string banjo's high-G drone
+    /// — that string is pegged at the 5th fret of the neck, so physically
+    /// no fretboard exists for it at frets 1-4, and pressing at fret 7
+    /// produces "open + 2 semitones" not "open + 7 semitones."
+    ///
+    /// Affects two things only:
+    /// 1. [`Tuning::match_to_fret`] adds the offset to the displayed
+    ///    fret when the target pitch is above this string's open, so
+    ///    A4 transposed onto a banjo drone comes out as fret 7, not 2.
+    /// 2. Anywhere that computes pitch from a (string, fret) pair must
+    ///    use `open + max(0, fret - fret_offset)` instead of `open + fret`.
+    ///    Fret 0 still means "open string" universally — existing tabs
+    ///    with `0.5` (drone open) keep their meaning.
+    pub fret_offset: u8,
 }
 
 /// Strings are listed in string-number order (string 1 first), NOT pitch order.
@@ -146,6 +161,15 @@ pub struct PresetEntry {
 pub struct PresetString {
     pub name: String,
     pub midi: u8,
+    /// See [`TunedString::fret_offset`]. Serde default = 0 so every
+    /// existing TOML preset (and user-defined tuning file) keeps parsing
+    /// unchanged — only the banjo 5-string drone sets it non-zero.
+    #[serde(default, skip_serializing_if = "is_zero_u8")]
+    pub fret_offset: u8,
+}
+
+fn is_zero_u8(n: &u8) -> bool {
+    *n == 0
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
@@ -164,6 +188,7 @@ impl PresetEntry {
                 .map(|s| TunedString {
                     name: s.name.clone(),
                     open: MidiNote(s.midi),
+                    fret_offset: s.fret_offset,
                 })
                 .collect(),
         }
@@ -179,6 +204,7 @@ impl PresetEntry {
                 .map(|s| PresetString {
                     name: s.name.clone(),
                     midi: s.open.0,
+                    fret_offset: s.fret_offset,
                 })
                 .collect(),
         }
@@ -270,12 +296,27 @@ impl Tuning {
             if fret_float < -0.5 {
                 continue;
             }
-            let fret_i = fret_float.round() as i32;
-            if fret_i < 0 || fret_i > max_fret as i32 {
+            let semitones_i = fret_float.round() as i32;
+            if semitones_i < 0 {
+                continue;
+            }
+            // Displayed fret = physical fret on the neck.
+            // For normal strings (fret_offset = 0) this is identical to
+            // semitones-above-open. For strings like the 5-string banjo
+            // drone (fret_offset = 5) we shift the non-zero case so the
+            // user sees the actual neck position they need to press.
+            // Open (semitones == 0) stays as fret 0 regardless of offset
+            // — `0.5` means "drone open" in every existing recording.
+            let fret_i = if semitones_i == 0 {
+                0
+            } else {
+                semitones_i + s.fret_offset as i32
+            };
+            if fret_i > max_fret as i32 {
                 continue;
             }
             let fret = fret_i as u8;
-            let exact_cents = fret as f32 * 100.0;
+            let exact_cents = semitones_i as f32 * 100.0;
             let cents_off = cents_above_open - exact_cents;
 
             let candidate = FretMatch {
@@ -419,6 +460,11 @@ impl Capo {
                 Ok(TunedString {
                     name,
                     open: new_note,
+                    // fret_offset is an intrinsic property of the instrument
+                    // (where the string is physically pegged on the neck), not
+                    // a property of the tuning state — a player capo doesn't
+                    // move the 5th-string spike. Preserve it from the base.
+                    fret_offset: s.fret_offset,
                 })
             })
             .collect::<Result<Vec<_>, String>>()?;
@@ -576,6 +622,46 @@ mod tests {
     }
 
     #[test]
+    fn match_to_fret_returns_physical_fret_on_offset_strings() {
+        // The 5-string banjo's high-G drone has `fret_offset = 5` because
+        // it's physically pegged at the 5th fret of the neck — frets 1-4
+        // don't exist for that string, and "fret 7 on string 5" means
+        // pressing 2 semitones above the open drone, not 7. So a uke A4
+        // (MIDI 69) transposed to banjo5 should come back with displayed
+        // fret 7 (not 2 — that was the pre-fix bug). Both string 1
+        // (D4 + 7 = A4) and string 5 (drone open + 2 = A4) are valid;
+        // we pin the fret value (the user-visible invariant) but accept
+        // either string — float-precision tie-break is incidental.
+        let banjo = Tuning::standard_banjo();
+        let a4 = MidiNote(69).to_frequency();
+        let m = banjo.match_to_fret(a4, 20).expect("should match");
+        assert_eq!(
+            m.fret, 7,
+            "uke A4 transposed to banjo5 should display fret 7 \
+             (not 2 — the pre-fix bug placed it on the drone using \
+             relative-to-open frets)"
+        );
+        let placed = &banjo.strings[m.string_idx].name;
+        assert!(
+            placed == "D4" || placed == "g4 (drone)",
+            "A4 should land on string 1 (D4+7) or the drone (open+2, displayed 7), got {placed}"
+        );
+    }
+
+    #[test]
+    fn match_to_fret_drone_open_still_lands_at_fret_zero() {
+        // Sanity-check the boundary: `fret_offset` only applies to non-zero
+        // semitones above open. Drone open (G4) must still be displayed as
+        // fret 0 — every existing banjo recording (cripple-creek, etc.)
+        // notates the drone open as `0.5`, and the fix must not break
+        // that legacy convention.
+        let banjo = Tuning::standard_banjo();
+        let g4 = MidiNote(67).to_frequency();
+        let m = banjo.match_to_fret(g4, 20).expect("should match");
+        assert_eq!(m.fret, 0, "drone open should still be fret 0, not 5");
+    }
+
+    #[test]
     fn match_to_fret_picks_lower_fret_when_ambiguous() {
         // D5 sits on every uke string: A fret 5, E fret 10, C fret 14, g fret 7.
         // Should pick A fret 5 — the lowest fret across all valid candidates.
@@ -693,10 +779,12 @@ mod tests {
                 PresetString {
                     name: "A4".into(),
                     midi: 69,
+                    fret_offset: 0,
                 },
                 PresetString {
                     name: "D4".into(),
                     midi: 62,
+                    fret_offset: 0,
                 },
             ],
         };
@@ -717,18 +805,22 @@ mod tests {
                 PresetString {
                     name: "A4".into(),
                     midi: 69,
+                    fret_offset: 0,
                 },
                 PresetString {
                     name: "D4".into(),
                     midi: 62,
+                    fret_offset: 0,
                 },
                 PresetString {
                     name: "G3".into(),
                     midi: 55,
+                    fret_offset: 0,
                 },
                 PresetString {
                     name: "C3".into(),
                     midi: 48,
+                    fret_offset: 0,
                 },
             ],
         };

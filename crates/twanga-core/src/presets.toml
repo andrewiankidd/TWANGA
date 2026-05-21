@@ -22,12 +22,17 @@ strings = [
 [[tuning]]
 slug = "standard-banjo"
 name = "Standard 5-String Banjo (Open G)"
+# The 5th string (high-G drone) is pegged at the 5th fret of the neck —
+# physically no fretboard at frets 1-4, and "fret 7 on string 5" means
+# pressing 2 semitones above open (A4), not 7 semitones above (D5).
+# `fret_offset = 5` makes `match_to_fret` emit physical-fret-on-neck
+# numbers for transposed output, so a uke A4 lands at 7.5 instead of 2.5.
 strings = [
     { name = "D4", midi = 62 },
     { name = "B3", midi = 59 },
     { name = "G3", midi = 55 },
     { name = "D3", midi = 50 },
-    { name = "g4 (drone)", midi = 67 },
+    { name = "g4 (drone)", midi = 67, fret_offset = 5 },
 ]
 
 [[tuning]]

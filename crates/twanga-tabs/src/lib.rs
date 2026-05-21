@@ -87,6 +87,13 @@ pub mod alphatex {
                 strings.push(TunedString {
                     name: n.clone(),
                     open: midi,
+                    // alphaTex's `\tuning` header is just note names — no
+                    // place to carry an instrument-level fret offset. Tunings
+                    // parsed from a file therefore default to 0 on every
+                    // string, which matches every legacy recording (`0.5` =
+                    // drone open, no banjo-tab files use fret > 0 on string 5
+                    // — checked against the bundled examples).
+                    fret_offset: 0,
                 });
             }
             Some(Tuning {
@@ -1186,10 +1193,15 @@ pub enum TabEvent {
 pub struct TabRecorder {
     string_names: Vec<String>,
     /// Open-string MIDI per string. Used by `render_rows` to compute
-    /// the live-note cell (`open_midi + fret` → pitch class name) so
-    /// the user sees "this fret = B" without having to do mental
-    /// arithmetic against the open-string label.
+    /// the live-note cell (`open_midi + max(0, fret - fret_offset)`
+    /// → pitch class name) so the user sees "this fret = B" without
+    /// having to do mental arithmetic against the open-string label.
     string_open_midis: Vec<MidiNote>,
+    /// Per-string fret offset (5 on the banjo drone, 0 elsewhere). Mirrors
+    /// `TunedString::fret_offset` so the live-note cell renders the right
+    /// pitch when `match_to_fret` placed a note at a displayed fret on a
+    /// physically-offset string (e.g. drone at fret 7 = A4, not D5).
+    string_fret_offsets: Vec<u8>,
     samples_per_column: usize,
     columns_per_block: usize,
     name_width: usize,
@@ -1218,6 +1230,7 @@ impl TabRecorder {
         Self {
             string_names: tuning.strings.iter().map(|s| s.name.clone()).collect(),
             string_open_midis: tuning.strings.iter().map(|s| s.open).collect(),
+            string_fret_offsets: tuning.strings.iter().map(|s| s.fret_offset).collect(),
             samples_per_column: samples_per_column.max(1),
             columns_per_block: columns_per_block.max(1),
             name_width,
@@ -1331,9 +1344,15 @@ impl TabRecorder {
                 // width keeps the tab-body alignment stable as notes
                 // come and go.
                 let last_fret = marks.last().copied().flatten();
+                let offset = self.string_fret_offsets.get(i).copied().unwrap_or(0);
                 let note_cell = match (last_fret, self.string_open_midis.get(i)) {
                     (Some(fret), Some(open)) => {
-                        let midi = MidiNote(open.0.saturating_add(fret));
+                        // pitch = open + max(0, fret - fret_offset). Saturating
+                        // sub gives 0 for fret <= offset, which is the right
+                        // answer for "open" (fret 0) and for the physically
+                        // impossible range [1, offset] (still open pitch).
+                        let semitones = fret.saturating_sub(offset);
+                        let midi = MidiNote(open.0.saturating_add(semitones));
                         format!("{:<2}", midi.pitch_class_name())
                     }
                     _ => "  ".to_string(),

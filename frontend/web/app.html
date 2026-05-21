@@ -5574,17 +5574,46 @@
             const col = tab.column_at(colIdx);
             if (!col || !Array.isArray(col.hits) || col.hits.length === 0) return false;
             const tuningNames = tab.tuning_names();
+            // Per-string `fret_offset` lookup. alphaTex's `\tuning` header
+            // only carries note names, so we match against the registry to
+            // recover offsets (5 on the banjo high-G drone, 0 elsewhere).
+            // Without this, `expectedMidi = openMidi + fret` would expect
+            // D5 instead of A4 for a transposed-to-banjo `7.5`, and the
+            // wait gate would never release on the correct note.
+            const fretOffsets = lookupFretOffsetsForTuningNames(tuningNames);
             for (const [stringNum, fret] of col.hits) {
                 const idx = stringNum - 1;
                 if (idx < 0 || idx >= tuningNames.length) continue;
                 const openMidi = midi_from_name(tuningNames[idx]);
                 if (openMidi == null) continue;
-                const expectedMidi = openMidi + fret;
+                const offset = fretOffsets[idx] ?? 0;
+                const semitones = Math.max(0, fret - offset);
+                const expectedMidi = openMidi + semitones;
                 const expectedHz = 440 * Math.pow(2, (expectedMidi - 69) / 12);
                 const cents = 1200 * Math.log2(detectedHz / expectedHz);
                 if (Math.abs(cents) < WAIT_MATCH_CENTS) return true;
             }
             return false;
+        }
+
+        /// Recover per-string `fret_offset` for a list of open-string note
+        /// names by matching against the registry. Returns an array of u8
+        /// (length = tuningNames.length), defaulting to 0 when no matching
+        /// preset is found (which is the right answer for hand-rolled
+        /// tunings and every legacy recording). See `TunedString::fret_offset`.
+        function lookupFretOffsetsForTuningNames(tuningNames) {
+            const fallback = tuningNames.map(() => 0);
+            try {
+                const slug = matchRegistrySlugForTuningNames(tuningNames);
+                if (!slug) return fallback;
+                let entry;
+                try { entry = builtin_preset_entry(slug); }
+                catch { entry = userTuningBySlug(slug); }
+                if (!entry || !Array.isArray(entry.strings)) return fallback;
+                return entry.strings.map((s) => s.fret_offset ?? 0);
+            } catch {
+                return fallback;
+            }
         }
 
         // ----------------------------------------------------------------

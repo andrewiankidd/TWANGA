@@ -380,6 +380,13 @@ fn run_tunings_add() -> Result<()> {
         strings.push(PresetString {
             name: pitch.name(),
             midi: pitch.0,
+            // User-defined tunings don't expose fret_offset through the prompt
+            // flow yet — covers 99% of instruments (everything fretted from
+            // nut to body has offset 0). The banjo 5-string drone is the only
+            // case so far that needs non-zero, and that lives in the bundled
+            // `presets.toml`. If users start defining 5-string banjo variants
+            // by hand, they can edit `$CONFIG/twanga/tunings.toml` to set it.
+            fret_offset: 0,
         });
     }
 
@@ -2218,16 +2225,30 @@ fn run_playback(
     // notes get surfaced to the user up front rather than silently
     // disappearing — they get a "Skipped notes" preamble before the cursor
     // starts and can hit `q` if it's worse than they expected.
-    let (tab, dropped) = if let Some(name) = tuning_override.as_deref() {
+    // `target_tuning` carries the *transpose target* tuning when one was
+    // selected — including per-string `fret_offset` metadata that the
+    // alphaTex `\tuning` header can't represent (it stores note names
+    // only). Without this preserved copy, downstream code that derives
+    // pitches from `tab.tuning_names` (`note_at_playhead`,
+    // `matches_any_expected`) would compute `open + 7 = D5` for the
+    // banjo drone at fret 7 instead of the correct `open + 2 = A4`.
+    // `None` when no transpose happened — matches every legacy recording.
+    let (tab, dropped, target_tuning) = if let Some(name) = tuning_override.as_deref() {
         let target = lookup_tuning(name).ok_or_else(|| {
             anyhow!(
                 "unknown tuning preset '{name}'. options: {}",
                 known_slugs().join(", ")
             )
         })?;
-        parsed.transpose_to_with_mode(&target, MAX_FRET, transpose_mode)
+        let (transposed, dropped) =
+            parsed.transpose_to_with_mode(&target, MAX_FRET, transpose_mode);
+        (transposed, dropped, Some(target))
     } else {
-        (parsed, Vec::new())
+        (parsed, Vec::new(), None)
+    };
+    let target_fret_offsets: Vec<u8> = match &target_tuning {
+        Some(t) => t.strings.iter().map(|s| s.fret_offset).collect(),
+        None => vec![0_u8; tab.tuning_names.len()],
     };
 
     let (loop_start, loop_end, repeat) = parse_loop_spec(loop_spec.as_deref(), tab.columns.len())?;
@@ -2256,11 +2277,16 @@ fn run_playback(
 
     // Effective tuning for wait-mode pitch comparison: tab's tuning + the
     // resolved capo. Frets in the tab are interpreted relative to this capo —
-    // fret 0 means "the open string above the capo."
+    // fret 0 means "the open string above the capo." Prefer the preserved
+    // `target_tuning` (when a transpose ran) over `tab.tuning()` so per-string
+    // `fret_offset` metadata survives — alphaTex's `\tuning` header doesn't
+    // carry it, and without it wait-mode would expect the wrong pitch on a
+    // banjo drone fretted above its peg.
     let tuning_for_wait: Option<Tuning> = if wait {
-        let base = tab
-            .tuning()
-            .ok_or_else(|| anyhow!("'\\tuning' header is missing or unparseable"))?;
+        let base = target_tuning.clone().map(Ok).unwrap_or_else(|| {
+            tab.tuning()
+                .ok_or_else(|| anyhow!("'\\tuning' header is missing or unparseable"))
+        })?;
         let c = effective_capo
             .clone()
             .unwrap_or_else(|| Capo::none(base.strings.len()));
@@ -2503,6 +2529,7 @@ fn run_playback(
                 &tab,
                 &labels,
                 &open_midis,
+                &target_fret_offsets,
                 col_idx,
                 PLAYBACK_WINDOW_COLS,
                 name_width,
@@ -2590,6 +2617,7 @@ fn render_playback_rows(
     tab: &ParsedTab,
     labels: &[String],
     open_midis: &[MidiNote],
+    fret_offsets: &[u8],
     current_col: usize,
     window_cols: usize,
     name_width: usize,
@@ -2618,7 +2646,7 @@ fn render_playback_rows(
         // fret being played on this string at the playhead column.
         // Empty when this string isn't playing in the current column.
         // 2-char-max fixed width keeps the tab-body alignment stable.
-        let note_cell = note_at_playhead(tab, string_idx, current_col, open_midis);
+        let note_cell = note_at_playhead(tab, string_idx, current_col, open_midis, fret_offsets);
         rows.push(format!("{padded} | {note_cell} | {content}"));
     }
 
@@ -2646,6 +2674,7 @@ fn note_at_playhead(
     string_idx: usize,
     current_col: usize,
     open_midis: &[MidiNote],
+    fret_offsets: &[u8],
 ) -> String {
     let column = tab.columns.get(current_col);
     let string_num = (string_idx + 1) as u8;
@@ -2657,7 +2686,14 @@ fn note_at_playhead(
     });
     match (fret, open_midis.get(string_idx)) {
         (Some(fret), Some(open)) => {
-            let midi = MidiNote(open.0.saturating_add(fret));
+            // pitch = open + max(0, fret - fret_offset). On the banjo
+            // drone (offset 5), a displayed fret of 7 is A4 (open + 2),
+            // not D5 (open + 7). `saturating_sub` correctly returns 0
+            // for fret <= offset, which keeps "open" as the pitch for
+            // the physically impossible drone-fret-1..4 range too.
+            let offset = fret_offsets.get(string_idx).copied().unwrap_or(0);
+            let semitones = fret.saturating_sub(offset);
+            let midi = MidiNote(open.0.saturating_add(semitones));
             format!("{:<2}", midi.pitch_class_name())
         }
         _ => "  ".to_string(),
@@ -2780,8 +2816,13 @@ fn matches_any_expected(detected: Frequency, expected: &[(u8, u8)], tuning: &Tun
         let Some(s) = tuning.strings.get(string_idx) else {
             continue;
         };
+        // semitones = max(0, fret - fret_offset). fret 0 always means
+        // "open" (target_hz == open_hz). For offset strings like the
+        // banjo drone (offset 5), fret 7 in the tab means open + 2
+        // semitones, not open + 7 — match against A4, not D5.
+        let semitones = fret.saturating_sub(s.fret_offset);
         let open_hz = s.open.to_frequency().hz();
-        let target_hz = open_hz * 2_f32.powf(*fret as f32 / 12.0);
+        let target_hz = open_hz * 2_f32.powf(semitones as f32 / 12.0);
         let cents = 1200.0 * (detected.hz() / target_hz).log2();
         if cents.abs() < WAIT_MATCH_CENTS {
             return true;

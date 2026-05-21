@@ -201,26 +201,32 @@ mod tests {
                 PresetString {
                     name: "D4".into(),
                     midi: 62,
+                    fret_offset: 0,
                 },
                 PresetString {
                     name: "A3".into(),
                     midi: 57,
+                    fret_offset: 0,
                 },
                 PresetString {
                     name: "F#3".into(),
                     midi: 54,
+                    fret_offset: 0,
                 },
                 PresetString {
                     name: "D3".into(),
                     midi: 50,
+                    fret_offset: 0,
                 },
                 PresetString {
                     name: "A2".into(),
                     midi: 45,
+                    fret_offset: 0,
                 },
                 PresetString {
                     name: "D2".into(),
                     midi: 38,
+                    fret_offset: 0,
                 },
             ],
         }
@@ -253,6 +259,7 @@ mod tests {
             strings: vec![PresetString {
                 name: "C2".into(),
                 midi: 36,
+                fret_offset: 0,
             }],
         };
         add_user_tuning_at(&path, first.clone()).expect("first add");
@@ -282,6 +289,7 @@ mod tests {
             strings: vec![PresetString {
                 name: "A4".into(),
                 midi: 69,
+                fret_offset: 0,
             }],
         };
         let err = add_user_tuning_at(&path, entry).expect_err("should refuse to shadow built-in");
@@ -308,6 +316,7 @@ mod tests {
             strings: vec![PresetString {
                 name: "C2".into(),
                 midi: 36,
+                fret_offset: 0,
             }],
         };
         add_user_tuning_at(&path, first.clone()).expect("first add");
