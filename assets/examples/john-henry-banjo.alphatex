@@ -1,0 +1,17 @@
+\title "John Henry"
+\subtitle "Traditional African-American work song · standard 5-string banjo (Open G)"
+\copyright "Traditional public-domain melody (American work song, late 19th century). Arrangement under MIT or Apache-2.0."
+\tempo 95
+\tuning D4 B3 G3 D3 G4
+.
+// Phrase 1: "John Hen-ry was a lit-tle ba-by"  G G B D B G D
+:8 0.3 0.5 0.2 0.5 | 0.1 0.5 0.2 0.5 |
+:8 0.3 0.5 0.4 0.5 | 0.4 0.5 0.4 0.5 |
+// Phrase 2: "Sit-tin' on his daddy's knee"  D B A G E D
+:8 0.1 0.5 0.2 0.5 | 2.3 0.5 0.3 0.5 |
+:8 2.4 0.5 0.4 0.5 | 0.4 0.5 0.4 0.5 |
+// Phrase 3: "He grabbed a hammer and a piece of steel"  B D D B G
+:8 0.2 0.5 0.1 0.5 | 0.1 0.5 0.2 0.5 |
+:8 0.3 0.5 2.3 0.5 | 0.3 0.5 0.3 0.5 |
+// Phrase 4: "Lord, Lord — Hammer be the death of me"
+:8 0.2 0.5 0.3 0.5 | 2.4 0.5 0.4 0.5 |

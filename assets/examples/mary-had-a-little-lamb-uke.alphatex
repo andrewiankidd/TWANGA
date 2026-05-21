@@ -1,0 +1,14 @@
+\title "Mary Had a Little Lamb"
+\subtitle "Traditional nursery rhyme · standard ukulele (GCEA, reentrant)"
+\copyright "Traditional public-domain melody (Hale, 1830 / Goodnight Ladies tune). Arrangement under MIT or Apache-2.0."
+\tempo 100
+\tuning A4 E4 C4 G4
+.
+// Phrase 1: "Mary had a little lamb"   E D C D | E E E
+:4 0.2 2.3 0.3 2.3 | 0.2 0.2 0.2 r |
+// Phrase 2: "Little lamb, little lamb"  D D D | E G G
+:4 2.3 2.3 2.3 r | 0.2 3.2 3.2 r |
+// Phrase 3: "Mary had a little lamb"   E D C D | E E E E
+:4 0.2 2.3 0.3 2.3 | 0.2 0.2 0.2 0.2 |
+// Phrase 4: "Its fleece was white as snow"  D D E D | C
+:4 2.3 2.3 0.2 2.3 | 0.3 r r r |

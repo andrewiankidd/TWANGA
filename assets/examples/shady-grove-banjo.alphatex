@@ -1,0 +1,15 @@
+\title "Shady Grove"
+\subtitle "Traditional Appalachian · standard 5-string banjo (Open G)"
+\copyright "Traditional public-domain melody (Appalachian, pre-1900). Arrangement under MIT or Apache-2.0."
+\tempo 100
+\tuning D4 B3 G3 D3 G4
+.
+// A Part — "Shad-y Grove, my lit-tle love"  D — D — D — B — A — G — A
+:8 0.1 0.5 0.1 0.5 | 0.1 0.5 0.2 0.5 |
+:8 2.3 0.5 0.3 0.5 | 2.3 0.5 0.3 0.5 |
+// B Part — "Shad-y Grove, my dar-ling"   modal turn around A — G — E — D
+:8 0.1 0.5 0.2 0.5 | 2.3 0.5 0.3 0.5 |
+:8 2.4 0.5 0.4 0.5 | 0.3 0.5 0.3 0.5 |
+// A Part repeat with low ending
+:8 0.1 0.5 0.1 0.5 | 0.1 0.5 0.2 0.5 |
+:8 2.3 0.5 0.3 0.5 | 2.4 0.5 0.4 0.5 |

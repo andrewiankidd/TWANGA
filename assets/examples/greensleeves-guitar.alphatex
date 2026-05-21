@@ -1,0 +1,14 @@
+\title "Greensleeves"
+\subtitle "Traditional English (Anonymous, 1580) · standard guitar"
+\copyright "Traditional public-domain melody (England, registered 1580). Arrangement under MIT or Apache-2.0."
+\tempo 90
+\tuning E4 B3 G3 D3 A2 E2
+.
+// Phrase 1: "Alas, my love"
+:4 2.3 0.1 1.1 3.2 | 1.2 0.2 2.3 0.2 |
+// Phrase 2: "You do me wrong"
+:4 0.3 2.3 0.2 1.2 | 2.3 r r r |
+// Phrase 3: "To cast me off discourteously"
+:4 2.3 0.1 1.1 3.2 | 1.2 0.2 2.3 0.2 |
+// Phrase 4: "And I have loved you for so long"
+:4 0.3 2.3 1.2 0.2 | 0.3 r r r |

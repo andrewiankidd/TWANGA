@@ -1,0 +1,14 @@
+\title "Scarborough Fair"
+\subtitle "Traditional English folk · standard guitar"
+\copyright "Traditional public-domain melody (English, late 17th century). Arrangement under MIT or Apache-2.0."
+\tempo 75
+\tuning E4 B3 G3 D3 A2 E2
+.
+// Phrase 1: "Are you going to Scarborough Fair?"
+:4 2.3 3.2 1.2 3.2 | 1.1 0.1 3.2 1.2 |
+// Phrase 2: "Parsley, sage, rosemary and thyme"
+:4 2.3 3.2 1.2 3.2 | 0.2 2.3 0.3 r |
+// Phrase 3: "Remember me to one who lives there"
+:4 0.1 1.1 3.2 1.2 | 0.2 2.3 0.2 r |
+// Phrase 4: "She once was a true love of mine"
+:4 0.2 1.2 3.2 1.2 | 0.2 2.3 0.3 r |

@@ -1,0 +1,16 @@
+\title "Reuben's Train"
+\subtitle "Traditional Appalachian · standard 5-string banjo (Open G), clawhammer"
+\copyright "Traditional public-domain melody (pre-1900, first recorded 1924). Arrangement under MIT or Apache-2.0."
+\tempo 100
+\tuning D4 B3 G3 D3 G4
+.
+// A Part — "Oh, me, oh my…" — melody on strings 1+2 with the high-G drone
+:8 0.1 0.5 2.1 0.5 | 0.1 0.5 2.2 0.5 |
+:8 0.2 0.5 2.2 0.5 | 0.3 0.5 2.3 0.5 |
+:8 0.1 0.5 0.1 0.5 | 2.2 0.5 0.2 0.5 |
+:8 0.2 0.5 0.3 0.5 | 0.3 0.5 0.3 0.5 |
+// B Part — "I can hear the whistle blow…" — drop to the low strings
+:8 0.3 0.5 0.3 0.5 | 2.3 0.5 0.4 0.5 |
+:8 0.3 0.5 2.3 0.5 | 0.2 0.5 0.2 0.5 |
+:8 0.1 0.5 2.1 0.5 | 0.1 0.5 0.2 0.5 |
+:8 0.3 0.5 0.3 0.5 | 0.3 0.5 0.3 0.5 |

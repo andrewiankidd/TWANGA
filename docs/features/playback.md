@@ -36,6 +36,8 @@ library the GUI's Playback screen shows. The picker prefixes each row with
 | `--pre-roll <N>` | Audible count-in ticks before playback starts (0–16). Default 4. |
 | `--resume` | Auto-accept the saved bookmark for this file (if any) and jump to that column without the interactive prompt. Mirrors the GUI's "Resume" banner button. |
 | `--no-resume` | Auto-decline any saved bookmark. Useful in scripts where you want a predictable start from column 0 regardless of history. |
+| `--device "<name>"` | Wait-mode only. Substring-match against the audio input device list (see `twanga devices`). No-op without `--wait`. |
+| `--silence-rms <RMS>` | Wait-mode only. Override the silence-gate threshold (linear-amplitude window-RMS, 0..1; default 0.005 ≈ -46 dB). |
 
 Examples:
 
@@ -55,8 +57,12 @@ twanga play assets/examples/cripple-creek-banjo.alphatex \
     --tuning standard-ukulele --transpose-mode octave-shift
 ```
 
-Controls during playback: `q + Enter` or Ctrl-C stops, `p + Enter` toggles
-pause/resume.
+Controls during playback (all `+ Enter`):
+
+- `q` — stop (or Ctrl-C)
+- `p` — pause / resume
+- `[` / `]` — drop / raise the silence threshold by ~6 dB. Wait mode
+  only — no-op without `--wait` since no mic is open.
 
 **Last-session resume.** On any user-initiated stop, the CLI saves a
 bookmark (the file's path + the current column + a `when` timestamp) to
@@ -93,7 +99,10 @@ The screen has two views: a **library list** until a tab is loaded, then a
   Lets you transpose the loaded tab onto a different instrument before
   playing. Tab's original tuning is pre-selected after load (via
   registry name-matching).
-- **Transpose mode** — dropdown next to the tuning picker:
+- **Transpose mode** — dropdown next to the tuning picker. Hidden
+  when the current tuning fits everything (no notes drop in either
+  mode); shown only when the choice matters. Hidden state still
+  applies the persisted value invisibly the next time it's relevant.
   - `drop` — historical behaviour; notes that don't fit on the target
     are silently omitted and listed in the "Skipped:" preamble.
   - `octave-shift` — notes are retried at ±12 semitones before being
@@ -104,8 +113,10 @@ The screen has two views: a **library list** until a tab is loaded, then a
 - **Loop** — dropdown with `off` / `full` / `range…`. `range…` reveals
   start + end column inputs. Equivalent to the CLI's `--loop` flag.
 - **Pre-roll / metronome toggle / wait toggle** — same controls as the
-  Recorder. Wait mode opens the mic, shows the same mic-level meter the
-  Recorder uses.
+  Recorder. Wait mode opens the mic and reveals the same mic-level
+  meter (with input device picker + silence-threshold slider) the
+  Recorder uses. Choices persist independently under
+  `twanga-playback-device-v1` / `twanga-playback-silence-rms-v1`.
 - **Renderer picker** — Tab or Highway view.
 - **Play / Pause / Stop** — spacebar shortcut for pause/resume. Pause
   pressed during wait closes out the wait segment so resume doesn't

@@ -1,0 +1,16 @@
+\title "Old Joe Clark"
+\subtitle "Traditional Appalachian · standard 5-string banjo (Open G)"
+\copyright "Traditional public-domain melody (Appalachian, pre-1918). Arrangement under MIT or Apache-2.0."
+\tempo 120
+\tuning D4 B3 G3 D3 G4
+.
+// A Part — "Round and round, Old Joe Clark"
+:8 0.1 0.5 0.1 0.5 | 2.2 0.5 0.2 0.5 |
+:8 0.2 0.5 2.3 0.5 | 0.3 0.5 0.4 0.5 |
+:8 0.1 0.5 0.1 0.5 | 2.2 0.5 0.2 0.5 |
+:8 0.2 0.5 2.3 0.5 | 0.3 0.5 0.3 0.5 |
+// B Part — "Fare thee well, Old Joe Clark"
+:8 0.2 0.5 2.2 0.5 | 0.1 0.5 0.1 0.5 |
+:8 2.2 0.5 0.2 0.5 | 2.3 0.5 0.3 0.5 |
+:8 0.2 0.5 2.2 0.5 | 0.1 0.5 2.2 0.5 |
+:8 0.2 0.5 0.3 0.5 | 0.3 0.5 0.3 0.5 |

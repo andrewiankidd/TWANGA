@@ -1,0 +1,18 @@
+\title "Auld Lang Syne"
+\subtitle "Robert Burns, 1788 · tenor ukulele (low-G GCEA)"
+\copyright "Traditional public-domain melody (Burns lyrics 1788 + traditional Scottish tune). Arrangement under MIT or Apache-2.0."
+\tempo 85
+\tuning A4 E4 C4 G3
+.
+// Phrase 1: "Should auld acquaintance be forgot"
+:4 0.4 0.3 0.3 0.3 | 0.2 2.3 0.3 2.3 |
+// Phrase 2: "And never brought to mind"
+:4 0.2 0.3 0.3 0.2 | 2.3 r r r |
+// Phrase 3: "Should auld acquaintance be forgot"
+:4 0.4 0.3 0.3 0.3 | 0.2 2.3 0.3 0.1 |
+// Phrase 4: "And days of auld lang syne"
+:4 0.1 0.1 0.2 2.3 | 0.3 r r r |
+// Phrase 5: chorus lift — "For auld lang syne, my dear"
+:4 0.3 0.1 0.1 0.1 | 0.2 2.3 0.3 0.1 |
+// Phrase 6: "For auld lang syne"
+:4 0.1 0.1 0.2 2.3 | 0.3 r r r |

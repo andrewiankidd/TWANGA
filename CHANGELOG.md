@@ -10,6 +10,49 @@ dated section.
 
 ### Added
 
+- **Runtime-tunable silence gate (CLI + GUI parity).** The YIN
+  pitch detector's silence threshold (window-RMS below which no
+  detection runs) was a hardcoded `Tuner::SILENCE_RMS = 0.005`;
+  now it's a runtime field with full surfaces on both sides:
+  - **Rust** — `Tuner` got `silence_rms()` getter and
+    `set_silence_rms(rms)` setter. `DEFAULT_SILENCE_RMS = 0.005`
+    stays as the out-of-box value; the `SILENCE_RMS` const sticks
+    around as a backwards-compat alias.
+  - **WASM** — `WebTuner.silence_rms()` and
+    `WebTuner.set_silence_rms(rms)` exposed via `#[wasm_bindgen]`.
+  - **CLI** — `--silence-rms <RMS>` flag on `tune`, `record`, and
+    `play`. Runtime `[` + Enter / `]` + Enter keys step the gate
+    by ~6 dB (×0.5 / ×2 in linear amplitude) on all three
+    subcommands and on `wait_for_pitch`'s inner sub-loop. Each
+    step prints `[silence: 0.00500 RMS (-46.0 dB)]` so the user
+    sees what they've set.
+  - **GUI** — new shared `makeSilenceThreshold` factory at
+    `frontend/web/controllers/silence-threshold.js` matching the
+    `makeMicMeter` / `makeDevicePicker` shape. A vertical-line
+    thumb (`<input type="range">` overlay) sits on the
+    mic-meter bar so the fill (live signal) and the thumb
+    (threshold) share the same dB axis. Wired into all three
+    mic-using screens (Tuner / Recorder / Playback wait mode);
+    persists per-screen in `localStorage` under
+    `twanga-{tuner,recorder,playback}-silence-rms-v1`. Pushed
+    into the live `WebTuner` via `set_silence_rms` on every drag
+    and re-applied to any freshly-constructed tuner instance.
+
+- **Input-device picker on the three mic-using GUI screens.** Tuner,
+  Recorder, and Playback (wait mode) now have a dropdown above the
+  mic meter, populated via `navigator.mediaDevices.enumerateDevices()`
+  and filtered to `kind === 'audioinput'`. Selected `deviceId` flows
+  through `micSession.start({ deviceId })` into
+  `getUserMedia({ audio: { deviceId: { exact: ... } } })`. New shared
+  factory at `frontend/web/controllers/device-picker.js`, same shape
+  as the mic-meter and silence-threshold controllers. Browsers gate
+  device labels behind an existing mic-permission grant, so the
+  first list shows generic names until permission is granted; Tauri's
+  webview returns labels immediately. Hot-plug supported via the
+  `devicechange` event. Stale stored device id (unplugged since the
+  last session) falls back to default and clears its storage entry.
+  CLI parity is the existing `--device "<name>"` flag.
+
 - **Portable desktop variants alongside installers.** Each desktop
   platform now ships two flavours next to each other on the
   Releases page:
@@ -416,6 +459,23 @@ dated section.
 
 ### Changed
 
+- **Transpose-mode dropdown is hidden when no notes drop.** The
+  "When a note doesn't fit" dropdown in the Playback per-tab view
+  now shows only when the current configuration actually drops at
+  least one note. When the tuning naturally fits everything, both
+  the dropdown and the "Skipped:" message hide together — the
+  drop-vs-octave-shift choice is meaningless if no notes are out
+  of range (both modes produce identical output). The persisted
+  value still applies invisibly the next time it matters.
+  Companion change: the "Skipped:" message itself moved to sit
+  directly under the transpose-mode dropdown so the consequence
+  of the choice is visible next to the choice itself.
+
+- **Highway lanes centre horizontally** in the renderer container,
+  so a tab with three or four strings doesn't sit pinned to the
+  left edge. Single `justifyContent: 'center'` on the flex root
+  in `frontend/web/render/builtins/highway.js`.
+
 - **Per-feature docs are bundled into desktop + mobile builds, not
   just the Pages site.** `pages.yml` had been copying
   `docs/features/*.md` into `frontend/web/assets/docs/` for a while
@@ -449,6 +509,33 @@ dated section.
   unchanged.
 
 ### Fixed
+
+- **External links with `target="_blank"` no longer open twice in
+  Tauri.** The webview already routes `_blank` anchors through the
+  shell plugin to the OS browser natively; our JS interceptor was
+  also catching them and calling `plugin:shell|open`, so the URL
+  opened twice (e.g. the footer's andrewkidd.co.uk link). Fixed by
+  skipping anchors with `target="_blank"` in the interceptor's
+  early-return chain — those are Tauri's job. Anchors without
+  `target="_blank"` still go through our invoke so the homepage
+  link (and similar) opens once.
+
+- **Android APK now has proper launcher icons + microphone
+  permissions.** `cargo tauri android init` regenerates
+  `gen/android/` on every CI run from `tauri.conf.json`'s icon
+  array. Our `icon.png` is 512×512 (below Tauri's recommended
+  1024×1024), so the auto-generated `mipmap-*/ic_launcher.png`
+  came out a bit blurry. New CI step right after `init` rsyncs
+  the hand-tuned `crates/twanga-app/icons/android/` set over the
+  auto-generated one. The same step also injects
+  `<uses-permission android:name="android.permission.RECORD_AUDIO" />`
+  and `<uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />`
+  into the generated `AndroidManifest.xml` — Tauri 2's schema has
+  no field for app-level Android permissions (verified against the
+  v2 reference), and without both permissions the WebView's
+  `getUserMedia()` either fails silently or trips
+  `NotReadableError` after grant. See `tauri-apps/tauri#10846` for
+  the underlying constraint.
 
 - **External links in the Tauri webview now actually open in the OS
   browser.** The interceptor in `frontend/web/app.html` was looking

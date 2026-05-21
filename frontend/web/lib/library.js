@@ -105,7 +105,16 @@ let _bundledPromise = null;
 
 function loadBundledManifest() {
     if (_bundledPromise) return _bundledPromise;
-    _bundledPromise = fetch('assets/examples/manifest.json', { cache: 'force-cache' })
+    // `no-cache` — validate with the server (If-None-Match ETag round
+    // trip) so users see new bundled examples without having to hard-
+    // refresh. `force-cache` would otherwise return the stale cached
+    // manifest indefinitely once it's been fetched once (per the fetch
+    // spec: "If there is a match, fresh or stale, it will be returned
+    // from the cache"). The 304-no-body response keeps the cost minimal.
+    // Individual .alphatex file bodies below stay `force-cache` —
+    // their contents are immutable per-name, only the manifest's
+    // *listing* of which files exist needs to refresh.
+    _bundledPromise = fetch('assets/examples/manifest.json', { cache: 'no-cache' })
         .then((r) => {
             if (!r.ok) throw new Error(`bundled manifest fetch failed: ${r.status}`);
             return r.json();
@@ -137,7 +146,9 @@ let _patternsPromise = null;
 
 function loadPatternsManifest() {
     if (_patternsPromise) return _patternsPromise;
-    _patternsPromise = fetch('assets/patterns/manifest.json', { cache: 'force-cache' })
+    // Same `no-cache` reasoning as loadBundledManifest above — validate
+    // so newly-added patterns appear without a hard refresh.
+    _patternsPromise = fetch('assets/patterns/manifest.json', { cache: 'no-cache' })
         .then((r) => {
             if (!r.ok) throw new Error(`patterns manifest fetch failed: ${r.status}`);
             return r.json();

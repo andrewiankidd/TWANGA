@@ -1,0 +1,17 @@
+\title "Drunken Sailor"
+\subtitle "Traditional sea shanty · tenor banjo (Jazz CGDA)"
+\copyright "Traditional public-domain melody (sea shanty, first printed 1824). Arrangement under MIT or Apache-2.0."
+\tempo 130
+\tuning A3 D3 G2 C2
+.
+// Phrase 1: "What shall we do with the drunken sailor"  (D-D-E-D | C-A-G-G)
+:8 0.2 0.2 2.2 0.2 | 0.3 0.1 0.3 r |
+// Phrase 2: (repeat)
+:8 0.2 0.2 2.2 0.2 | 0.3 0.1 0.3 r |
+// Phrase 3: "Early in the morning"  (D-D-A-G-A-G-D-D)
+:8 0.2 0.2 0.1 0.3 | 0.1 0.3 0.2 0.2 |
+// Phrase 4: refrain — "Way hey and up she rises"  (G-A-D-D-A-G-D)
+:8 0.3 0.1 0.2 0.2 | 0.1 0.3 0.2 r |
+:8 0.3 0.1 0.2 0.2 | 0.1 0.3 0.2 r |
+// Tag
+:8 0.2 0.1 0.3 0.4 | 0.4 r r r |

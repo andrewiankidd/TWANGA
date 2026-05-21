@@ -1,0 +1,14 @@
+\title "In the Pines"
+\subtitle "Traditional Appalachian folk · standard guitar"
+\copyright "Traditional public-domain melody (Appalachian, pre-1917). Arrangement under MIT or Apache-2.0."
+\tempo 80
+\tuning E4 B3 G3 D3 A2 E2
+.
+// Phrase 1: "In the pines, in the pines"
+:4 0.2 1.2 3.2 1.2 | 0.2 2.3 0.3 r |
+// Phrase 2: "Where the sun don't ever shine"
+:4 0.2 0.2 1.2 3.2 | 1.2 0.2 0.3 r |
+// Phrase 3: "I would shiver the whole night through"
+:4 0.2 3.2 5.2 3.2 | 1.2 0.2 0.3 r |
+// Phrase 4: tag — drop to the low end
+:4 2.3 0.3 2.4 0.4 | 0.4 r r r |

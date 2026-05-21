@@ -1,0 +1,16 @@
+\title "House of the Rising Sun"
+\subtitle "Traditional folk · standard guitar"
+\copyright "Traditional public-domain melody (American folk, pre-1933 first recording; specific arrangements like The Animals' 1964 version are separately copyrighted). Arrangement under MIT or Apache-2.0."
+\tempo 80
+\tuning E4 B3 G3 D3 A2 E2
+.
+// Verse 1 melody: "There is a house in New Or-leans"  A C E A B C
+:4 2.3 1.2 0.1 0.1 | 2.1 1.2 r r |
+// "They call the Ri-sing Sun"  B A G E
+:4 2.1 0.1 0.3 0.4 | r r r r |
+// "And it's been the ru-in of ma-ny a poor boy"  A C E A C B
+:4 2.3 1.2 0.1 0.1 | 1.2 2.1 r r |
+// "And God, I know I'm one"  B A G F E
+:4 2.1 0.1 0.3 1.1 | 0.1 r r r |
+// Bass tag — descending minor
+:4 0.5 3.5 0.4 2.4 | 0.4 r r r |

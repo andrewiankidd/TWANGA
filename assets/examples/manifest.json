@@ -1,5 +1,5 @@
 {
-  "//": "Manifest of bundled .alphatex examples. Same files used by the CLI and the browser GUI; the GUI fetches them via this manifest because browsers have no directory-listing API for static-served files. CLI/Tauri can read the directory directly OR follow the same manifest.",
+  "//": "Manifest of bundled .alphatex examples. Same files used by the CLI and the browser GUI; the GUI fetches them via this manifest because browsers have no directory-listing API for static-served files. CLI/Tauri can read the directory directly OR follow the same manifest. Every example is a verified-public-domain traditional / classical melody with the original arrangement under MIT or Apache-2.0 (see the \\copyright line at the top of each .alphatex file).",
   "examples": [
     {
       "id": "twinkle-twinkle-uke",
@@ -8,10 +8,184 @@
       "tuning": "standard-ukulele"
     },
     {
+      "id": "mary-had-a-little-lamb-uke",
+      "title": "Mary Had a Little Lamb",
+      "path": "mary-had-a-little-lamb-uke.alphatex",
+      "tuning": "standard-ukulele"
+    },
+    {
+      "id": "frere-jacques-uke",
+      "title": "Frère Jacques",
+      "path": "frere-jacques-uke.alphatex",
+      "tuning": "standard-ukulele"
+    },
+    {
+      "id": "row-row-row-your-boat-uke",
+      "title": "Row Row Row Your Boat",
+      "path": "row-row-row-your-boat-uke.alphatex",
+      "tuning": "standard-ukulele"
+    },
+    {
+      "id": "old-macdonald-uke",
+      "title": "Old MacDonald Had a Farm",
+      "path": "old-macdonald-uke.alphatex",
+      "tuning": "standard-ukulele"
+    },
+    {
+      "id": "london-bridge-uke",
+      "title": "London Bridge Is Falling Down",
+      "path": "london-bridge-uke.alphatex",
+      "tuning": "standard-ukulele"
+    },
+    {
+      "id": "jingle-bells-uke",
+      "title": "Jingle Bells",
+      "path": "jingle-bells-uke.alphatex",
+      "tuning": "standard-ukulele"
+    },
+    {
+      "id": "silent-night-uke",
+      "title": "Silent Night",
+      "path": "silent-night-uke.alphatex",
+      "tuning": "standard-ukulele"
+    },
+    {
+      "id": "ode-to-joy-tenor-uke",
+      "title": "Ode to Joy",
+      "path": "ode-to-joy-tenor-uke.alphatex",
+      "tuning": "tenor-ukulele"
+    },
+    {
+      "id": "auld-lang-syne-tenor-uke",
+      "title": "Auld Lang Syne",
+      "path": "auld-lang-syne-tenor-uke.alphatex",
+      "tuning": "tenor-ukulele"
+    },
+    {
+      "id": "danny-boy-tenor-uke",
+      "title": "Danny Boy",
+      "path": "danny-boy-tenor-uke.alphatex",
+      "tuning": "tenor-ukulele"
+    },
+    {
+      "id": "brahms-lullaby-tenor-uke",
+      "title": "Brahms's Lullaby",
+      "path": "brahms-lullaby-tenor-uke.alphatex",
+      "tuning": "tenor-ukulele"
+    },
+    {
       "id": "cripple-creek-banjo",
       "title": "Cripple Creek",
       "path": "cripple-creek-banjo.alphatex",
       "tuning": "standard-banjo"
+    },
+    {
+      "id": "reubens-train-banjo",
+      "title": "Reuben's Train",
+      "path": "reubens-train-banjo.alphatex",
+      "tuning": "standard-banjo"
+    },
+    {
+      "id": "old-joe-clark-banjo",
+      "title": "Old Joe Clark",
+      "path": "old-joe-clark-banjo.alphatex",
+      "tuning": "standard-banjo"
+    },
+    {
+      "id": "boil-them-cabbage-down-banjo",
+      "title": "Boil Them Cabbage Down",
+      "path": "boil-them-cabbage-down-banjo.alphatex",
+      "tuning": "standard-banjo"
+    },
+    {
+      "id": "wildwood-flower-banjo",
+      "title": "Wildwood Flower",
+      "path": "wildwood-flower-banjo.alphatex",
+      "tuning": "standard-banjo"
+    },
+    {
+      "id": "shady-grove-banjo",
+      "title": "Shady Grove",
+      "path": "shady-grove-banjo.alphatex",
+      "tuning": "standard-banjo"
+    },
+    {
+      "id": "john-henry-banjo",
+      "title": "John Henry",
+      "path": "john-henry-banjo.alphatex",
+      "tuning": "standard-banjo"
+    },
+    {
+      "id": "soldiers-joy-tenor-banjo",
+      "title": "Soldier's Joy",
+      "path": "soldiers-joy-tenor-banjo.alphatex",
+      "tuning": "tenor-banjo"
+    },
+    {
+      "id": "drunken-sailor-tenor-banjo",
+      "title": "Drunken Sailor",
+      "path": "drunken-sailor-tenor-banjo.alphatex",
+      "tuning": "tenor-banjo"
+    },
+    {
+      "id": "whiskey-in-the-jar-tenor-banjo",
+      "title": "Whiskey in the Jar",
+      "path": "whiskey-in-the-jar-tenor-banjo.alphatex",
+      "tuning": "tenor-banjo"
+    },
+    {
+      "id": "sailors-hornpipe-tenor-banjo",
+      "title": "Sailor's Hornpipe",
+      "path": "sailors-hornpipe-tenor-banjo.alphatex",
+      "tuning": "tenor-banjo"
+    },
+    {
+      "id": "in-the-pines-guitar",
+      "title": "In the Pines",
+      "path": "in-the-pines-guitar.alphatex",
+      "tuning": "standard-guitar"
+    },
+    {
+      "id": "scarborough-fair-guitar",
+      "title": "Scarborough Fair",
+      "path": "scarborough-fair-guitar.alphatex",
+      "tuning": "standard-guitar"
+    },
+    {
+      "id": "greensleeves-guitar",
+      "title": "Greensleeves",
+      "path": "greensleeves-guitar.alphatex",
+      "tuning": "standard-guitar"
+    },
+    {
+      "id": "house-of-the-rising-sun-guitar",
+      "title": "House of the Rising Sun",
+      "path": "house-of-the-rising-sun-guitar.alphatex",
+      "tuning": "standard-guitar"
+    },
+    {
+      "id": "when-the-saints-guitar",
+      "title": "When the Saints Go Marching In",
+      "path": "when-the-saints-guitar.alphatex",
+      "tuning": "standard-guitar"
+    },
+    {
+      "id": "shenandoah-guitar",
+      "title": "Shenandoah",
+      "path": "shenandoah-guitar.alphatex",
+      "tuning": "standard-guitar"
+    },
+    {
+      "id": "amazing-grace-drop-d",
+      "title": "Amazing Grace",
+      "path": "amazing-grace-drop-d.alphatex",
+      "tuning": "drop-d-guitar"
+    },
+    {
+      "id": "pachelbel-canon-drop-d",
+      "title": "Pachelbel's Canon (excerpt)",
+      "path": "pachelbel-canon-drop-d.alphatex",
+      "tuning": "drop-d-guitar"
     }
   ]
 }

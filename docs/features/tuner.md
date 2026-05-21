@@ -23,6 +23,8 @@ position (default 0).
 |------|-------------|
 | `--tuning <slug>` | Any built-in slug (see `twanga tunings list`) or a user-defined one. Omit to be prompted. |
 | `--capo <spec>` | Uniform integer (`--capo 3`) or per-string list (`--capo "0,2,2,2,2,2"`). Omit to be prompted (uniform only via prompt). |
+| `--device "<name>"` | Substring-match against the audio input device list (see `twanga devices`). Omit to use the OS default. |
+| `--silence-rms <RMS>` | Override the silence-gate threshold (window-RMS in linear amplitude, 0..1; default 0.005 ≈ -46 dB). Lower for quieter plucks at the cost of more cable-hum / room-noise false positives. |
 
 Example output:
 
@@ -37,7 +39,13 @@ C4               | current:    261.10 Hz | target:    261.63 Hz | Tuned! (-3.5 c
 g4 (reentrant)   | current:    392.10 Hz | target:    392.00 Hz | Tuned! (+0.4 cents)
 ```
 
-Stop with `q + Enter` or Ctrl-C.
+Runtime keys (line-input, all `+ Enter`):
+
+- `q` — stop (or Ctrl-C)
+- `[` — drop silence threshold by ~6 dB (×0.5 RMS)
+- `]` — raise silence threshold by ~6 dB (×2 RMS)
+
+The threshold change prints a line like `[silence: 0.00500 RMS (-46.0 dB)]` so you can see what you've set. Useful when the default gate is rejecting genuine plucks; halve it twice and try again.
 
 ## GUI
 
@@ -51,6 +59,17 @@ Open the Tuner card from the main menu (or hash route `#tuner`).
   rendered as its own row with live frequency, target, and a cents-off
   indicator. The mic-level meter (small RMS bar) sits above the rows so
   you can tell "no signal" apart from "signal but no target match".
+- **Input device picker** — dropdown above the meter, populated from
+  `navigator.mediaDevices.enumerateDevices()`. Browsers gate the
+  human-readable labels behind an existing permission grant, so the
+  first list may show generic names; once you've granted mic access
+  the labels populate properly. Hot-plug supported (USB mic in/out
+  updates the list).
+- **Silence-threshold slider** — vertical-line thumb overlaid on the
+  mic-meter bar. Drag to set the gate; the bar fill shows live signal
+  on the same axis. Fill crosses the thumb → detection fires; stays
+  below → it doesn't. Same -6 dB / +6 dB intent as the CLI's
+  `[` / `]` keys.
 
 State (selected tuning, capo, last-used renderer) persists to `localStorage`
 under `twanga-tuner-tuning-v1`. On Tauri the same shape will round-trip to
@@ -62,10 +81,15 @@ under `twanga-tuner-tuning-v1`. On Tauri the same shape will round-trip to
 - **Tunings** — built-in presets are baked into the binary (and the WASM
   bundle). User-defined live at `$CONFIG/twanga/tunings.toml` (CLI) /
   `localStorage` key `twanga-user-tunings-v1` (GUI).
-- **Audio device** — CLI uses the system default mic; override coming
-  via `--device` in a future release. GUI uses whatever the browser's
-  `getUserMedia({ audio: true })` returns; OS-level input selection
-  applies.
+- **Audio device** — CLI uses the system default mic unless `--device
+  "<name>"` is passed (substring match against `twanga devices`). GUI
+  has its own dropdown picker that goes through
+  `getUserMedia({ audio: { deviceId: { exact: ... } } })`; the choice
+  persists in `localStorage` under `twanga-tuner-device-v1`.
+- **Silence threshold** — runtime-tunable on both surfaces. CLI:
+  `--silence-rms <RMS>` flag, or `[` / `]` runtime keys. GUI: the
+  slider on the mic meter, persisted under
+  `twanga-tuner-silence-rms-v1`.
 
 ## See also
 

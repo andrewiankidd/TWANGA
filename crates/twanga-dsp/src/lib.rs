@@ -145,15 +145,30 @@ pub struct Tuner {
     slide_by: usize,
     buffer: Vec<f32>,
     readings: Vec<TunerReading>,
+    /// Runtime-configurable silence threshold. Default is
+    /// [`DEFAULT_SILENCE_RMS`]; can be raised to suppress more
+    /// ambient noise or lowered to catch quieter plucks. Set via
+    /// [`set_silence_rms`](Self::set_silence_rms).
+    silence_rms: f32,
 }
 
 impl Tuner {
     pub const DEFAULT_WINDOW: usize = 8192;
     pub const DEFAULT_SLIDE_BY: usize = 4096;
 
-    /// Window RMS below this is treated as silence — no detection attempted.
-    /// 0.005 catches a quiet room while staying well below any plucked-string note.
-    pub const SILENCE_RMS: f32 = 0.005;
+    /// Default silence threshold. Window RMS below this is treated
+    /// as silence — no detection attempted. 0.005 catches a quiet
+    /// room while staying well below any plucked-string note. Now a
+    /// runtime-tunable field (see [`Self::silence_rms`] /
+    /// [`Self::set_silence_rms`]); the constant stays as the
+    /// out-of-box default so callers that don't care don't need to
+    /// touch it.
+    pub const DEFAULT_SILENCE_RMS: f32 = 0.005;
+
+    /// Backwards-compatible alias. New code should use
+    /// [`Self::DEFAULT_SILENCE_RMS`] or the instance method
+    /// [`Self::silence_rms`].
+    pub const SILENCE_RMS: f32 = Self::DEFAULT_SILENCE_RMS;
 
     /// In `Strings` mode, detections this far from the nearest open string are
     /// treated as noise (mains hum, cable EMI, room sounds) and dropped. A
@@ -171,7 +186,22 @@ impl Tuner {
             slide_by: Self::DEFAULT_SLIDE_BY,
             buffer: Vec::with_capacity(Self::DEFAULT_WINDOW * 2),
             readings: Vec::new(),
+            silence_rms: Self::DEFAULT_SILENCE_RMS,
         }
+    }
+
+    /// Read the current silence threshold (linear amplitude RMS).
+    pub fn silence_rms(&self) -> f32 {
+        self.silence_rms
+    }
+
+    /// Update the silence threshold at runtime. Clamped to a sane
+    /// range — 0 disables the gate entirely (detection on every
+    /// window, including pure silence) and 1.0 is the maximum
+    /// possible RMS, so values outside that range have no useful
+    /// meaning.
+    pub fn set_silence_rms(&mut self, rms: f32) {
+        self.silence_rms = rms.clamp(0.0, 1.0);
     }
 
     pub fn mode(&self) -> &TunerMode {
@@ -190,7 +220,7 @@ impl Tuner {
             let window = &self.buffer[..self.window_size];
 
             // Silence gate — don't try to find pitch in cable hum or room noise.
-            if window_rms(window) < Self::SILENCE_RMS {
+            if window_rms(window) < self.silence_rms {
                 self.buffer.drain(..self.slide_by);
                 continue;
             }

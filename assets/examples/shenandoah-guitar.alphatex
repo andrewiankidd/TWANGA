@@ -1,0 +1,18 @@
+\title "Shenandoah"
+\subtitle "Traditional American river song · standard guitar"
+\copyright "Traditional public-domain melody (American folk, pre-1860). Arrangement under MIT or Apache-2.0."
+\tempo 65
+\tuning E4 B3 G3 D3 A2 E2
+.
+// Phrase 1: "Oh Shen-an-doah"  G C D E G
+:4 0.3 1.2 3.2 0.1 | 3.1 r r r |
+// Phrase 2: "I long to hear you"  E D C D E G E
+:4 0.1 3.2 1.2 3.2 | 0.1 3.1 0.1 r |
+// Phrase 3: "A-way you roll-ing riv-er"  D C D E G D
+:4 3.2 1.2 3.2 0.1 | 3.1 3.2 r r |
+// Phrase 4: "Oh Shen-an-doah I long to hear you"  G C D E G E D C
+:8 0.3 1.2 3.2 0.1 3.1 0.1 3.2 1.2 |
+// Phrase 5 resolve: "A-way, I'm bound a-way"  D C D E C
+:4 3.2 1.2 3.2 0.1 | 1.2 r r r |
+// Phrase 6: "Cross the wide Mis-sou-ri"  G C E G F E D
+:8 0.3 1.2 0.1 3.1 1.1 0.1 3.2 r |

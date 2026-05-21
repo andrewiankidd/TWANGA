@@ -228,6 +228,7 @@
             gap: 0.6rem;
             margin: 0 0 1rem 0.3rem;
         }
+        .transpose-mode-row[hidden] { display: none; }
         .transpose-mode-row .transpose-mode-label {
             color: var(--muted);
             font-size: 0.85rem;
@@ -1206,6 +1207,13 @@
             letter-spacing: 1px;
             font-weight: 700;
         }
+        .mic-meter .mic-meter-bar-wrap {
+            flex: 1;
+            position: relative;
+            height: 16px;
+            display: flex;
+            align-items: center;
+        }
         .mic-meter .mic-meter-bar {
             flex: 1;
             height: 8px;
@@ -1229,6 +1237,109 @@
             min-width: 5em;
             font-family: monospace;
             text-align: right;
+        }
+        /* Detected-note pill — sits to the right of the dB readout.
+           Populated by `setDetectedNote(label)` whenever the WebTuner
+           emits a reading; cleared automatically after 800ms of no
+           readings (handled inside the mic-meter controller). The
+           silence gate already enforces "only when above threshold";
+           this is just the UI fade so the pill doesn't stay stuck on
+           the last detected note forever. */
+        .mic-meter .mic-meter-note {
+            min-width: 3em;
+            text-align: center;
+            font-family: monospace;
+            font-weight: 700;
+            color: var(--highlight);
+            padding: 0.1rem 0.4rem;
+            border: 1px solid var(--border);
+            border-radius: 3px;
+            background: var(--card);
+        }
+        .mic-meter .mic-meter-note:empty {
+            border-color: transparent;
+            background: transparent;
+        }
+        /* Silence-threshold slider overlay. Native <input type="range">
+           sitting on top of the .mic-meter-bar so the slider thumb
+           appears as a vertical-line marker on the meter axis. Track
+           is transparent (the meter bar below shows through); the
+           thumb is a thin tall rectangle. */
+        .mic-meter .mic-meter-threshold {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 16px;
+            margin: 0;
+            padding: 0;
+            background: transparent;
+            -webkit-appearance: none;
+            appearance: none;
+            cursor: ew-resize;
+            pointer-events: auto;
+            z-index: 2;
+        }
+        .mic-meter .mic-meter-threshold:focus { outline: none; }
+        .mic-meter .mic-meter-threshold::-webkit-slider-runnable-track {
+            background: transparent;
+            height: 16px;
+            border: none;
+        }
+        .mic-meter .mic-meter-threshold::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 4px;
+            height: 16px;
+            background: var(--text);
+            border: 1px solid var(--background);
+            border-radius: 1px;
+            cursor: ew-resize;
+        }
+        .mic-meter .mic-meter-threshold::-moz-range-track {
+            background: transparent;
+            height: 16px;
+            border: none;
+        }
+        .mic-meter .mic-meter-threshold::-moz-range-thumb {
+            width: 4px;
+            height: 16px;
+            background: var(--text);
+            border: 1px solid var(--background);
+            border-radius: 1px;
+            cursor: ew-resize;
+        }
+
+        /* Input-device picker. Shared component used by every screen
+           that opens the mic (Tuner / Recorder / Playback wait mode).
+           Browsers gate device LABELS behind an existing permission
+           grant — first-load lists may show generic names until the
+           user grants mic permission, then the controller re-enumerates
+           on success. Tauri's webview returns labels immediately. */
+        .device-picker {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            margin: 0.5rem 0;
+            font-size: 0.8rem;
+        }
+        .device-picker .device-picker-label {
+            min-width: 2.5em;
+            color: var(--muted);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            font-weight: 700;
+            font-family: monospace;
+            font-size: 0.75rem;
+        }
+        .device-picker .device-picker-select {
+            flex: 1;
+            max-width: 24em;
+            background: var(--card);
+            border: 1px solid var(--border);
+            color: var(--text);
+            border-radius: 4px;
+            padding: 0.3rem 0.5rem;
+            font-size: 0.85rem;
         }
         .mic-meter.is-silent .mic-meter-db {
             color: var(--err);
@@ -1518,12 +1629,25 @@
                  the mic; gives the user a diagnostic signal so "no
                  reading" is distinguishable from "no audio reaching the
                  mic". -->
+            <div class="device-picker">
+                <label for="tuner-device-select" class="device-picker-label">Input</label>
+                <select id="tuner-device-select" class="device-picker-select"></select>
+            </div>
+
             <div class="mic-meter" id="tuner-mic-meter" hidden>
                 <span class="mic-meter-label">mic</span>
-                <div class="mic-meter-bar">
-                    <div class="mic-meter-fill" id="tuner-mic-meter-fill"></div>
+                <div class="mic-meter-bar-wrap">
+                    <div class="mic-meter-bar">
+                        <div class="mic-meter-fill" id="tuner-mic-meter-fill"></div>
+                    </div>
+                    <input type="range" class="mic-meter-threshold" id="tuner-mic-meter-threshold"
+                           min="0" max="100" step="1"
+                           aria-label="Silence threshold (drag to adjust)"
+                           title="Silence threshold — detection only fires when input level exceeds the thumb position">
                 </div>
                 <span class="mic-meter-db" id="tuner-mic-meter-db">—</span>
+                <span class="mic-meter-note" id="tuner-mic-meter-note"
+                      title="Detected pitch — only populated while the detector is firing (silence gate cleared, YIN found a periodic signal)"></span>
             </div>
 
             <p class="tuner-hint" id="tuner-hint">click Start mic to begin</p>
@@ -1619,12 +1743,25 @@
 
             <div class="renderer-host" id="recorder-renderer-host"></div>
 
+            <div class="device-picker">
+                <label for="recorder-device-select" class="device-picker-label">Input</label>
+                <select id="recorder-device-select" class="device-picker-select"></select>
+            </div>
+
             <div class="mic-meter" id="recorder-mic-meter" hidden>
                 <span class="mic-meter-label">mic</span>
-                <div class="mic-meter-bar">
-                    <div class="mic-meter-fill" id="recorder-mic-meter-fill"></div>
+                <div class="mic-meter-bar-wrap">
+                    <div class="mic-meter-bar">
+                        <div class="mic-meter-fill" id="recorder-mic-meter-fill"></div>
+                    </div>
+                    <input type="range" class="mic-meter-threshold" id="recorder-mic-meter-threshold"
+                           min="0" max="100" step="1"
+                           aria-label="Silence threshold (drag to adjust)"
+                           title="Silence threshold — detection only fires when input level exceeds the thumb position">
                 </div>
                 <span class="mic-meter-db" id="recorder-mic-meter-db">—</span>
+                <span class="mic-meter-note" id="recorder-mic-meter-note"
+                      title="Detected pitch — only populated while the detector is firing (silence gate cleared, YIN found a periodic signal)"></span>
             </div>
 
             <p class="tuner-hint" id="recorder-hint">pick a tuning, then click Start recording</p>
@@ -1718,6 +1855,10 @@
                         <option value="octave-shift">Shift to nearest octave</option>
                     </select>
                 </div>
+                <!-- Skipped-notes message sits with the transpose-mode
+                     dropdown so the user sees the consequence of their
+                     choice immediately next to the choice itself. -->
+                <div class="form-error" id="playback-skipped-notes" hidden></div>
 
                 <div class="active-tuning-row">
                     <div class="active-tuning-name" id="playback-active-tuning-name">—</div>
@@ -1776,7 +1917,6 @@
                     </label>
                 </div>
 
-                <div class="form-error" id="playback-skipped-notes" hidden></div>
                 <div class="renderer-host" id="playback-renderer-host"></div>
 
                 <!-- Mic-level meter — only visible during wait-mode playback
@@ -1784,12 +1924,25 @@
                      diagnostic role as the recorder's: surfaces "no signal"
                      so the user can distinguish a missed pitch match from
                      a dead input. -->
+                <div class="device-picker">
+                    <label for="playback-device-select" class="device-picker-label">Input</label>
+                    <select id="playback-device-select" class="device-picker-select"></select>
+                </div>
+
                 <div class="mic-meter" id="playback-mic-meter" hidden>
                     <span class="mic-meter-label">mic</span>
-                    <div class="mic-meter-bar">
-                        <div class="mic-meter-fill" id="playback-mic-meter-fill"></div>
+                    <div class="mic-meter-bar-wrap">
+                        <div class="mic-meter-bar">
+                            <div class="mic-meter-fill" id="playback-mic-meter-fill"></div>
+                        </div>
+                        <input type="range" class="mic-meter-threshold" id="playback-mic-meter-threshold"
+                               min="0" max="100" step="1"
+                               aria-label="Silence threshold (drag to adjust)"
+                               title="Silence threshold — detection only fires when input level exceeds the thumb position">
                     </div>
                     <span class="mic-meter-db" id="playback-mic-meter-db">—</span>
+                    <span class="mic-meter-note" id="playback-mic-meter-note"
+                          title="Detected pitch — only populated while the detector is firing (silence gate cleared, YIN found a periodic signal)"></span>
                 </div>
 
                 <p class="tuner-hint" id="playback-hint">click Play to start</p>
@@ -2022,6 +2175,8 @@
             matchRegistrySlugForTuningNames,
         } from './controllers/tuning.js';
         import { makeMicMeter } from './controllers/mic-meter.js';
+        import { makeDevicePicker } from './controllers/device-picker.js';
+        import { makeSilenceThreshold } from './controllers/silence-threshold.js';
         import * as library from './lib/library.js';
         import { renderMarkdown } from './lib/markdown.js';
 
@@ -2139,6 +2294,12 @@
                 // mailto: / etc are either internal navigation or already
                 // routed correctly by the platform.
                 if (!href || !/^https?:\/\//i.test(href)) return;
+                // Anchors with target="_blank" are already handled by
+                // Tauri's webview natively (it routes them through the
+                // shell plugin and opens them in the OS browser). If
+                // our JS interceptor ALSO fires, the URL opens twice.
+                // Skip — let Tauri handle them.
+                if (anchor.target === '_blank') return;
                 e.preventDefault();
                 e.stopPropagation();
                 // Tauri 2: shell plugin's `open` is reached via the IPC
@@ -2282,6 +2443,33 @@
             const initialSlug = tunerSlugs.includes(savedSlug) ? savedSlug : 'chromatic';
             tunerController.select(initialSlug);
 
+            // Eager-init the device picker. Lazy-init inside startMic
+            // also exists as a safety fallback in case this fails.
+            tunerState.devicePicker = makeDevicePicker({
+                selectId: 'tuner-device-select',
+                storageKey: 'twanga-tuner-device-v1',
+                onChange: () => {
+                    if (micSession.consumerName === 'tuner') {
+                        stopMic();
+                        startMic().catch((err) => console.error(
+                            'restart after device change failed', err));
+                    }
+                },
+            });
+            tunerState.devicePicker.start().catch((e) =>
+                console.warn('tuner device picker init failed', e));
+
+            // Silence-threshold slider — restores the saved value on
+            // mount, pushes new values to the live tuner via
+            // set_silence_rms on every drag. No tuner-restart needed.
+            tunerState.silenceThreshold = makeSilenceThreshold({
+                sliderId: 'tuner-mic-meter-threshold',
+                storageKey: 'twanga-tuner-silence-rms-v1',
+                onChange: (rms) => {
+                    tunerState.tuner?.set_silence_rms(rms);
+                },
+            });
+
             el('pitch-btn').addEventListener('click', () => {
                 stopMic(); // can't run synthetic + mic at once
                 const sr = 48_000;
@@ -2338,6 +2526,8 @@
             rowsByLabel: new Map(), // string label → row element (string mode only)
             sampleRate: 48_000,
             micMeter: null,         // shared mic-meter controller; lazy-initialised in startMic
+            devicePicker: null,     // shared input-device picker; lazy-initialised in startMic
+            silenceThreshold: null, // shared silence-threshold slider (see ./controllers/silence-threshold.js)
         };
         // The Tuner's tuning + capo state lives in `tunerController` (an
         // instance of `makeTuningController`). The controller owns the
@@ -2384,6 +2574,14 @@
                 tunerState.tuner = WebTuner.new_for_strings_with_capo(mode, spec, sr);
             } else {
                 tunerState.tuner = WebTuner.new_for_strings(mode, sr);
+            }
+            // Re-apply the user's silence-threshold setting to the
+            // newly-constructed WebTuner. The threshold is a per-
+            // instance field, so it needs setting after every
+            // rebuild (tuning change, mic restart, etc).
+            const userRms = tunerState.silenceThreshold?.getRms();
+            if (userRms !== undefined) {
+                tunerState.tuner.set_silence_rms(userRms);
             }
 
             el('active-tuning-name').textContent = tunerState.tuner.name();
@@ -2536,17 +2734,28 @@
 
             sampleRate() { return this.ctx?.sampleRate ?? 48_000; },
 
-            async start({ onSamples, consumerName }) {
+            async start({ onSamples, consumerName, deviceId }) {
                 if (this.isRunning()) this.stop();
+                // Build the audio constraints object. `deviceId` is
+                // optional — when null/undefined the OS-default mic is
+                // used. `{ exact: deviceId }` (not `{ ideal: deviceId }`)
+                // so getUserMedia throws OverconstrainedError if the
+                // saved device is gone, letting the picker fall back
+                // to default cleanly instead of silently using a wrong
+                // input.
+                const audioConstraints = {
+                    // Disable browser preprocessing — pitch detection
+                    // wants the raw signal, not Chrome's voice-call
+                    // cleanup.
+                    echoCancellation: false,
+                    noiseSuppression: false,
+                    autoGainControl: false,
+                };
+                if (deviceId) {
+                    audioConstraints.deviceId = { exact: deviceId };
+                }
                 const stream = await navigator.mediaDevices.getUserMedia({
-                    audio: {
-                        // Disable browser preprocessing — pitch detection
-                        // wants the raw signal, not Chrome's voice-call
-                        // cleanup.
-                        echoCancellation: false,
-                        noiseSuppression: false,
-                        autoGainControl: false,
-                    },
+                    audio: audioConstraints,
                 });
                 const ctx = new (window.AudioContext || window.webkitAudioContext)();
                 // Browsers' autoplay policy gives us a SUSPENDED context if
@@ -2604,27 +2813,55 @@
 
         async function startMic() {
             el('tuner-hint').textContent = 'requesting microphone…';
-            // Lazy-init the meter on first start; the makeMicMeter
-            // factory hides itself when a different consumer owns the
-            // session (`getActiveConsumer`), so the same instance is
-            // safe to reuse across start/stop cycles.
+            // Lazy-init the meter + device picker on first start. Each
+            // factory's `getActiveConsumer` hook hides the meter when
+            // a different consumer owns the session, so the same
+            // instances are safe to reuse across start/stop cycles.
             if (!tunerState.micMeter) {
                 tunerState.micMeter = makeMicMeter({
                     meterId: 'tuner-mic-meter',
                     fillId: 'tuner-mic-meter-fill',
                     dbId: 'tuner-mic-meter-db',
+                    noteId: 'tuner-mic-meter-note',
                     consumerName: 'tuner',
                     getActiveConsumer: () => micSession.consumerName,
                 });
             }
+            if (!tunerState.devicePicker) {
+                tunerState.devicePicker = makeDevicePicker({
+                    selectId: 'tuner-device-select',
+                    storageKey: 'twanga-tuner-device-v1',
+                    onChange: () => {
+                        // If mic is already running with us as the
+                        // consumer, restart so the new device takes
+                        // effect immediately.
+                        if (micSession.consumerName === 'tuner') {
+                            stopMic();
+                            startMic().catch((err) => console.error(
+                                'restart after device change failed', err));
+                        }
+                    },
+                });
+                await tunerState.devicePicker.start();
+            }
             const sr = await micSession.start({
                 consumerName: 'tuner',
+                deviceId: tunerState.devicePicker.getSelectedId(),
                 onSamples: (samples) => {
                     if (!tunerState.tuner) return;
                     tunerState.tuner.feed(samples);
                     tunerState.micMeter?.feed(samples);
                     const readings = tunerState.tuner.take_readings();
-                    if (readings.length > 0) applyReadings(readings);
+                    if (readings.length > 0) {
+                        applyReadings(readings);
+                        // Surface the latest detected pitch on the
+                        // meter pill. In strings mode multiple strings
+                        // can produce readings per call; the last one
+                        // is the most recent in time.
+                        tunerState.micMeter?.setDetectedNote(
+                            readings[readings.length - 1].label
+                        );
+                    }
                 },
             });
             // Rebuild AFTER the session is open so the tuner picks up the
@@ -2634,6 +2871,10 @@
             tunerState.sampleRate = sr;
             rebuildTuner();
             tunerState.micMeter.start();
+            // Now that we've been granted mic access, re-enumerate
+            // devices to fill in their human-readable labels (browsers
+            // hide them until permission is granted).
+            tunerState.devicePicker.refresh().catch(() => {});
             el('mic-btn').textContent = 'Stop mic';
             el('tuner-hint').textContent = `listening… (${Math.round(sr)} Hz mic)`;
         }
@@ -3122,6 +3363,8 @@
             tickHandle: null,
             chromaticTuner: null,   // WebTuner in chromatic mode, fed by mic
             micMeter: null,         // shared mic-meter controller (see ./controllers/mic-meter.js)
+            devicePicker: null,     // shared input-device picker (see ./controllers/device-picker.js)
+            silenceThreshold: null, // shared silence-threshold slider (see ./controllers/silence-threshold.js)
 
             rendererController: null,
         };
@@ -3130,6 +3373,31 @@
             recHydrateFromStorage();
             recWireSettings();
             recWireButtons();
+
+            // Eager-initialise the device picker so the dropdown is
+            // populated as soon as the user lands on the Recorder
+            // screen (otherwise it'd be a blank <select> until they
+            // hit Start recording).
+            recState.devicePicker = makeDevicePicker({
+                selectId: 'recorder-device-select',
+                storageKey: 'twanga-recorder-device-v1',
+                onChange: () => {
+                    // If we're currently recording on the old device,
+                    // the user's choice takes effect on the next start.
+                    // Don't hot-swap mid-recording — would risk dropped
+                    // samples at the boundary.
+                },
+            });
+            recState.devicePicker.start().catch((e) =>
+                console.warn('recorder device picker init failed', e));
+
+            recState.silenceThreshold = makeSilenceThreshold({
+                sliderId: 'recorder-mic-meter-threshold',
+                storageKey: 'twanga-recorder-silence-rms-v1',
+                onChange: (rms) => {
+                    recState.chromaticTuner?.set_silence_rms(rms);
+                },
+            });
             recState.rendererController = wireRendererHost({
                 selectId: 'recorder-renderer-select',
                 hostId: 'recorder-renderer-host',
@@ -3437,10 +3705,19 @@
             // `match_pitch_to_fret` against the base PresetEntry + capo.
             const sr = micSession.sampleRate(); // may be 48k stub before mic is up
             recState.chromaticTuner = WebTuner.new_chromatic(sr);
+            // Re-apply the persisted silence threshold to the freshly-
+            // constructed tuner. Each WebTuner instance has its own
+            // gate state, so the slider's value has to be pushed at
+            // every (re)construction.
+            const recRms = recState.silenceThreshold?.getRms();
+            if (recRms !== undefined) {
+                recState.chromaticTuner.set_silence_rms(recRms);
+            }
 
             try {
                 const liveSr = await micSession.start({
                     consumerName: 'recorder',
+                    deviceId: recState.devicePicker?.getSelectedId(),
                     onSamples: (samples) => {
                         // Feed the shared meter *before* the tuner so it
                         // still animates during pre-roll even though the
@@ -3457,6 +3734,16 @@
                         // keep the tuner's internal queue from growing,
                         // but throw them away.
                         const readings = recState.chromaticTuner.take_readings();
+                        // Surface the latest detected pitch on the
+                        // meter pill EVEN during pre-roll, so the user
+                        // can sanity-check the mic before the actual
+                        // recording starts. Silence + YIN gates inside
+                        // the WebTuner already filter out junk.
+                        if (readings.length > 0) {
+                            recState.micMeter?.setDetectedNote(
+                                readings[readings.length - 1].label
+                            );
+                        }
                         if (!recState.isRecording) return;
                         for (const r of readings) {
                             const m = match_pitch_to_fret(
@@ -3486,12 +3773,19 @@
                 if (Math.round(liveSr) !== sr) {
                     recState.chromaticTuner.free?.();
                     recState.chromaticTuner = WebTuner.new_chromatic(liveSr);
+                    const recRmsAfter = recState.silenceThreshold?.getRms();
+                    if (recRmsAfter !== undefined) {
+                        recState.chromaticTuner.set_silence_rms(recRmsAfter);
+                    }
                 }
                 // Mic is live — show the level meter immediately so the
                 // user can see signal during the pre-roll. Diagnostic for
                 // "no detection on macOS" type issues: the meter surfaces
                 // a "no signal" hint after 2 s of no audio chunks.
                 recStartMicMeter();
+                // Refresh the device list so the labels populate now
+                // that we've been granted permission.
+                recState.devicePicker?.refresh().catch(() => {});
             } catch (err) {
                 recState.chromaticTuner?.free?.();
                 recState.chromaticTuner = null;
@@ -3564,6 +3858,7 @@
                     meterId: 'recorder-mic-meter',
                     fillId: 'recorder-mic-meter-fill',
                     dbId: 'recorder-mic-meter-db',
+                    noteId: 'recorder-mic-meter-note',
                     consumerName: 'recorder',
                     getActiveConsumer: () => micSession.consumerName,
                 });
@@ -3883,6 +4178,8 @@
             waitingForCol: -1,      // column index whose note we're waiting for (-1 = not waiting)
             waitStartedAt: 0,       // performance.now() when the current wait segment began (0 = not waiting). Used to add the wait duration to `totalPausedMs` when the mic detects a match, so the column-tick math doesn't "skip ahead" by however long the user took to play the note.
             micMeter: null,         // shared mic-meter controller (see ./controllers/mic-meter.js)
+            devicePicker: null,     // shared input-device picker (see ./controllers/device-picker.js)
+            silenceThreshold: null, // shared silence-threshold slider (see ./controllers/silence-threshold.js)
             _resumeOffsetCols: 0,   // internal: forwarded from playbackStart's resumeColumn arg to the engine kickoff
         };
 
@@ -3997,6 +4294,28 @@
         }
 
         function initPlayback() {
+            // Eager-initialise the device picker so the dropdown is
+            // populated when the user lands on the Playback view
+            // (so they can pick before enabling wait mode).
+            playbackState.devicePicker = makeDevicePicker({
+                selectId: 'playback-device-select',
+                storageKey: 'twanga-playback-device-v1',
+                onChange: () => {
+                    // The mic is only opened in wait mode and gets
+                    // a fresh getUserMedia call each time. Persisting
+                    // the choice is enough; nothing to hot-swap.
+                },
+            });
+            playbackState.devicePicker.start().catch((e) =>
+                console.warn('playback device picker init failed', e));
+
+            playbackState.silenceThreshold = makeSilenceThreshold({
+                sliderId: 'playback-mic-meter-threshold',
+                storageKey: 'twanga-playback-silence-rms-v1',
+                onChange: (rms) => {
+                    playbackState.chromaticTuner?.set_silence_rms(rms);
+                },
+            });
             playbackHydrate();
             playbackState.rendererController = wireRendererHost({
                 selectId: 'playback-renderer-select',
@@ -4352,11 +4671,19 @@
             playbackState.loadedTab.transposed = transposed;
             playbackState.loadedTab.dropped = dropped;
 
-            // "Skipped:" preamble shows up to 8 unique names.
+            // "Skipped:" preamble shows up to 8 unique names. The
+            // transpose-mode dropdown sits with it — both hide
+            // together when nothing dropped, because the
+            // drop-vs-octave-shift choice is meaningless when no
+            // notes are out of range (both modes produce identical
+            // output). The persisted value still applies invisibly
+            // next time it matters.
             const skipBox = el('playback-skipped-notes');
+            const transposeRow = document.querySelector('.transpose-mode-row');
             if (dropped.length === 0) {
                 skipBox.hidden = true;
                 skipBox.textContent = '';
+                if (transposeRow) transposeRow.hidden = true;
             } else {
                 const unique = [...new Set(dropped.map((d) => d.note))].sort();
                 const preview = unique.slice(0, 8).join(', ');
@@ -4365,6 +4692,7 @@
                 skipBox.textContent =
                     `Skipped: ${dropped.length} note${dropped.length === 1 ? '' : 's'} ` +
                     `couldn't fit on the target tuning — ${preview}${extra}`;
+                if (transposeRow) transposeRow.hidden = false;
             }
 
             playbackPushScoreToRenderer();
@@ -4788,9 +5116,16 @@
             if (playbackState.wait) {
                 const sr = micSession.sampleRate();
                 playbackState.chromaticTuner = WebTuner.new_chromatic(sr);
+                // Re-apply the persisted silence threshold to the new
+                // chromatic tuner used for wait-mode pitch comparison.
+                const pbRms = playbackState.silenceThreshold?.getRms();
+                if (pbRms !== undefined) {
+                    playbackState.chromaticTuner.set_silence_rms(pbRms);
+                }
                 try {
                     const liveSr = await micSession.start({
                         consumerName: 'playback',
+                        deviceId: playbackState.devicePicker?.getSelectedId(),
                         onSamples: (samples) => {
                             // Feed the meter first so it animates even
                             // during pre-roll / between expected notes.
@@ -4803,6 +5138,14 @@
                             // so the queue doesn't grow. Only act on them
                             // when actively waiting for a column.
                             const readings = t.take_readings();
+                            // Show the detected pitch on the meter pill
+                            // regardless of waiting state — useful for
+                            // confirming the mic is alive between notes.
+                            if (readings.length > 0) {
+                                playbackState.micMeter?.setDetectedNote(
+                                    readings[readings.length - 1].label
+                                );
+                            }
                             if (playbackState.waitingForCol < 0) return;
                             for (const r of readings) {
                                 if (playbackWaitMatches(r.detected_hz, playbackState.waitingForCol)) {
@@ -4826,6 +5169,10 @@
                     if (Math.round(liveSr) !== sr) {
                         playbackState.chromaticTuner.free?.();
                         playbackState.chromaticTuner = WebTuner.new_chromatic(liveSr);
+                        const pbRmsAfter = playbackState.silenceThreshold?.getRms();
+                        if (pbRmsAfter !== undefined) {
+                            playbackState.chromaticTuner.set_silence_rms(pbRmsAfter);
+                        }
                     }
                     // Mic is live — show the meter so the user has a
                     // diagnostic signal (same role as on the recorder).
@@ -4834,11 +5181,15 @@
                             meterId: 'playback-mic-meter',
                             fillId: 'playback-mic-meter-fill',
                             dbId: 'playback-mic-meter-db',
+                            noteId: 'playback-mic-meter-note',
                             consumerName: 'playback',
                             getActiveConsumer: () => micSession.consumerName,
                         });
                     }
                     playbackState.micMeter.start();
+                    // Now we've got permission — refresh the device
+                    // list so the labels populate.
+                    playbackState.devicePicker?.refresh().catch(() => {});
                 } catch (err) {
                     playbackState.chromaticTuner?.free?.();
                     playbackState.chromaticTuner = null;

@@ -34,12 +34,19 @@ GUI) shows it in the header.
 | `--no-metronome` | Disable the metronome click on each beat (default: on). |
 | `--pre-roll <N>` | Audible count-in ticks before recording starts (0–16). Default 4. Always audible, even when `--no-metronome` is set. Aborts cleanly on Ctrl-C / `q + Enter`. |
 | `--title <text>` | Human-readable title — written to `\title` AND used to derive the filename (`<slug>-<unix-secs>.alphatex`). Blank input falls back to `recording-<unix-secs>.alphatex`. |
+| `--device "<name>"` | Substring-match against the audio input device list (see `twanga devices`). Omit to use the OS default. |
+| `--silence-rms <RMS>` | Override the silence-gate threshold (linear-amplitude window-RMS, 0..1; default 0.005 ≈ -46 dB). Lower for quiet plucks at the cost of more cable-hum / room-noise false positives. |
 
-Controls during a take: `q + Enter` or Ctrl-C stops cleanly, `p + Enter`
-toggles pause/resume, **`u + Enter` while paused** undoes the last
-committed column (pops it from the score + rewinds the sample counter
-so resume doesn't fire a phantom catch-up click). Match for the GUI's
-"Undo last column" button.
+Controls during a take (all `+ Enter`):
+
+- `q` — stop (or Ctrl-C)
+- `p` — pause / resume
+- `u` (while paused) — undo last committed column. Pops it from the
+  score and rewinds the sample counter so resume doesn't fire a
+  phantom catch-up click. Match for the GUI's "Undo last column"
+  button.
+- `[` / `]` — drop / raise the silence threshold by ~6 dB. Prints the
+  new value on its own line.
 
 Example output:
 
@@ -70,12 +77,18 @@ Open the Recorder card from the main menu (or `#recorder`).
   recently committed column and rewinds the wall clock by one column so
   resume doesn't fire a phantom catch-up click. Click repeatedly to undo
   multiple. Disabled when nothing has been committed.
-- **Renderer picker** — Tab (column-grid) or Highway (Rocksmith-style
-  notes-toward-you) for the live in-progress view.
-- **Mic-level meter** — small RMS bar surfaces "no signal" diagnostics
-  (helps distinguish missing pitch detection from a dead input;
-  particularly useful on macOS where the AudioContext can start
-  suspended).
+- **Renderer picker** — Tab (column-grid) or Highway (notes drop down
+  lanes toward a "now" line) for the live in-progress view.
+- **Input device picker** — dropdown above the meter, populated via
+  `navigator.mediaDevices.enumerateDevices()`. Persists in
+  `localStorage` under `twanga-recorder-device-v1`. Hot-plug supported.
+  No mid-take swap; the choice takes effect on the next Start.
+- **Mic-level meter + silence-threshold slider** — small RMS bar
+  surfaces "no signal" diagnostics (helps distinguish missing pitch
+  detection from a dead input; particularly useful on macOS where the
+  AudioContext can start suspended). The slider thumb overlays the
+  bar; drag to set the silence gate on the same dB axis. Persisted
+  under `twanga-recorder-silence-rms-v1`.
 - **Save** — writes the take as `.alphatex` into the in-browser library
   (IndexedDB). Title field on the save dialog populates the alphaTex
   `\title` field and the derived row title in the library.

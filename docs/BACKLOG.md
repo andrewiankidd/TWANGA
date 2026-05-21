@@ -223,6 +223,12 @@ Tuner-driven passive sample collection. The chore (tuning) becomes the data sour
 - **Folder-based sync.** Point app data at a Dropbox/iCloud/Syncthing folder for multi-machine sync. No accounts, no server.
 - **MusicXML export.** Interop with MuseScore, Guitar Pro, etc. Bidirectional via internal TwangaTab model. (MusicXML *import* is on the [ROADMAP](ROADMAP.md); export would land alongside.)
 
+## Mic-input parity gaps
+
+Minor asymmetries between the CLI and GUI around live mic configuration. The static-flag versions exist on both sides; the live versions only on one.
+
+- **Runtime device-switch on CLI.** GUI has a device picker on Tuner / Recorder / Playback wait-mode that hot-swaps the active input. CLI has `--device "<name>"` at startup; switching mid-session would need to drop and re-open the `InputStream`. Doable but low-value — CLI users typically know their device before they start.
+
 ## Architecture / infrastructure
 
 - **CI mobile targets.** Linux/Windows/macOS already ship via the CI + release workflows. GitHub Pages deploy for the web build also ships (`pages.yml`). Mobile (iOS / Android via Tauri Mobile) is the next platform tier to add — see [ROADMAP](ROADMAP.md).

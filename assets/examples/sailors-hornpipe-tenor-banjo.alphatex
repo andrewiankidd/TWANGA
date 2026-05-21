@@ -1,0 +1,18 @@
+\title "Sailor's Hornpipe"
+\subtitle "Traditional · tenor banjo (Jazz CGDA)"
+\copyright "Traditional public-domain melody (sailor's dance tune, late 18th century). Arrangement under MIT or Apache-2.0."
+\tempo 140
+\tuning A3 D3 G2 C2
+.
+// A Part — quick descending opening "dee-dee-dee-dee, dee-dee-dee-dee"
+:8 0.1 2.1 0.1 0.2 | 2.2 0.2 0.1 2.1 |
+:8 0.1 0.2 2.2 0.2 | 0.3 2.3 0.2 r |
+// A Part second half
+:8 0.1 2.1 0.1 0.2 | 2.2 0.2 0.1 2.1 |
+:8 0.1 0.2 2.2 0.3 | 0.3 0.3 0.3 r |
+// B Part — upper register
+:8 3.1 2.1 0.1 2.1 | 3.1 0.1 2.1 0.1 |
+:8 0.2 2.2 0.2 2.2 | 3.2 0.2 2.2 0.2 |
+// B Part second half — resolve
+:8 3.1 2.1 0.1 2.1 | 3.1 0.1 0.2 2.2 |
+:8 0.2 0.3 2.3 0.3 | 0.3 0.3 0.3 r |

@@ -1,0 +1,16 @@
+\title "Soldier's Joy"
+\subtitle "Traditional Scottish/Irish/American fiddle tune · tenor banjo (Jazz CGDA)"
+\copyright "Traditional public-domain melody (late 1700s; published in Aird's Selection 1782). Arrangement under MIT or Apache-2.0."
+\tempo 110
+\tuning A3 D3 G2 C2
+.
+// A Part: classic D-major reel phrase
+:8 0.2 2.2 4.2 0.1 | 2.2 0.1 2.2 4.2 |
+:8 0.1 2.1 0.1 4.2 | 2.2 0.2 2.2 0.2 |
+:8 0.2 2.2 4.2 0.1 | 2.2 0.1 2.2 4.2 |
+:8 0.1 2.1 0.1 0.2 | 2.2 0.2 0.2 r |
+// B Part: drop to the lower strings
+:8 0.3 2.3 0.2 2.3 | 0.3 2.3 0.2 r |
+:8 0.3 2.3 0.2 2.3 | 0.3 0.4 0.3 r |
+:8 0.2 2.2 0.1 2.1 | 0.1 2.1 0.1 r |
+:8 2.2 0.2 0.3 2.3 | 0.3 0.3 0.3 r |

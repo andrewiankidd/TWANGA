@@ -1,0 +1,17 @@
+\title "Wildwood Flower"
+\subtitle "Webster / Irving, 1860 · standard 5-string banjo (Open G)"
+\copyright "Public-domain melody (J. P. Webster, 1860; Carter Family popularised 1928 but the underlying tune is the 1860 parlor song). Arrangement under MIT or Apache-2.0."
+\tempo 95
+\tuning D4 B3 G3 D3 G4
+.
+// Phrase 1: "Oh, I'll twine with my min-gles of rav-en black hair"
+:8 0.3 0.5 0.2 0.5 | 0.1 0.5 2.2 0.5 |
+:8 0.2 0.5 0.3 0.5 | 2.3 0.5 0.3 0.5 |
+// Phrase 2: "With the ros-es so red and the lil-ies so fair"
+:8 0.3 0.5 0.2 0.5 | 0.1 0.5 0.1 0.5 |
+:8 2.2 0.5 0.2 0.5 | 0.2 0.5 0.3 0.5 |
+// Phrase 3: "And the myr-tle so bright with the em-er-ald hue"
+:8 0.2 0.5 0.2 0.5 | 0.1 0.5 2.2 0.5 |
+:8 0.2 0.5 0.3 0.5 | 2.3 0.5 0.3 0.5 |
+// Phrase 4: tag
+:8 0.3 0.5 0.3 0.5 | 0.3 0.5 0.3 0.5 |

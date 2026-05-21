@@ -1,0 +1,14 @@
+\title "London Bridge Is Falling Down"
+\subtitle "Traditional English nursery rhyme · standard ukulele (GCEA, reentrant)"
+\copyright "Traditional public-domain melody (England, 18th century or earlier). Arrangement under MIT or Apache-2.0."
+\tempo 105
+\tuning A4 E4 C4 G4
+.
+// Phrase 1: "London Bridge is fall-ing down"  G A G F E F G
+:4 3.2 0.1 3.2 1.2 | 0.2 1.2 3.2 r |
+// Phrase 2: "Fall-ing down, fall-ing down"  D E F | E F G
+:4 2.3 0.2 1.2 r | 0.2 1.2 3.2 r |
+// Phrase 3: (repeat phrase 1)
+:4 3.2 0.1 3.2 1.2 | 0.2 1.2 3.2 r |
+// Phrase 4: "My fair la-dy"  G D E C
+:4 3.2 2.3 0.2 0.3 | r r r r |

@@ -51,11 +51,26 @@ clap long-help so you can discover what's available. Bare `twanga play`
 opens an interactive picker over bundled examples + patterns + your
 `./recordings/`, mirroring the GUI's Playback library.
 
+## Shared mic-input controls
+
+`tune`, `record`, and `play --wait` all open a mic and share the same
+two flags + two runtime keys:
+
+- **`--device "<name>"`** — substring match against `twanga devices`.
+  Defaults to the OS default input.
+- **`--silence-rms <RMS>`** — silence-gate threshold (window-RMS in
+  linear amplitude, 0..1). Default 0.005 (≈ -46 dB) catches a quiet
+  room. Lower for quieter plucks, higher to reject more noise.
+- **`[` + Enter / `]` + Enter** — at runtime, drop or raise the
+  silence threshold by ~6 dB (×0.5 / ×2 in linear RMS). Echoes the
+  new value so you can see what you've set. GUI equivalent is the
+  thumb on the mic-meter slider.
+
 ## Other subcommands
 
 - **`twanga devices`** — list audio input devices CPAL can see.
-  Useful for sanity-checking before `tune` / `record` / `play --wait`.
-  No arguments.
+  Useful for sanity-checking before `tune` / `record` / `play --wait`,
+  or for picking the exact name to pass to `--device`. No arguments.
 - **`twanga convert <input> <output>`** — *stub*. Will eventually
   round-trip alphaTex ↔ MusicXML once the MusicXML parser lands.
   Proprietary formats (`.gp5`/`.gpx`) are explicit non-goals.

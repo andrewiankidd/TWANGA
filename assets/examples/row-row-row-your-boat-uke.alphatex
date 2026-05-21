@@ -1,0 +1,15 @@
+\title "Row Row Row Your Boat"
+\subtitle "Traditional round · standard ukulele (GCEA, reentrant)"
+\copyright "Traditional public-domain melody (Eliphalet Oram Lyte, 1852). Arrangement under MIT or Apache-2.0."
+\tempo 95
+\tuning A4 E4 C4 G4
+.
+// Phrase 1: "Row, row, row your boat"       (C C C D E)
+:4 0.3 0.3 0.3 2.3 | 0.2 r r r |
+// Phrase 2: "Gently down the stream"        (E D E F G)
+:4 0.2 2.3 0.2 1.2 | 3.2 r r r |
+// Phrase 3: "Merrily, merrily, merrily, merrily" (C C C, G G G, E E E, C C C — triplet feel flattened to 8ths)
+:8 0.1 0.1 0.1 r 3.2 3.2 3.2 r |
+:8 0.2 0.2 0.2 r 0.3 0.3 0.3 r |
+// Phrase 4: "Life is but a dream"           (G F E D C)
+:4 3.2 1.2 0.2 2.3 | 0.3 r r r |

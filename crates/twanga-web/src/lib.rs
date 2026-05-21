@@ -619,6 +619,21 @@ impl WebTuner {
         self.inner.feed(samples);
     }
 
+    /// Read the current silence threshold (linear amplitude RMS over
+    /// an 8192-sample window). Default 0.005 ≈ -46 dB.
+    pub fn silence_rms(&self) -> f32 {
+        self.inner.silence_rms()
+    }
+
+    /// Update the silence threshold at runtime. Clamped to [0, 1].
+    /// Lower values catch quieter plucks at the cost of more cable-
+    /// hum / room-noise false detections; higher values reject more
+    /// noise but require louder notes. Backs the GUI's per-screen
+    /// silence-gate slider and the CLI's `--silence-rms` flag.
+    pub fn set_silence_rms(&mut self, rms: f32) {
+        self.inner.set_silence_rms(rms);
+    }
+
     /// Drain accumulated readings. Each entry is `{ label, detected_hz,
     /// target_hz, cents }`. In `Strings` mode multiple strings can produce
     /// readings per call; the UI should treat the result as "updates for

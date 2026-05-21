@@ -1,0 +1,15 @@
+\title "Frère Jacques"
+\subtitle "Traditional French round · standard ukulele (GCEA, reentrant)"
+\copyright "Traditional public-domain melody (French folk, late 18th century). Arrangement under MIT or Apache-2.0."
+\tempo 110
+\tuning A4 E4 C4 G4
+.
+// Phrase 1: "Frère Jacques, Frère Jacques"  (C D E C | C D E C)
+:4 0.3 2.3 0.2 0.3 | 0.3 2.3 0.2 0.3 |
+// Phrase 2: "Dormez-vous? Dormez-vous?"     (E F G | E F G)
+:4 0.2 1.2 3.2 r | 0.2 1.2 3.2 r |
+// Phrase 3: "Sonnez les matines"            (G A G F E C | G A G F E C)
+:4 3.2 0.1 3.2 1.2 | 0.2 0.3 r r |
+:4 3.2 0.1 3.2 1.2 | 0.2 0.3 r r |
+// Phrase 4: "Ding, ding, dong"              (C G C | C G C — dropping to low G via the reentrant string)
+:4 0.3 0.4 0.3 r | 0.3 0.4 0.3 r |

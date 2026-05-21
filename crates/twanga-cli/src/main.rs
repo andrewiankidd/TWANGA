@@ -51,6 +51,14 @@ enum Command {
         /// value to be prompted; default 0 = no capo.
         #[arg(long, num_args = 0..=1, default_missing_value = "")]
         capo: Option<String>,
+        /// Silence-gate threshold (window RMS, linear amplitude). Detection is
+        /// skipped when the 8192-sample window average is below this value.
+        /// Default 0.005 (≈ -46 dB) catches a quiet room while staying below
+        /// any plucked note. Lower to catch quieter plucks (more cable-hum /
+        /// noise false positives); higher to reject more noise. Range 0..1.
+        /// The GUI exposes the same setting as a slider over the level meter.
+        #[arg(long, value_name = "RMS")]
+        silence_rms: Option<f32>,
     },
     /// Play back a `.alphatex` recording. Scrolling cursor view, optional
     /// metronome click on each beat, optional "wait" mode that pauses until
@@ -125,6 +133,11 @@ enum Command {
         /// start regardless of history.
         #[arg(long, conflicts_with = "resume")]
         no_resume: bool,
+        /// Silence-gate threshold for wait-mode pitch detection (window RMS,
+        /// linear amplitude). Default 0.005 (≈ -46 dB). Same semantics as
+        /// `twanga tune --silence-rms` — no-op when `--wait` isn't passed.
+        #[arg(long, value_name = "RMS")]
+        silence_rms: Option<f32>,
     },
     /// Live tab recorder — capture played notes as horizontal ASCII tab notation.
     /// Any argument left unset triggers an interactive prompt (with the default
@@ -169,6 +182,10 @@ enum Command {
         /// Accept the blank default to keep the pre-title filename shape.
         #[arg(long, num_args = 0..=1, default_missing_value = "")]
         title: Option<String>,
+        /// Silence-gate threshold (window RMS, linear amplitude). Default 0.005
+        /// (≈ -46 dB). Same semantics as `twanga tune --silence-rms`.
+        #[arg(long, value_name = "RMS")]
+        silence_rms: Option<f32>,
     },
     /// List available audio input devices.
     Devices,
@@ -1019,6 +1036,38 @@ fn is_undo_input(input: &str) -> bool {
     matches!(input, "u" | "undo")
 }
 
+/// Silence-threshold step-down keypress. `[ + Enter` halves the gate
+/// (≈ -6 dB), making detection trigger on quieter input. CLI parity
+/// for the GUI's mic-meter slider.
+fn is_threshold_down(input: &str) -> bool {
+    matches!(input, "[")
+}
+
+/// Silence-threshold step-up keypress. `] + Enter` doubles the gate
+/// (≈ +6 dB), making detection require louder input. CLI parity
+/// for the GUI's mic-meter slider.
+fn is_threshold_up(input: &str) -> bool {
+    matches!(input, "]")
+}
+
+/// Step the tuner's silence threshold by ±6 dB (×2 / ×0.5 in linear
+/// amplitude). 6 dB steps because the useful threshold range spans
+/// roughly 0.001..0.05, which is six doublings — about seven
+/// keypresses gets across the entire usable band. Prints the new
+/// value (in both linear RMS and dB) on its own line so the user
+/// sees what they've set; the next tick of the status-line refresh
+/// redraws the live reading underneath.
+fn step_silence_threshold(tuner: &mut Tuner, up: bool) {
+    let current = tuner.silence_rms();
+    let factor = if up { 2.0_f32 } else { 0.5_f32 };
+    // Clamp to a sane range. 0.00001 is well below any plausible
+    // signal; 0.5 is louder than any plucked-string note ever gets.
+    let next = (current * factor).clamp(0.000_01, 0.5);
+    tuner.set_silence_rms(next);
+    let db = 20.0 * next.log10();
+    eprintln!("\n[silence: {next:.5} RMS ({db:.1} dB)]");
+}
+
 fn run_chromatic(mut tuner: Tuner, mut stream: InputStream) -> Result<()> {
     let mut status = StatusLine::new();
     let use_color = status.is_terminal();
@@ -1036,6 +1085,11 @@ fn run_chromatic(mut tuner: Tuner, mut stream: InputStream) -> Result<()> {
             if is_quit_input(&input) {
                 status.finish()?;
                 return Ok(());
+            }
+            if is_threshold_down(&input) {
+                step_silence_threshold(&mut tuner, false);
+            } else if is_threshold_up(&input) {
+                step_silence_threshold(&mut tuner, true);
             }
         }
         let n = stream.read(&mut buf);
@@ -1078,6 +1132,11 @@ fn run_strings(mut tuner: Tuner, mut stream: InputStream, strings: Vec<TunedStri
             if is_quit_input(&input) {
                 return Ok(());
             }
+            if is_threshold_down(&input) {
+                step_silence_threshold(&mut tuner, false);
+            } else if is_threshold_up(&input) {
+                step_silence_threshold(&mut tuner, true);
+            }
         }
         let n = stream.read(&mut buf);
         if n > 0 {
@@ -1098,7 +1157,7 @@ fn run_strings(mut tuner: Tuner, mut stream: InputStream, strings: Vec<TunedStri
     }
 }
 
-fn run_tuner(mode: TunerMode) -> Result<()> {
+fn run_tuner(mode: TunerMode, silence_rms: Option<f32>) -> Result<()> {
     let stream = InputStream::open()?;
     let sample_rate = stream.sample_rate;
     let channels = stream.channels;
@@ -1113,7 +1172,8 @@ fn run_tuner(mode: TunerMode) -> Result<()> {
     eprintln!("Audio:  {sample_rate} Hz, {channels} channel(s)");
     eprintln!();
     eprintln!("─────────────────────────────────────────────────");
-    eprintln!("  Controls: type 'q' + Enter to stop  (or Ctrl-C)");
+    eprintln!("  Controls: 'q' + Enter to stop  (or Ctrl-C)");
+    eprintln!("            '[' / ']' + Enter to step silence threshold ∓ 6 dB");
     eprintln!("─────────────────────────────────────────────────");
     eprintln!();
 
@@ -1122,7 +1182,10 @@ fn run_tuner(mode: TunerMode) -> Result<()> {
         TunerMode::Strings(t) => Some(t.strings.clone()),
     };
 
-    let tuner = Tuner::new(mode, sample_rate);
+    let mut tuner = Tuner::new(mode, sample_rate);
+    if let Some(rms) = silence_rms {
+        tuner.set_silence_rms(rms);
+    }
     match strings {
         None => run_chromatic(tuner, stream),
         Some(s) => run_strings(tuner, stream, s),
@@ -1203,6 +1266,7 @@ fn run_recorder(
     metronome: bool,
     pre_roll: u32,
     title: Option<String>,
+    silence_rms: Option<f32>,
 ) -> Result<()> {
     let mut stream = InputStream::open()?;
     let sample_rate = stream.sample_rate;
@@ -1233,6 +1297,9 @@ fn run_recorder(
     // imposing the tuner's ±7 semitone string-distance gate, which would clip
     // high-fret recording. We do our own fret-aware string match below.
     let mut tuner = Tuner::new(TunerMode::Chromatic, sample_rate);
+    if let Some(rms) = silence_rms {
+        tuner.set_silence_rms(rms);
+    }
 
     let (recording_path, mut recording_writer) =
         open_recording_file(&base_tuning, &capo, bpm, resolution_denom, title.as_deref())?;
@@ -1261,6 +1328,7 @@ fn run_recorder(
     eprintln!();
     eprintln!("─────────────────────────────────────────────────");
     eprintln!("  Controls: 'q' stop · 'p' pause/resume · 'u' undo last col (while paused)");
+    eprintln!("            '[' / ']' step silence threshold ∓ 6 dB");
     eprintln!("─────────────────────────────────────────────────");
     eprintln!();
 
@@ -1331,6 +1399,10 @@ fn run_recorder(
                 } else {
                     eprintln!("[undo only works while paused — press 'p' + Enter first]");
                 }
+            } else if is_threshold_down(&input) {
+                step_silence_threshold(&mut tuner, false);
+            } else if is_threshold_up(&input) {
+                step_silence_threshold(&mut tuner, true);
             }
         }
         let n = stream.read(&mut buf);
@@ -1418,7 +1490,11 @@ fn main() -> Result<()> {
         return Ok(());
     };
     match command {
-        Command::Tune { tuning, capo } => {
+        Command::Tune {
+            tuning,
+            capo,
+            silence_rms,
+        } => {
             let mode = resolve_mode(tuning)?;
             let mode = match mode {
                 TunerMode::Chromatic => TunerMode::Chromatic,
@@ -1428,7 +1504,7 @@ fn main() -> Result<()> {
                     TunerMode::Strings(effective)
                 }
             };
-            run_tuner(mode)?;
+            run_tuner(mode, silence_rms)?;
         }
         Command::Record {
             tuning,
@@ -1439,6 +1515,7 @@ fn main() -> Result<()> {
             no_metronome,
             pre_roll,
             title,
+            silence_rms,
         } => {
             let t = resolve_tuning(tuning)?;
             let c = resolve_capo(capo, &t)?;
@@ -1447,7 +1524,17 @@ fn main() -> Result<()> {
             let bw = resolve_block_width(block_width)?;
             let pre_roll = resolve_pre_roll(pre_roll)?;
             let title = resolve_title(title)?;
-            run_recorder(t, c, bpm, denom, bw, !no_metronome, pre_roll, title)?;
+            run_recorder(
+                t,
+                c,
+                bpm,
+                denom,
+                bw,
+                !no_metronome,
+                pre_roll,
+                title,
+                silence_rms,
+            )?;
         }
         Command::Play {
             path,
@@ -1461,6 +1548,7 @@ fn main() -> Result<()> {
             pre_roll,
             resume,
             no_resume,
+            silence_rms,
         } => {
             // Resolve the file to play: an explicit path always wins;
             // otherwise drop into the interactive picker that merges
@@ -1508,6 +1596,7 @@ fn main() -> Result<()> {
                 capo,
                 pre_roll,
                 resume_col,
+                silence_rms,
             )?;
         }
         Command::Devices => {
@@ -1899,6 +1988,7 @@ fn run_patterns_play(
         /* capo_spec */ None,
         /* pre_roll */ 4,
         /* resume_col */ None,
+        /* silence_rms */ None,
     )
 }
 
@@ -2113,6 +2203,7 @@ fn run_playback(
     capo_spec: Option<String>,
     pre_roll: u32,
     resume_col: Option<u64>,
+    silence_rms: Option<f32>,
 ) -> Result<()> {
     // Transpose if --tuning was provided (either explicitly via flag or via
     // the prompt). The transposed tab carries the target tuning's names in
@@ -2183,10 +2274,11 @@ fn run_playback(
     let (mut input_state, mut input_buf) = if wait {
         let s = InputStream::open()?;
         let sr = s.sample_rate;
-        (
-            Some((s, Tuner::new(TunerMode::Chromatic, sr))),
-            vec![0.0_f32; READ_CHUNK],
-        )
+        let mut tuner = Tuner::new(TunerMode::Chromatic, sr);
+        if let Some(rms) = silence_rms {
+            tuner.set_silence_rms(rms);
+        }
+        (Some((s, tuner)), vec![0.0_f32; READ_CHUNK])
     } else {
         (None, Vec::new())
     };
@@ -2289,7 +2381,7 @@ fn run_playback(
         }
     }
     eprintln!("─────────────────────────────────────────────────");
-    eprintln!("  Controls: 'q' + Enter to stop, 'p' + Enter to pause/resume");
+    eprintln!("  Controls: 'q' stop · 'p' pause/resume · '[' / ']' silence ∓ 6 dB (wait mode)");
     eprintln!("─────────────────────────────────────────────────");
     eprintln!();
 
@@ -2351,6 +2443,16 @@ fn run_playback(
                         eprintln!("\n[paused — press 'p' + Enter to resume]");
                     } else {
                         eprintln!("[resuming]");
+                    }
+                } else if let Some((_, ref mut wait_tuner)) = input_state {
+                    // Threshold-step keys only do anything when there's
+                    // a tuner to step (i.e. wait mode is on; without
+                    // `--wait`, the input_state is None and the
+                    // keypress is a no-op).
+                    if is_threshold_down(&input) {
+                        step_silence_threshold(wait_tuner, false);
+                    } else if is_threshold_up(&input) {
+                        step_silence_threshold(wait_tuner, true);
                     }
                 }
             }
@@ -2585,6 +2687,11 @@ fn wait_for_expected_note(
         if let Ok(input) = stdin_rx.try_recv() {
             if is_quit_input(&input) {
                 return Ok(());
+            }
+            if is_threshold_down(&input) {
+                step_silence_threshold(tuner, false);
+            } else if is_threshold_up(&input) {
+                step_silence_threshold(tuner, true);
             }
         }
         let n = stream.read(buf);

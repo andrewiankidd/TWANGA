@@ -31,6 +31,7 @@ class HighwayRenderer {
         Object.assign(this.root.style, {
             position: 'relative',
             display: 'flex',
+            justifyContent: 'center',
             gap: `${this.options.laneGap}px`,
             background: 'var(--card)',
             border: '1px solid var(--border)',

@@ -1,0 +1,17 @@
+\title "Whiskey in the Jar"
+\subtitle "Traditional Irish · tenor banjo (Jazz CGDA)"
+\copyright "Traditional public-domain melody (Irish folk, 17th century; modern hits like Thin Lizzy / Metallica are separately copyrighted arrangements). Arrangement under MIT or Apache-2.0."
+\tempo 100
+\tuning A3 D3 G2 C2
+.
+// Phrase 1: "As I was go-ing o-ver"  D D D D F E D
+:8 0.2 0.2 0.2 0.2 | 3.2 2.2 0.2 r |
+// Phrase 2: "The Cork and Ker-ry moun-tains"  F E D C D
+:8 3.2 2.2 0.2 0.3 | 0.2 r r r |
+// Phrase 3: "I saw Cap-tain Far-rell"  D D D F E D
+:8 0.2 0.2 0.2 0.2 | 3.2 2.2 0.2 r |
+// Phrase 4: "And his mon-ey he was count-ing"  E D D C D
+:8 2.2 0.2 0.2 0.3 | 0.2 r r r |
+// Refrain: "Mush-a ring dum-a doo dum-a da"  A A G F E D
+:8 0.1 0.1 0.3 3.2 | 2.2 0.2 r r |
+:8 0.3 0.4 0.3 0.2 | 0.2 0.2 0.2 r |

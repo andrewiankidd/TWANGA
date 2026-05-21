@@ -73,6 +73,25 @@ swaps for `$CONFIG/twanga/recordings/`, localStorage tunings swap for
 `tunings.toml`. See the shell README for the full Tauri command
 list.
 
+## Shared mic-input controls
+
+Tuner, Recorder, and Playback (wait mode) share two affordances over the
+mic-level meter:
+
+- **Input device picker** — dropdown above the meter, populated via
+  `navigator.mediaDevices.enumerateDevices()`. Browsers gate device
+  labels behind an existing mic-permission grant, so the first list
+  may show generic names; once permission is granted, labels populate.
+  Tauri's webview returns labels immediately. Hot-plug supported via
+  the `devicechange` event. Selection persists per-screen in
+  `localStorage` (`twanga-{tuner,recorder,playback}-device-v1`).
+- **Silence-threshold slider** — a thin vertical-line thumb overlaid
+  on the mic-meter bar. Drag to set the silence gate on the same dB
+  axis as the bar fill. Fill crosses the thumb → detection fires;
+  stays below → it doesn't. Persists per-screen
+  (`twanga-{tuner,recorder,playback}-silence-rms-v1`). CLI equivalents
+  are the `--silence-rms` flag and the `[` / `]` runtime keys.
+
 ## Storage notes
 
 The browser build stores user data in two places:

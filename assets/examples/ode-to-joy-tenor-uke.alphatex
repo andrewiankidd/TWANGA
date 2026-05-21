@@ -1,0 +1,18 @@
+\title "Ode to Joy"
+\subtitle "Beethoven, Symphony No. 9 · tenor ukulele (low-G GCEA)"
+\copyright "Public-domain melody (Beethoven, 1824 — well past life+70). Arrangement under MIT or Apache-2.0."
+\tempo 95
+\tuning A4 E4 C4 G3
+.
+// Phrase 1: "Joyful, joyful, we adore thee"
+:4 0.2 0.2 1.2 3.2 | 3.2 1.2 0.2 2.3 |
+// Phrase 2: "God of glory, Lord of love"
+:4 0.3 2.3 0.2 0.2 | 1.2 r 0.2 r |
+// Phrase 3: (repeat of phrase 1)
+:4 0.2 0.2 1.2 3.2 | 3.2 1.2 0.2 2.3 |
+// Phrase 4: "Hearts unfold like flowers before thee"
+:4 0.3 2.3 0.2 1.2 | 0.3 r r r |
+// Phrase 5: middle bridge — drop to the C string
+:4 2.3 2.3 0.2 0.3 | 2.3 1.2 0.3 2.3 |
+// Phrase 6: resolve
+:4 0.2 2.3 0.3 1.2 | 0.3 r r r |
