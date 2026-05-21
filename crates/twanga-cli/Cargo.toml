@@ -19,9 +19,9 @@ twanga-dsp = { path = "../twanga-dsp" }
 twanga-synth = { path = "../twanga-synth" }
 twanga-tabs = { path = "../twanga-tabs" }
 twanga-tui = { path = "../twanga-tui" }
+twanga-paths = { path = "../twanga-paths" }
 anyhow.workspace = true
 clap.workspace = true
 serde = { workspace = true }
 serde_json = { workspace = true }
 toml = { workspace = true }
-directories = { workspace = true }

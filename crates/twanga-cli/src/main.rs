@@ -1196,8 +1196,6 @@ fn run_tuner(mode: TunerMode, silence_rms: Option<f32>) -> Result<()> {
 /// treated as garbage / out-of-range and silently dropped.
 const MAX_FRET: u8 = 20;
 
-/// Folder (relative to CWD) where `twanga record` writes its output files.
-const RECORDINGS_DIR: &str = "recordings";
 
 /// Open an alphaTex recording file for `twanga record`. Writes the header
 /// against the BASE tuning + capo (the writer encodes the capo into the
@@ -1218,7 +1216,10 @@ fn open_recording_file(
     resolution_denom: u32,
     title: Option<&str>,
 ) -> Result<(PathBuf, AlphaTexWriter<BufWriter<File>>)> {
-    let dir = PathBuf::from(RECORDINGS_DIR);
+    // Single source of truth for the recordings dir — same call the
+    // picker (`bundled::scan_recordings`) uses, so writes + scans
+    // agree across home / portable modes.
+    let dir = bundled::recordings_dir_path();
     fs::create_dir_all(&dir)
         .with_context(|| format!("failed to create '{}' directory", dir.display()))?;
     let secs = SystemTime::now()
@@ -1653,6 +1654,7 @@ const DOC_PATTERNS: &str = include_str!("../../../docs/features/patterns.md");
 const DOC_EDITOR: &str = include_str!("../../../docs/features/editor.md");
 const DOC_TUNINGS: &str = include_str!("../../../docs/features/tunings.md");
 const DOC_HARDWARE: &str = include_str!("../../../docs/features/hardware.md");
+const DOC_USER_GUIDE: &str = include_str!("../../../docs/features/user-guide.md");
 
 /// Slug → embedded markdown body. Order here is the listing order shown
 /// to the user when they run `twanga docs` with no arg.
@@ -1687,6 +1689,11 @@ const DOCS_PAGES: &[(&str, &str, &str)] = &[
         "hardware",
         "Audio-input setup guide — mics, instrument cables, interfaces.",
         DOC_HARDWARE,
+    ),
+    (
+        "user-guide",
+        "Paths + portable mode, audio architecture, privacy, credits.",
+        DOC_USER_GUIDE,
     ),
 ];
 
@@ -2899,6 +2906,7 @@ mod docs_tests {
     fn slug_set_matches_expected_features() {
         let expected = [
             "tuner", "recorder", "playback", "patterns", "editor", "tunings", "hardware",
+            "user-guide",
         ];
         let actual: Vec<&str> = DOCS_PAGES.iter().map(|(s, _, _)| *s).collect();
         assert_eq!(

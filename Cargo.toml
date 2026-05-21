@@ -7,6 +7,7 @@ members = [
     "crates/twanga-audio",
     "crates/twanga-tabs",
     "crates/twanga-tui",
+    "crates/twanga-paths",
     "crates/twanga-cli",
     "crates/twanga-bench",
     "crates/twanga-app",

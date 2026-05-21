@@ -1,14 +1,14 @@
 //! User-tunings layer for the CLI. The same TOML schema lives in
 //! `crates/twanga-core/src/presets.toml` (compiled into the binary) and in
-//! the user-config file under the OS-conventional config dir; this module
-//! merges the two for menus and lookup.
+//! the user-data file under the TWANGA data root; this module merges the
+//! two for menus and lookup.
 //!
 //! The low-level `*_at` functions take an explicit path and are unit-tested.
-//! The high-level functions wrap them around `directories::ProjectDirs` so
-//! production code uses the platform's standard config location.
+//! The high-level functions resolve the data root through `twanga-paths`,
+//! which decides home-mode (`~/twanga/tunings.toml`) vs portable-mode
+//! (`<binary-dir>/twanga-data/tunings.toml`).
 
 use anyhow::{Context, Result, anyhow};
-use directories::ProjectDirs;
 use std::fs;
 use std::path::{Path, PathBuf};
 use twanga_core::{PresetEntry, PresetFile, Tuning};
@@ -35,11 +35,11 @@ impl KnownTuning {
     }
 }
 
-/// Path to the user tunings file. Returns `None` only on exotic platforms
-/// where `directories` can't resolve a config dir at all.
+/// Path to the user tunings file. Returns `None` only when the data
+/// root itself can't be resolved (neither portable sentinel nor home
+/// dir available — vanishingly rare).
 pub fn user_tunings_path() -> Option<PathBuf> {
-    let dirs = ProjectDirs::from("", "", "twanga")?;
-    Some(dirs.config_dir().join("tunings.toml"))
+    Some(twanga_paths::data_root()?.tunings_path())
 }
 
 /// Read the user-tunings file at `path`. Treats a missing file as "no user

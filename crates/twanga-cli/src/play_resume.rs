@@ -4,15 +4,14 @@
 //! was on when they stopped, the file's title (for display), and a
 //! `when` timestamp so we can age out / sort.
 //!
-//! Stored at `$CONFIG/twanga/play-resume.toml` (alongside
-//! `tunings.toml`). TOML for human-readability; the file is small.
+//! Stored at `<data-root>/play-resume.toml` (alongside `tunings.toml`).
+//! TOML for human-readability; the file is small.
 //!
 //! Same shape on both sides — a future Tauri filesystem command
 //! could sync this with the browser's localStorage without
 //! translation.
 
 use anyhow::{Context, Result, anyhow};
-use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -40,11 +39,10 @@ struct BookmarksFile {
 }
 
 /// Where the bookmarks TOML lives on disk. Same directory as the
-/// user-tunings file. Returns `None` only on platforms where
-/// `directories` can't resolve a config dir.
+/// user-tunings file. Returns `None` only when the data root itself
+/// can't be resolved.
 pub fn bookmarks_file_path() -> Option<PathBuf> {
-    let dirs = ProjectDirs::from("", "", "twanga")?;
-    Some(dirs.config_dir().join("play-resume.toml"))
+    Some(twanga_paths::data_root()?.play_resume_path())
 }
 
 /// Read all bookmarks from disk. Missing file → empty list (a fresh

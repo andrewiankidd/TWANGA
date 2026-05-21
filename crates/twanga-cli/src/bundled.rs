@@ -9,9 +9,10 @@
 //!     `.alphatex` files in the same dir.
 //!   - Patterns live at `assets/patterns/manifest.json` (with
 //!     groups + per-pattern difficulty) + matching `.alphatex` files.
-//!   - User recordings live at `./recordings/*.alphatex` next to wherever
-//!     the user ran the command — same convention `twanga record` uses
-//!     when writing files out.
+//!   - User recordings live at `<data-root>/recordings/*.alphatex` —
+//!     `~/twanga/recordings/` in default mode, `<binary-dir>/twanga-data
+//!     /recordings/` in portable mode. Same path twanga-record writes
+//!     to, via `twanga_paths::data_root()`.
 //!
 //! All discovery is filesystem-based against the current working
 //! directory. The GUI does the same thing via `fetch()` against the
@@ -105,9 +106,16 @@ pub fn patterns_manifest_path() -> PathBuf {
     PathBuf::from("assets/patterns/manifest.json")
 }
 
-/// Default location of the user recordings dir (relative to cwd).
+/// Default location of the user recordings dir. Routes through
+/// `twanga-paths` so this honours portable-mode detection (sentinel
+/// next to the binary) and the default `~/twanga/recordings/` home
+/// path. Falls back to a CWD-relative `recordings/` on the
+/// astronomically rare case where the data root can't be resolved
+/// (no home dir AND no resolvable exe dir).
 pub fn recordings_dir_path() -> PathBuf {
-    PathBuf::from("recordings")
+    twanga_paths::data_root()
+        .map(|r| r.recordings_dir())
+        .unwrap_or_else(|| PathBuf::from("recordings"))
 }
 
 /// Load + parse the bundled-examples manifest. Returns an empty list

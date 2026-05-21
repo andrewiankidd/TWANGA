@@ -4,14 +4,17 @@
 //! defined; otherwise it falls back to IndexedDB + localStorage (the
 //! web build's behaviour).
 //!
-//! Storage layout (mirrors the CLI's `$CONFIG/twanga/` so the desktop
-//! shell + the CLI share files transparently):
+//! Storage layout — resolved by `twanga-paths`, so the desktop shell
+//! and the CLI read + write the same files. Default home mode:
 //!
-//!   $CONFIG/twanga/
+//!   ~/twanga/
 //!       tunings.toml          ← user-defined tunings (CLI + Tauri share this)
 //!       recordings/
 //!           <slug>-<ts>.alphatex
-//!           …
+//!
+//! Portable mode (sentinel `twanga.portable` next to the binary)
+//! swaps the prefix for `<binary-dir>/twanga-data/` but the rest of
+//! the layout is identical.
 //!
 //! Recording ids are filenames (e.g. `my-take-1779133041.alphatex`).
 //! Stable across runs, unique-by-construction (the recorder adds a
@@ -19,7 +22,6 @@
 //! IDB ids because those are integers, not strings.
 
 use anyhow::{Context, Result, anyhow};
-use directories::ProjectDirs;
 use serde::Serialize;
 use std::fs;
 use std::path::PathBuf;
@@ -49,26 +51,26 @@ pub struct RecordingFull {
     pub last_backed_up_at: Option<u64>,
 }
 
-/// Resolve `$CONFIG/twanga/` (the same dir twanga-cli uses for
-/// tunings.toml). Errors only on exotic platforms where `directories`
-/// can't resolve a config dir at all.
-fn config_dir() -> Result<PathBuf> {
-    let dirs = ProjectDirs::from("", "", "twanga")
-        .ok_or_else(|| anyhow!("could not resolve $CONFIG/twanga (no platform config dir)"))?;
-    Ok(dirs.config_dir().to_path_buf())
+/// Resolve the user data root (home / portable). Errors only when
+/// `twanga-paths` can't resolve EITHER the binary dir or the home
+/// dir — a configuration so broken there's no recoverable place to
+/// write to.
+fn data_root() -> Result<twanga_paths::DataRoot> {
+    twanga_paths::data_root()
+        .ok_or_else(|| anyhow!("could not resolve TWANGA data root (no home dir, no portable sentinel)"))
 }
 
-/// `$CONFIG/twanga/recordings/`. Created on demand.
+/// `<data-root>/recordings/`. Created on demand.
 fn recordings_dir() -> Result<PathBuf> {
-    let dir = config_dir()?.join("recordings");
+    let dir = data_root()?.recordings_dir();
     fs::create_dir_all(&dir).with_context(|| format!("failed to create {}", dir.display()))?;
     Ok(dir)
 }
 
-/// `$CONFIG/twanga/tunings.toml` — the same file twanga-cli reads
-/// + writes via the `tunings::user_tunings_path()` helper.
+/// `<data-root>/tunings.toml` — same file twanga-cli reads + writes
+/// via the `tunings::user_tunings_path()` helper.
 fn tunings_path() -> Result<PathBuf> {
-    Ok(config_dir()?.join("tunings.toml"))
+    Ok(data_root()?.tunings_path())
 }
 
 /// Unix millis from a file's modification time. Returns `None` if
