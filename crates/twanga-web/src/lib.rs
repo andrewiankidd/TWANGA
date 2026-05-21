@@ -473,6 +473,18 @@ struct StringInfoJs {
     fret_offset: u8,
 }
 
+/// JS-facing snapshot of the auto noise-floor calibration. See
+/// [`WebTuner::calibration_status`]. All fields are flat so the GUI can
+/// destructure inline without nested-object access.
+#[derive(serde::Serialize)]
+struct CalibrationStatusJs {
+    in_progress: bool,
+    samples_collected: usize,
+    samples_total: usize,
+    floor_rms: Option<f32>,
+    threshold_rms: Option<f32>,
+}
+
 #[wasm_bindgen]
 impl WebTuner {
     /// Build a chromatic tuner. Use this when the user hasn't picked an
@@ -635,9 +647,59 @@ impl WebTuner {
     /// Lower values catch quieter plucks at the cost of more cable-
     /// hum / room-noise false detections; higher values reject more
     /// noise but require louder notes. Backs the GUI's per-screen
-    /// silence-gate slider and the CLI's `--silence-rms` flag.
+    /// silence-gate slider and the CLI's `--silence-rms` flag. Also
+    /// cancels any in-progress noise calibration and clears the most
+    /// recent calibration result — the GUI uses that result to badge
+    /// the slider as "auto", which would be wrong once the user has
+    /// overridden the value.
     pub fn set_silence_rms(&mut self, rms: f32) {
         self.inner.set_silence_rms(rms);
+    }
+
+    /// Start a fresh auto noise-floor calibration. Subsequent
+    /// [`Self::feed`] calls will tap samples for `window_seconds`,
+    /// measure the 10th-percentile chunk RMS, and update the silence
+    /// gate accordingly. Pitch detection continues during the window —
+    /// the user can play and still see readings.
+    ///
+    /// The GUI calls this on input-stream startup and on every device-
+    /// picker change (the cached result is single-slot — switching
+    /// devices invalidates and re-measures, even when returning to a
+    /// previously-used device).
+    pub fn start_noise_calibration(&mut self, window_seconds: f32) {
+        self.inner.start_noise_calibration(window_seconds);
+    }
+
+    /// Cancel an in-progress calibration without changing the threshold.
+    /// Called by the GUI when the audio session is torn down (device
+    /// change before completion, user leaves the tuner page, etc).
+    pub fn cancel_noise_calibration(&mut self) {
+        self.inner.cancel_noise_calibration();
+    }
+
+    /// Snapshot of the live calibration state, JSON-ready. Fields:
+    ///   - `in_progress` (bool): true while the calibration window is filling
+    ///   - `samples_collected` / `samples_total`: progress counts (for a
+    ///     countdown / progress bar). Zero/zero if no calibration is active.
+    ///   - `floor_rms` / `threshold_rms`: only populated after a calibration
+    ///     completes; the GUI shows them next to the slider as "auto, X dB".
+    pub fn calibration_status(&self) -> JsValue {
+        let status = CalibrationStatusJs {
+            in_progress: self.inner.calibration_progress().is_some(),
+            samples_collected: self
+                .inner
+                .calibration_progress()
+                .map(|p| p.samples_collected)
+                .unwrap_or(0),
+            samples_total: self
+                .inner
+                .calibration_progress()
+                .map(|p| p.samples_total)
+                .unwrap_or(0),
+            floor_rms: self.inner.last_calibration().map(|r| r.floor_rms),
+            threshold_rms: self.inner.last_calibration().map(|r| r.threshold_rms),
+        };
+        serde_wasm_bindgen::to_value(&status).unwrap()
     }
 
     /// Drain accumulated readings. Each entry is `{ label, detected_hz,

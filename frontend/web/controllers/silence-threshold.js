@@ -54,6 +54,19 @@ export function makeSilenceThreshold({ sliderId, storageKey, onChange }) {
                 onChange(rms);
             }
         },
+        // Used by the noise-floor auto-calibration: snap the slider to
+        // the freshly-measured threshold WITHOUT firing the onChange
+        // callback. The tuner has already set its silence_rms internally
+        // during calibration; routing through `onChange` here would call
+        // `WebTuner.set_silence_rms()` again, which clears the tuner's
+        // `last_calibration` field and removes the "auto" badge the
+        // UI is just about to show. Persists so the slider reopens at
+        // the calibrated position on next visit.
+        setRmsSilent(newRms) {
+            rms = Math.max(0, Math.min(1, newRms));
+            slider.value = String(Math.round(rmsToPct(rms)));
+            saveRms(storageKey, rms);
+        },
     };
 }
 

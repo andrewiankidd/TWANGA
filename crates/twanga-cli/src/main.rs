@@ -1057,6 +1057,54 @@ fn is_threshold_up(input: &str) -> bool {
     matches!(input, "]")
 }
 
+/// Window length for the per-session auto noise-floor calibration.
+/// 3s gives ~30 RMS samples at 100 ms each — plenty for a robust
+/// 10th-percentile floor measurement, while short enough that the
+/// startup pause isn't annoying.
+const NOISE_CALIBRATION_SECONDS: f32 = 3.0;
+
+/// Display state for the auto noise-floor calibration during a CLI
+/// session. Tracks whether we've already printed the "calibration
+/// complete" line for the current run so it only scrolls past once.
+struct CliCalibration {
+    announced: bool,
+}
+
+impl CliCalibration {
+    fn new() -> Self {
+        Self { announced: false }
+    }
+
+    /// Status-line text while a calibration is in progress. `None` when
+    /// no calibration is active — the caller should fall back to the
+    /// usual status (reading display, "(play any note)", etc).
+    fn status(&self, tuner: &Tuner) -> Option<String> {
+        let p = tuner.calibration_progress()?;
+        let remaining =
+            p.samples_total.saturating_sub(p.samples_collected) as f32 / tuner.sample_rate() as f32;
+        Some(format!("Calibrating noise floor… {remaining:.1}s"))
+    }
+
+    /// Once-per-session announcement printed after a calibration
+    /// completes. Subsequent calls return `None` until a fresh
+    /// calibration is started. Caller emits this as its own line
+    /// (it doesn't replace the status line) — the next live-reading
+    /// tick redraws below it.
+    fn take_announcement(&mut self, tuner: &Tuner) -> Option<String> {
+        if self.announced || tuner.calibration_progress().is_some() {
+            return None;
+        }
+        let r = tuner.last_calibration()?;
+        self.announced = true;
+        Some(format!(
+            "Noise floor: {:.1} dB → gate at {:.1} dB ({:.5} RMS)",
+            20.0 * r.floor_rms.log10(),
+            20.0 * r.threshold_rms.log10(),
+            r.threshold_rms,
+        ))
+    }
+}
+
 /// Step the tuner's silence threshold by ±6 dB (×2 / ×0.5 in linear
 /// amplitude). 6 dB steps because the useful threshold range spans
 /// roughly 0.001..0.05, which is six doublings — about seven
@@ -1080,6 +1128,7 @@ fn run_chromatic(mut tuner: Tuner, mut stream: InputStream) -> Result<()> {
     let use_color = status.is_terminal();
     let mut buf = vec![0.0_f32; READ_CHUNK];
     let stdin_rx = twanga_tui::spawn_line_reader();
+    let mut cal = CliCalibration::new();
 
     status.update("(play any note to begin)")?;
 
@@ -1102,8 +1151,20 @@ fn run_chromatic(mut tuner: Tuner, mut stream: InputStream) -> Result<()> {
         let n = stream.read(&mut buf);
         if n > 0 {
             tuner.feed(&buf[..n]);
-            for r in tuner.take_readings() {
-                status.update(&format_chromatic_row(&r, use_color))?;
+            if let Some(text) = cal.take_announcement(&tuner) {
+                eprintln!("\n{text}");
+            }
+            if let Some(text) = cal.status(&tuner) {
+                // During calibration, the status line shows the countdown.
+                // Readings still accumulate (pitch detection runs in
+                // parallel) but we drain + discard them — they'd flash by
+                // too fast to read while the countdown is also updating.
+                status.update(&text)?;
+                tuner.take_readings();
+            } else {
+                for r in tuner.take_readings() {
+                    status.update(&format_chromatic_row(&r, use_color))?;
+                }
             }
         } else {
             std::thread::sleep(std::time::Duration::from_millis(10));
@@ -1130,6 +1191,8 @@ fn run_strings(mut tuner: Tuner, mut stream: InputStream, strings: Vec<TunedStri
 
     let mut buf = vec![0.0_f32; READ_CHUNK];
     let stdin_rx = twanga_tui::spawn_line_reader();
+    let mut cal = CliCalibration::new();
+    let mut last_cal_status: Option<String> = None;
 
     loop {
         if twanga_tui::is_shutdown_requested() {
@@ -1148,15 +1211,31 @@ fn run_strings(mut tuner: Tuner, mut stream: InputStream, strings: Vec<TunedStri
         let n = stream.read(&mut buf);
         if n > 0 {
             tuner.feed(&buf[..n]);
-            let mut changed = false;
-            for r in tuner.take_readings() {
-                if let Some(idx) = strings.iter().position(|s| s.name == r.label) {
-                    row_states[idx] = Some((r.detected.hz(), r.cents));
-                    changed = true;
-                }
+            if let Some(text) = cal.take_announcement(&tuner) {
+                eprintln!("\n{text}");
+                last_cal_status = None;
             }
-            if changed {
-                display.render(&make_rows(&row_states, use_color))?;
+            // While calibrating, render the per-string display normally
+            // but also print a transient countdown line above it the first
+            // time we see each new "X.Xs" tick — gives the user a sense
+            // of progress without re-rendering the multi-string block.
+            if let Some(text) = cal.status(&tuner) {
+                if last_cal_status.as_deref() != Some(&text) {
+                    eprintln!("[{text}]");
+                    last_cal_status = Some(text);
+                }
+                tuner.take_readings();
+            } else {
+                let mut changed = false;
+                for r in tuner.take_readings() {
+                    if let Some(idx) = strings.iter().position(|s| s.name == r.label) {
+                        row_states[idx] = Some((r.detected.hz(), r.cents));
+                        changed = true;
+                    }
+                }
+                if changed {
+                    display.render(&make_rows(&row_states, use_color))?;
+                }
             }
         } else {
             std::thread::sleep(std::time::Duration::from_millis(10));
@@ -1190,8 +1269,14 @@ fn run_tuner(mode: TunerMode, silence_rms: Option<f32>) -> Result<()> {
     };
 
     let mut tuner = Tuner::new(mode, sample_rate);
+    // Explicit `--silence-rms <N>` skips auto-calibration entirely: the
+    // user has stated a value and we respect it. Otherwise, measure the
+    // noise floor over the next NOISE_CALIBRATION_SECONDS and set the
+    // gate accordingly.
     if let Some(rms) = silence_rms {
         tuner.set_silence_rms(rms);
+    } else {
+        tuner.start_noise_calibration(NOISE_CALIBRATION_SECONDS);
     }
     match strings {
         None => run_chromatic(tuner, stream),
@@ -1304,9 +1389,16 @@ fn run_recorder(
     // imposing the tuner's ±7 semitone string-distance gate, which would clip
     // high-fret recording. We do our own fret-aware string match below.
     let mut tuner = Tuner::new(TunerMode::Chromatic, sample_rate);
+    // Auto-calibrate the silence gate unless the user pinned it via flag.
+    // Calibration overlaps the recording's first 3s; hits detected during
+    // that window are discarded (see the loop below) so a noisy first
+    // moment doesn't pollute the take.
     if let Some(rms) = silence_rms {
         tuner.set_silence_rms(rms);
+    } else {
+        tuner.start_noise_calibration(NOISE_CALIBRATION_SECONDS);
     }
+    let mut cal = CliCalibration::new();
 
     let (recording_path, mut recording_writer) =
         open_recording_file(&base_tuning, &capo, bpm, resolution_denom, title.as_deref())?;
@@ -1423,10 +1515,21 @@ fn run_recorder(
         if n > 0 {
             total_samples += n as u64;
             tuner.feed(&buf[..n]);
-            for r in tuner.take_readings() {
-                match effective.match_to_fret(r.detected, MAX_FRET) {
-                    Some(m) => recorder.record_hit(m.string_idx, m.fret),
-                    None => total_dropped += 1,
+            if let Some(text) = cal.take_announcement(&tuner) {
+                eprintln!("\n{text}");
+            }
+            // Drop tuner readings entirely while calibration is running —
+            // we don't want to commit hits to the recording before the
+            // gate is properly set, and the user wouldn't see them with
+            // pre-roll clicks playing anyway.
+            if cal.status(&tuner).is_some() {
+                tuner.take_readings();
+            } else {
+                for r in tuner.take_readings() {
+                    match effective.match_to_fret(r.detected, MAX_FRET) {
+                        Some(m) => recorder.record_hit(m.string_idx, m.fret),
+                        None => total_dropped += 1,
+                    }
                 }
             }
             for event in recorder.advance(n) {
@@ -2307,8 +2410,14 @@ fn run_playback(
         let s = InputStream::open()?;
         let sr = s.sample_rate;
         let mut tuner = Tuner::new(TunerMode::Chromatic, sr);
+        // Wait mode's note matching is gated by the silence threshold —
+        // without auto-cal, a noisy mic + the conservative default can
+        // miss legitimately quiet plucks. Auto-calibrate at session start
+        // unless the user pinned a value with `--silence-rms`.
         if let Some(rms) = silence_rms {
             tuner.set_silence_rms(rms);
+        } else {
+            tuner.start_noise_calibration(NOISE_CALIBRATION_SECONDS);
         }
         (Some((s, tuner)), vec![0.0_f32; READ_CHUNK])
     } else {

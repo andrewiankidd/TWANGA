@@ -150,6 +150,61 @@ pub struct Tuner {
     /// ambient noise or lowered to catch quieter plucks. Set via
     /// [`set_silence_rms`](Self::set_silence_rms).
     silence_rms: f32,
+    /// In-progress noise-floor calibration, if any. See
+    /// [`Self::start_noise_calibration`]. Calibration runs as a tap on
+    /// the incoming sample stream — pitch detection continues in
+    /// parallel during the window, so the user isn't gated out while
+    /// the floor is being measured.
+    calibration: Option<NoiseCalibration>,
+    /// Most recently completed calibration result, for UI display.
+    /// Cleared by a fresh [`Self::start_noise_calibration`] call so the
+    /// "result" surface only ever shows the latest run's numbers.
+    last_calibration: Option<CalibrationResult>,
+}
+
+/// Internal state for an in-progress noise-floor calibration. The Tuner
+/// taps incoming samples into fixed-size chunks (~100 ms each), computes
+/// the RMS of each filled chunk, and once we have `chunks_needed` of them
+/// takes the 10th-percentile as the noise floor — robust to the user
+/// briefly playing during the calibration window because only the quiet
+/// gaps contribute to the low-percentile bucket.
+struct NoiseCalibration {
+    chunk_size: usize,
+    chunks_needed: usize,
+    chunk_buffer: Vec<f32>,
+    chunk_rms: Vec<f32>,
+}
+
+/// Progress snapshot of an in-progress calibration. The UI surfaces this
+/// so the user can see a countdown / progress bar during the silent
+/// listening window.
+#[derive(Debug, Clone, Copy)]
+pub struct CalibrationProgress {
+    /// Whole-sample count consumed so far.
+    pub samples_collected: usize,
+    /// Total samples the calibration window needs.
+    pub samples_total: usize,
+}
+
+impl CalibrationProgress {
+    /// Fraction of the window completed, in `[0.0, 1.0]`.
+    pub fn fraction(&self) -> f32 {
+        if self.samples_total == 0 {
+            1.0
+        } else {
+            (self.samples_collected as f32 / self.samples_total as f32).clamp(0.0, 1.0)
+        }
+    }
+}
+
+/// Outcome of a completed noise-floor calibration. `floor_rms` is the
+/// measured noise level (10th-percentile of the chunk RMSes); `threshold_rms`
+/// is what we set the silence gate to — the floor multiplied by a safety
+/// factor and clamped into a sane range.
+#[derive(Debug, Clone, Copy)]
+pub struct CalibrationResult {
+    pub floor_rms: f32,
+    pub threshold_rms: f32,
 }
 
 impl Tuner {
@@ -177,6 +232,31 @@ impl Tuner {
     /// plausible attempt at any string in the tuning.
     pub const MAX_STRING_DISTANCE_CENTS: f32 = 700.0;
 
+    /// Calibration chunk duration. 100 ms is short enough that the user
+    /// briefly playing through a chunk doesn't poison the floor measurement
+    /// (other chunks land in the quiet gaps and dominate the 10th percentile),
+    /// and long enough that one chunk's RMS is a stable noise estimate.
+    pub const CALIBRATION_CHUNK_MS: u32 = 100;
+
+    /// Safety multiplier applied to the measured floor when picking the
+    /// silence threshold. 3× ≈ +10 dB headroom — enough that a noisy chunk
+    /// doesn't trip the gate but tight enough to catch quiet plucks on a
+    /// clean DI input. Clamps still apply in [`Self::DEFAULT_FLOOR_MIN_RMS`,
+    /// [`Self::DEFAULT_FLOOR_MAX_RMS`].
+    pub const CALIBRATION_FLOOR_MULTIPLIER: f32 = 3.0;
+
+    /// Floor of the clamp applied to a calibrated threshold. A pristine
+    /// direct-in can measure a floor near 0; without this clamp the gate
+    /// would be effectively disabled and stray subsonic transients would
+    /// fire YIN unnecessarily.
+    pub const DEFAULT_FLOOR_MIN_RMS: f32 = 0.0005;
+
+    /// Ceiling of the clamp applied to a calibrated threshold. A loud
+    /// environment (live mic, fan, etc.) could measure a high floor;
+    /// capping it here keeps the gate from becoming so insensitive that
+    /// quiet but legitimate plucks get dropped.
+    pub const DEFAULT_FLOOR_MAX_RMS: f32 = 0.02;
+
     pub fn new(mode: TunerMode, sample_rate: u32) -> Self {
         Self {
             yin: Yin::new(0.15),
@@ -187,6 +267,8 @@ impl Tuner {
             buffer: Vec::with_capacity(Self::DEFAULT_WINDOW * 2),
             readings: Vec::new(),
             silence_rms: Self::DEFAULT_SILENCE_RMS,
+            calibration: None,
+            last_calibration: None,
         }
     }
 
@@ -199,9 +281,75 @@ impl Tuner {
     /// range — 0 disables the gate entirely (detection on every
     /// window, including pure silence) and 1.0 is the maximum
     /// possible RMS, so values outside that range have no useful
-    /// meaning.
+    /// meaning. Cancels any in-progress noise calibration: when the
+    /// user reaches for the threshold control they're taking manual
+    /// authority, and finishing a calibration that's about to overwrite
+    /// their value would be a confusing "slider jumped under my finger"
+    /// experience.
     pub fn set_silence_rms(&mut self, rms: f32) {
         self.silence_rms = rms.clamp(0.0, 1.0);
+        // Manual override clears both the in-progress calibration AND the
+        // most recent result — the UI uses `last_calibration().is_some()`
+        // to decide whether to show the "auto" badge near the slider, so
+        // leaving it populated after the user overrode would mislabel
+        // their manual value as auto-calibrated.
+        self.calibration = None;
+        self.last_calibration = None;
+    }
+
+    /// Begin a fresh noise-floor calibration. Subsequent [`Self::feed`]
+    /// calls accumulate samples for `window_seconds`; once full, the
+    /// 10th-percentile chunk RMS is used as the floor and
+    /// [`Self::silence_rms`] is set to `floor * CALIBRATION_FLOOR_MULTIPLIER`
+    /// (clamped into [`DEFAULT_FLOOR_MIN_RMS`, [`DEFAULT_FLOOR_MAX_RMS`]).
+    ///
+    /// Pitch detection continues normally during the calibration window —
+    /// users can play through it and still see readings, the calibration
+    /// just runs as a tap on the same sample stream.
+    ///
+    /// Calling this while a calibration is already in progress restarts
+    /// the window. Calling [`Self::set_silence_rms`] cancels it.
+    pub fn start_noise_calibration(&mut self, window_seconds: f32) {
+        let chunk_size =
+            ((self.sample_rate as u64 * Self::CALIBRATION_CHUNK_MS as u64) / 1000) as usize;
+        let chunk_size = chunk_size.max(1);
+        let total_samples = (self.sample_rate as f32 * window_seconds).round() as usize;
+        let chunks_needed = (total_samples / chunk_size).max(1);
+        self.calibration = Some(NoiseCalibration {
+            chunk_size,
+            chunks_needed,
+            chunk_buffer: Vec::with_capacity(chunk_size),
+            chunk_rms: Vec::with_capacity(chunks_needed),
+        });
+        self.last_calibration = None;
+    }
+
+    /// Cancel an in-progress calibration without changing the threshold.
+    /// Useful when the audio session is tearing down (device change,
+    /// shutdown) and we don't want a half-finished calibration to fire
+    /// its "complete" side-effects after the fact.
+    pub fn cancel_noise_calibration(&mut self) {
+        self.calibration = None;
+    }
+
+    /// Progress of an in-progress calibration, or `None` if no calibration
+    /// is currently running. UI code uses this to render a countdown or
+    /// progress bar during the listening window.
+    pub fn calibration_progress(&self) -> Option<CalibrationProgress> {
+        let c = self.calibration.as_ref()?;
+        let collected = c.chunk_rms.len() * c.chunk_size + c.chunk_buffer.len();
+        let total = c.chunks_needed * c.chunk_size;
+        Some(CalibrationProgress {
+            samples_collected: collected,
+            samples_total: total,
+        })
+    }
+
+    /// Result of the most recently completed calibration, if any. Cleared
+    /// when a new calibration is started. UI code reads this to show the
+    /// measured floor + applied threshold after the window completes.
+    pub fn last_calibration(&self) -> Option<CalibrationResult> {
+        self.last_calibration
     }
 
     pub fn mode(&self) -> &TunerMode {
@@ -214,7 +362,13 @@ impl Tuner {
 
     /// Push mono samples. Runs YIN on every completed window (subject to a
     /// silence gate) and queues a `TunerReading` per accepted detection.
+    /// If a noise-floor calibration is in progress, also taps the samples
+    /// into 100 ms RMS chunks until the window fills — at which point the
+    /// silence threshold is updated and the calibration completes.
     pub fn feed(&mut self, samples: &[f32]) {
+        if self.calibration.is_some() {
+            self.advance_calibration(samples);
+        }
         self.buffer.extend_from_slice(samples);
         while self.buffer.len() >= self.window_size {
             let window = &self.buffer[..self.window_size];
@@ -245,6 +399,50 @@ impl Tuner {
 
     pub fn take_readings(&mut self) -> std::vec::Drain<'_, TunerReading> {
         self.readings.drain(..)
+    }
+
+    /// Consume new samples into the in-progress calibration's chunk
+    /// buffer. Each time a chunk fills, compute its RMS and push it onto
+    /// the chunk-RMS list; once the list is full, finalise.
+    fn advance_calibration(&mut self, samples: &[f32]) {
+        // Take a mutable borrow we can finish-and-drop deterministically —
+        // we can't hold `&mut self.calibration` while we also mutate other
+        // fields (`silence_rms`, `last_calibration`) in `finalize`, so move
+        // the state out, work on it, and put it back only if not done.
+        let Some(mut cal) = self.calibration.take() else {
+            return;
+        };
+        for &s in samples {
+            cal.chunk_buffer.push(s);
+            if cal.chunk_buffer.len() >= cal.chunk_size {
+                let rms = window_rms(&cal.chunk_buffer);
+                cal.chunk_buffer.clear();
+                cal.chunk_rms.push(rms);
+                if cal.chunk_rms.len() >= cal.chunks_needed {
+                    self.finalize_calibration(&cal.chunk_rms);
+                    return; // cal goes out of scope; calibration field stays None
+                }
+            }
+        }
+        self.calibration = Some(cal);
+    }
+
+    /// Sort the collected chunk RMSes, take the 10th percentile as the
+    /// noise floor, multiply by the safety factor, clamp into the sane
+    /// range, and apply as the new silence threshold. Records the
+    /// `CalibrationResult` so UI code can display the numbers.
+    fn finalize_calibration(&mut self, chunk_rms: &[f32]) {
+        let mut sorted: Vec<f32> = chunk_rms.to_vec();
+        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        let idx = ((sorted.len() as f32 * 0.10).floor() as usize).min(sorted.len() - 1);
+        let floor = sorted[idx];
+        let threshold = (floor * Self::CALIBRATION_FLOOR_MULTIPLIER)
+            .clamp(Self::DEFAULT_FLOOR_MIN_RMS, Self::DEFAULT_FLOOR_MAX_RMS);
+        self.silence_rms = threshold;
+        self.last_calibration = Some(CalibrationResult {
+            floor_rms: floor,
+            threshold_rms: threshold,
+        });
     }
 }
 
@@ -518,6 +716,206 @@ mod tests {
         let low = sine(Frequency(50.0), 44100, Tuner::DEFAULT_WINDOW * 2);
         tuner.feed(&low);
         assert!(tuner.take_readings().count() >= 1);
+    }
+
+    // ---- Noise-calibration tests ----
+
+    fn quiet_noise(sample_count: usize, amplitude: f32, seed: u64) -> Vec<f32> {
+        // Deterministic low-amplitude pseudo-random samples for testing the
+        // calibration's noise-floor measurement. White noise from
+        // `twanga_synth::white_noise` would also work; rolling our own
+        // here keeps the test self-contained and the magnitude controllable.
+        let mut state = seed;
+        (0..sample_count)
+            .map(|_| {
+                state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+                let r = ((state >> 32) as i32) as f32 / i32::MAX as f32;
+                r * amplitude
+            })
+            .collect()
+    }
+
+    #[test]
+    fn calibration_status_none_when_not_started() {
+        let tuner = Tuner::new(TunerMode::Chromatic, 44100);
+        assert!(tuner.calibration_progress().is_none());
+        assert!(tuner.last_calibration().is_none());
+    }
+
+    #[test]
+    fn calibration_progresses_through_feed() {
+        let mut tuner = Tuner::new(TunerMode::Chromatic, 44100);
+        tuner.start_noise_calibration(0.5); // half-second window
+        let p = tuner
+            .calibration_progress()
+            .expect("calibration should be active");
+        assert_eq!(p.samples_collected, 0);
+        assert!(p.samples_total > 0);
+        // Feed about a third of the window — progress should reflect that.
+        let third = (44100 / 6) as usize;
+        tuner.feed(&quiet_noise(third, 0.001, 1));
+        let p = tuner.calibration_progress().expect("still active");
+        assert!(p.samples_collected >= third - tuner.sample_rate() as usize / 10);
+        assert!(tuner.last_calibration().is_none());
+    }
+
+    #[test]
+    fn calibration_completes_and_sets_threshold_from_percentile() {
+        let mut tuner = Tuner::new(TunerMode::Chromatic, 44100);
+        let window_secs = 1.0;
+        tuner.start_noise_calibration(window_secs);
+
+        // Stream a full window's worth of quiet noise (~0.002 amplitude).
+        // The chunk RMS values will hover around amplitude / sqrt(3) for a
+        // uniform distribution — well above the floor clamp but well below
+        // the ceiling clamp.
+        let samples_needed = (44100.0 * window_secs).ceil() as usize + 4410;
+        tuner.feed(&quiet_noise(samples_needed, 0.002, 42));
+
+        assert!(
+            tuner.calibration_progress().is_none(),
+            "calibration should have completed after a full window"
+        );
+        let result = tuner
+            .last_calibration()
+            .expect("calibration should have produced a result");
+        // Threshold must be > floor (the multiplier kicks in unless clamps
+        // bite) and must equal the live `silence_rms()` (the side-effect
+        // of calibration is to set the gate).
+        assert!(result.threshold_rms > result.floor_rms);
+        assert!((tuner.silence_rms() - result.threshold_rms).abs() < 1e-7);
+        // Threshold respects the configured clamp range.
+        assert!(result.threshold_rms >= Tuner::DEFAULT_FLOOR_MIN_RMS);
+        assert!(result.threshold_rms <= Tuner::DEFAULT_FLOOR_MAX_RMS);
+    }
+
+    #[test]
+    fn calibration_clamps_threshold_to_min_for_pristine_silence() {
+        // A truly silent input (all-zero samples) measures a floor of 0.
+        // Without clamping, the threshold would also be 0 — effectively
+        // disabling the gate, which we never want. The MIN clamp keeps a
+        // sane floor even on pristine DI inputs.
+        let mut tuner = Tuner::new(TunerMode::Chromatic, 44100);
+        tuner.start_noise_calibration(1.0);
+        let samples_needed = (44100.0_f32 * 1.0).ceil() as usize + 4410;
+        tuner.feed(&vec![0.0_f32; samples_needed]);
+        let result = tuner.last_calibration().expect("should complete");
+        assert!((result.threshold_rms - Tuner::DEFAULT_FLOOR_MIN_RMS).abs() < 1e-7);
+    }
+
+    #[test]
+    fn calibration_clamps_threshold_to_max_for_loud_environment() {
+        // A loud noise floor (say a constant 0.1 amplitude) would push
+        // the multiplied threshold past 0.02 — the ceiling clamp keeps
+        // the gate from becoming so insensitive that real plucks are
+        // dropped. Confirms the upper bound is enforced.
+        let mut tuner = Tuner::new(TunerMode::Chromatic, 44100);
+        tuner.start_noise_calibration(1.0);
+        let samples_needed = (44100.0_f32 * 1.0).ceil() as usize + 4410;
+        tuner.feed(&quiet_noise(samples_needed, 0.1, 7));
+        let result = tuner.last_calibration().expect("should complete");
+        assert!((result.threshold_rms - Tuner::DEFAULT_FLOOR_MAX_RMS).abs() < 1e-7);
+    }
+
+    #[test]
+    fn manual_set_silence_rms_cancels_in_progress_calibration() {
+        // User reaching for the threshold control mid-calibration is an
+        // override — finishing the calibration after that would overwrite
+        // their value and look like the slider jumped under their finger.
+        let mut tuner = Tuner::new(TunerMode::Chromatic, 44100);
+        tuner.start_noise_calibration(3.0);
+        // Feed a fraction of the window so calibration is in progress.
+        tuner.feed(&quiet_noise(4410 * 5, 0.001, 99));
+        assert!(tuner.calibration_progress().is_some());
+
+        tuner.set_silence_rms(0.01);
+        assert!(tuner.calibration_progress().is_none());
+        assert!(tuner.last_calibration().is_none());
+        // The user's value sticks.
+        assert!((tuner.silence_rms() - 0.01).abs() < 1e-7);
+    }
+
+    #[test]
+    fn manual_set_silence_rms_after_complete_clears_last_calibration() {
+        // After cal completes, the UI uses `last_calibration().is_some()`
+        // to show an "auto" badge. If the user manually adjusts the
+        // threshold, that badge needs to go away — confirm `set_silence_rms`
+        // clears the post-cal result too.
+        let mut tuner = Tuner::new(TunerMode::Chromatic, 44100);
+        tuner.start_noise_calibration(0.5);
+        tuner.feed(&quiet_noise(44100 / 2 + 4410, 0.001, 5));
+        assert!(tuner.last_calibration().is_some());
+
+        tuner.set_silence_rms(0.008);
+        assert!(tuner.last_calibration().is_none());
+    }
+
+    #[test]
+    fn calibration_does_not_block_pitch_detection_during_window() {
+        // Calibration runs as a tap on the input stream — pitch detection
+        // continues in parallel. A clean A4 fed during the calibration
+        // window should still produce a reading (assuming amplitude clears
+        // the current silence gate, which starts at the default 0.005).
+        let mut tuner = Tuner::new(TunerMode::Strings(Tuning::standard_ukulele()), 44100);
+        tuner.start_noise_calibration(2.0);
+        // Strong A4 — well above the default 0.005 threshold during cal.
+        let buf = sine(Frequency::A4, 44100, Tuner::DEFAULT_WINDOW);
+        tuner.feed(&buf);
+        let readings = tuner.take_readings().count();
+        assert!(readings > 0, "pitch detection should not be paused by cal");
+    }
+
+    #[test]
+    fn cancel_noise_calibration_drops_in_flight_state() {
+        let mut tuner = Tuner::new(TunerMode::Chromatic, 44100);
+        tuner.start_noise_calibration(3.0);
+        tuner.feed(&quiet_noise(4410 * 3, 0.001, 11));
+        assert!(tuner.calibration_progress().is_some());
+
+        tuner.cancel_noise_calibration();
+        assert!(tuner.calibration_progress().is_none());
+        // Unlike `set_silence_rms`, cancel doesn't clear the most recent
+        // result — there isn't one yet, but if there had been (sequential
+        // start → complete → start → cancel scenario), we'd want the
+        // earlier complete to remain visible. Confirm that semantic.
+        assert!(tuner.last_calibration().is_none());
+    }
+
+    #[test]
+    fn calibration_tenth_percentile_picks_quiet_samples_when_user_plays_through() {
+        // The 10th-percentile choice is specifically robust to the user
+        // briefly playing through the calibration window — the loud
+        // chunks land in the upper percentiles, leaving the quiet gaps
+        // to dominate the floor estimate. Simulate this by mixing a
+        // short loud burst into otherwise-quiet noise.
+        let mut tuner = Tuner::new(TunerMode::Chromatic, 44100);
+        tuner.start_noise_calibration(1.0);
+
+        // First 200 ms: quiet noise (≈ 0.001 amplitude → tiny chunk RMS).
+        // Next 200 ms: a loud A4 burst (amplitude 0.3, way above default
+        // threshold). Then 600 ms more quiet noise. The 30 100-ms chunks
+        // break down roughly 2 loud + 28 quiet — the 10th percentile
+        // (3rd from bottom when sorted) lands in the quiet bucket.
+        let mut samples = quiet_noise(44100 / 5, 0.001, 17);
+        samples.extend(
+            sine(Frequency::A4, 44100, 44100 / 5)
+                .iter()
+                .map(|s| s * 0.3),
+        );
+        samples.extend(quiet_noise(44100 * 3 / 5 + 4410, 0.001, 23));
+        tuner.feed(&samples);
+
+        let result = tuner
+            .last_calibration()
+            .expect("calibration should complete");
+        // The measured floor should reflect the quiet bucket, NOT the
+        // loud burst — i.e. small RMS. If we'd accidentally used the
+        // mean or a high percentile, this would be far higher.
+        assert!(
+            result.floor_rms < 0.005,
+            "10th percentile should ignore the loud burst, got floor {}",
+            result.floor_rms
+        );
     }
 
     #[test]

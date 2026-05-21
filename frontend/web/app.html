@@ -1297,6 +1297,22 @@
             cursor: ew-resize;
         }
 
+        /* Status pill for the auto noise-floor calibration. Shown inline
+           next to the silence-threshold slider — during the 3 s sample
+           window it reads "calibrating 2.1s"; after completion it reads
+           "auto, -42 dB" until the user manually adjusts the slider (at
+           which point `WebTuner.set_silence_rms` clears the tuner's
+           `last_calibration` and the pill hides). */
+        .mic-meter-cal-status {
+            font-family: var(--font-mono, monospace);
+            font-size: 11px;
+            color: var(--muted, #888);
+            padding: 0 4px;
+            white-space: nowrap;
+        }
+        .mic-meter-cal-status[hidden] { display: none; }
+        .mic-meter-cal-status.calibrating { color: var(--accent, #d49a4d); }
+
         /* Input-device picker. Shared component used by every screen
            that opens the mic (Tuner / Recorder / Playback wait mode).
            Browsers gate device LABELS behind an existing permission
@@ -1676,6 +1692,8 @@
                 <span class="mic-meter-db" id="tuner-mic-meter-db">—</span>
                 <span class="mic-meter-note" id="tuner-mic-meter-note"
                       title="Detected pitch — only populated while the detector is firing (silence gate cleared, YIN found a periodic signal)"></span>
+                <span class="mic-meter-cal-status" id="tuner-mic-meter-cal-status" hidden
+                      title="Auto noise-floor calibration. Measures the noise floor over 3 s when a new mic device starts; updates the silence-threshold slider with a value clamped above your noise floor."></span>
             </div>
 
             <p class="tuner-hint" id="tuner-hint">click Start mic to begin</p>
@@ -1793,6 +1811,8 @@
                 <span class="mic-meter-db" id="recorder-mic-meter-db">—</span>
                 <span class="mic-meter-note" id="recorder-mic-meter-note"
                       title="Detected pitch — only populated while the detector is firing (silence gate cleared, YIN found a periodic signal)"></span>
+                <span class="mic-meter-cal-status" id="recorder-mic-meter-cal-status" hidden
+                      title="Auto noise-floor calibration. Measures the noise floor over 3 s when a new mic device starts; updates the silence-threshold slider with a value clamped above your noise floor."></span>
             </div>
 
             <p class="tuner-hint" id="recorder-hint">pick a tuning, then click Start recording</p>
@@ -1978,6 +1998,8 @@
                     <span class="mic-meter-db" id="playback-mic-meter-db">—</span>
                     <span class="mic-meter-note" id="playback-mic-meter-note"
                           title="Detected pitch — only populated while the detector is firing (silence gate cleared, YIN found a periodic signal)"></span>
+                    <span class="mic-meter-cal-status" id="playback-mic-meter-cal-status" hidden
+                          title="Auto noise-floor calibration. Measures the noise floor over 3 s when a new mic device starts; updates the silence-threshold slider with a value clamped above your noise floor."></span>
                 </div>
 
                 <p class="tuner-hint" id="playback-hint">click Play to start</p>
@@ -2686,6 +2708,63 @@
             }
         }
 
+        /// Window length for the per-session auto noise-floor calibration.
+        /// Matches the CLI's `NOISE_CALIBRATION_SECONDS` constant in
+        /// `twanga-cli/src/main.rs` — keep them in sync if you change one.
+        const NOISE_CAL_SECONDS = 3.0;
+
+        /// Single-frame refresh of the noise-floor-calibration UI for one
+        /// mic-using screen (tuner / recorder / playback share this
+        /// pattern). Called from each screen's `onSamples` callback right
+        /// after `tuner.feed()`.
+        ///
+        /// State transitions, driven by `WebTuner.calibration_status()`:
+        ///   1. `in_progress: true` — sampling phase. Pill shows
+        ///      "calibrating Xs". Slider is NOT touched.
+        ///   2. `in_progress: false`, `threshold_rms: Some` — just
+        ///      finished. Snap slider to the measured threshold via
+        ///      `setRmsSilent` (NOT `setRms` — that would call
+        ///      `set_silence_rms` again, which clears
+        ///      `last_calibration` and hides the badge we want to
+        ///      show). Pill shows "auto, -XX dB". This state sticks
+        ///      until the user manually adjusts.
+        ///   3. `in_progress: false`, `threshold_rms: null` — user
+        ///      moved the slider (or no calibration has run yet).
+        ///      Pill is hidden.
+        function updateCalibrationUi(tuner, slider, statusEl, sampleRate) {
+            if (!tuner || !statusEl) return;
+            let status;
+            try {
+                status = tuner.calibration_status();
+            } catch (e) {
+                console.warn('calibration_status read failed', e);
+                return;
+            }
+            if (status.in_progress) {
+                statusEl.hidden = false;
+                statusEl.classList.add('calibrating');
+                const remainSamples = Math.max(
+                    0,
+                    (status.samples_total || 0) - (status.samples_collected || 0)
+                );
+                const remainSec = remainSamples / (sampleRate || 44100);
+                statusEl.textContent = `calibrating ${remainSec.toFixed(1)}s`;
+            } else if (status.threshold_rms != null) {
+                statusEl.hidden = false;
+                statusEl.classList.remove('calibrating');
+                const db = 20 * Math.log10(status.threshold_rms);
+                statusEl.textContent = `auto, ${db.toFixed(1)} dB`;
+                // Silent slider sync — pushing through `setRms` would
+                // call `set_silence_rms`, which clears the badge we just
+                // populated. See the comment on `setRmsSilent`.
+                slider?.setRmsSilent?.(status.threshold_rms);
+            } else {
+                statusEl.hidden = true;
+                statusEl.classList.remove('calibrating');
+                statusEl.textContent = '';
+            }
+        }
+
         function applyReadings(readings) {
             for (const r of readings) {
                 let row;
@@ -2885,6 +2964,12 @@
                     if (!tunerState.tuner) return;
                     tunerState.tuner.feed(samples);
                     tunerState.micMeter?.feed(samples);
+                    updateCalibrationUi(
+                        tunerState.tuner,
+                        tunerState.silenceThreshold,
+                        el('tuner-mic-meter-cal-status'),
+                        tunerState.sampleRate
+                    );
                     const readings = tunerState.tuner.take_readings();
                     if (readings.length > 0) {
                         applyReadings(readings);
@@ -2904,6 +2989,12 @@
             // ~80 cents flat.
             tunerState.sampleRate = sr;
             rebuildTuner();
+            // Kick off noise-floor calibration after the tuner exists.
+            // Runs as a tap on the same sample stream `onSamples` feeds —
+            // 3 s window, 10th-percentile floor × 3, clamped server-side.
+            // Per design: every fresh device gets its own measurement
+            // (we don't cache across devices), including A→B→A returns.
+            tunerState.tuner.start_noise_calibration(NOISE_CAL_SECONDS);
             tunerState.micMeter.start();
             // Now that we've been granted mic access, re-enumerate
             // devices to fill in their human-readable labels (browsers
@@ -3852,6 +3943,12 @@
                         // primed so the first reading after pre-roll
                         // doesn't have to wait for a full window to fill.
                         recState.chromaticTuner.feed(samples);
+                        updateCalibrationUi(
+                            recState.chromaticTuner,
+                            recState.silenceThreshold,
+                            el('recorder-mic-meter-cal-status'),
+                            recState.sampleRate || sr
+                        );
                         // But only *commit* hits + drops while actively
                         // recording. During pre-roll we drain readings to
                         // keep the tuner's internal queue from growing,
@@ -3901,6 +3998,15 @@
                         recState.chromaticTuner.set_silence_rms(recRmsAfter);
                     }
                 }
+                recState.sampleRate = liveSr;
+                // Kick off the per-session noise-floor calibration on the
+                // (possibly-rebuilt) tuner. Hits committed during pre-roll
+                // are already dropped above; cal completes well before
+                // the user's first real take in most cases (3 s window vs.
+                // typical 4-beat pre-roll), and any leftover noisy first
+                // moments after cal completes get the gate that was just
+                // measured for THIS device + setup.
+                recState.chromaticTuner.start_noise_calibration(NOISE_CAL_SECONDS);
                 // Mic is live — show the level meter immediately so the
                 // user can see signal during the pre-roll. Diagnostic for
                 // "no detection on macOS" type issues: the meter surfaces
@@ -5287,6 +5393,12 @@
                             const t = playbackState.chromaticTuner;
                             if (!t) return;
                             t.feed(samples);
+                            updateCalibrationUi(
+                                t,
+                                playbackState.silenceThreshold,
+                                el('playback-mic-meter-cal-status'),
+                                playbackState.sampleRate || sr
+                            );
                             // Readings drain whether or not we're waiting,
                             // so the queue doesn't grow. Only act on them
                             // when actively waiting for a column.
@@ -5327,6 +5439,12 @@
                             playbackState.chromaticTuner.set_silence_rms(pbRmsAfter);
                         }
                     }
+                    playbackState.sampleRate = liveSr;
+                    // Per-session auto noise-floor calibration. The wait-mode
+                    // pitch matcher inside `playbackWaitMatches` will see
+                    // the calibrated gate by the time the user reaches the
+                    // first column with hits (3 s vs. typical pre-roll).
+                    playbackState.chromaticTuner.start_noise_calibration(NOISE_CAL_SECONDS);
                     // Mic is live — show the meter so the user has a
                     // diagnostic signal (same role as on the recorder).
                     if (!playbackState.micMeter) {
