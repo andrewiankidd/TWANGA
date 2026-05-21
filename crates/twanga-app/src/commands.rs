@@ -56,8 +56,9 @@ pub struct RecordingFull {
 /// dir — a configuration so broken there's no recoverable place to
 /// write to.
 fn data_root() -> Result<twanga_paths::DataRoot> {
-    twanga_paths::data_root()
-        .ok_or_else(|| anyhow!("could not resolve TWANGA data root (no home dir, no portable sentinel)"))
+    twanga_paths::data_root().ok_or_else(|| {
+        anyhow!("could not resolve TWANGA data root (no home dir, no portable sentinel)")
+    })
 }
 
 /// `<data-root>/recordings/`. Created on demand.

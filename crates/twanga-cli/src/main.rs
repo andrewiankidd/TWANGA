@@ -1196,7 +1196,6 @@ fn run_tuner(mode: TunerMode, silence_rms: Option<f32>) -> Result<()> {
 /// treated as garbage / out-of-range and silently dropped.
 const MAX_FRET: u8 = 20;
 
-
 /// Open an alphaTex recording file for `twanga record`. Writes the header
 /// against the BASE tuning + capo (the writer encodes the capo into the
 /// `\subtitle` line so the file round-trips through other tools), embeds
@@ -2905,7 +2904,13 @@ mod docs_tests {
     #[test]
     fn slug_set_matches_expected_features() {
         let expected = [
-            "tuner", "recorder", "playback", "patterns", "editor", "tunings", "hardware",
+            "tuner",
+            "recorder",
+            "playback",
+            "patterns",
+            "editor",
+            "tunings",
+            "hardware",
             "user-guide",
         ];
         let actual: Vec<&str> = DOCS_PAGES.iter().map(|(s, _, _)| *s).collect();
