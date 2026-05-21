@@ -1,18 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<!--
-  Custom Info.plist entries merged into the bundle Info.plist that
-  tauri-bundler generates from tauri.conf.json. Tauri 2 looks for a
-  file named Info.plist alongside tauri.conf.json and merges its keys
-  into the generated plist at bundle time — no CI post-processing
-  required (unlike the Android manifest hack in release.yml, where
-  Tauri's schema has no first-class field for app-level permissions).
-
-  Keys here are the ones with no equivalent in tauri.conf.json's
-  bundle.macOS schema. Anything Tauri already generates (CFBundle*,
-  LSMinimumSystemVersion, etc.) should stay out of this file so we
-  don't fight the generator.
--->
 <plist version="1.0">
 <dict>
     <key>NSMicrophoneUsageDescription</key>

@@ -67,6 +67,47 @@ jobs:
       - name: cargo-machete (unused dependencies)
         run: cargo-machete
 
+  wasm-bridge:
+    # Build the WASM bundle and verify every JS call into it resolves
+    # to a declared export. Catches the "Rust added a #[wasm_bindgen]
+    # method, JS already calls it, but the local pkg/ on someone's
+    # machine is stale" failure mode that Rust tests + clippy don't
+    # see (Rust tests exercise the Rust API, not the bindgen export
+    # surface). Cheap (~30 s) and Linux-only.
+    name: Frontend WASM bridge surface check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: wasm-bridge
+      # Same prebuilt-binary install pattern as pages.yml — version
+      # must match the wasm-bindgen crate version in twanga-web's
+      # Cargo.toml or the .d.ts shape can shift between releases.
+      - name: Install wasm-bindgen-cli (prebuilt)
+        run: |
+          VERSION=0.2.121
+          curl -sL "https://github.com/rustwasm/wasm-bindgen/releases/download/${VERSION}/wasm-bindgen-${VERSION}-x86_64-unknown-linux-musl.tar.gz" \
+            | tar xz
+          sudo mv "wasm-bindgen-${VERSION}-x86_64-unknown-linux-musl/wasm-bindgen" /usr/local/bin/
+          wasm-bindgen --version
+      - name: Build twanga-web (release)
+        run: cargo build --target wasm32-unknown-unknown -p twanga-web --release
+      - name: Generate JS glue + .d.ts
+        run: |
+          mkdir -p frontend/web/pkg
+          wasm-bindgen --target web \
+            --out-dir frontend/web/pkg \
+            target/wasm32-unknown-unknown/release/twanga_web.wasm
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify JS calls resolve to declared WASM exports
+        run: node tools/check-wasm-bridge.mjs
+
   test:
     name: Test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}

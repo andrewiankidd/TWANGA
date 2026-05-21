@@ -1,19 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<!--
-  macOS entitlements for the TWANGA .app bundle.
-
-  Tauri's bundler passes this file to `codesign --entitlements ...` during
-  the ad-hoc sign step triggered by `bundle.macOS.signingIdentity = "-"`
-  in tauri.conf.json. Without the `device.audio-input` entitlement here,
-  WKWebView strips `navigator.mediaDevices` from the page entirely (not
-  just denies `getUserMedia()` — the object itself becomes undefined),
-  which breaks the tuner before it can even prompt the user.
-
-  Pair this with the NSMicrophoneUsageDescription string in Info.plist:
-  the entitlement permits microphone access at the bundle level, the
-  Info.plist description is what macOS shows in the consent prompt.
--->
 <plist version="1.0">
 <dict>
     <key>com.apple.security.device.audio-input</key>
