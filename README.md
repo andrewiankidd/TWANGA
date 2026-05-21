@@ -2,25 +2,23 @@
 
 ![logo](assets/logo.png)
 
-TWANGA is an open-source learning tool for fretted/strung instruments. Bring-your-own-tabs, arbitrary tunings as first-class, no subscription, no library lock-in. Built for people who play banjo, ukulele, mandolin, or anything else with strings and frets — not just guitar.
+TWANGA is an open-source learning tool for fretted/strung instruments. Bring your own tabs, define your own tunings, no subscription, no library lock-in. Built for banjo, ukulele, mandolin, and anything else with strings and frets, not just guitar.
 
 ## About
 
-Most instrument-trainer software is locked: subscription pricing, walled song libraries, single-instrument tunnel vision (almost always 6-string guitar + 4-string bass), and tunings hard-coded into the data model. TWANGA inverts the trade-off — you own the inputs:
+Most instrument-trainer software locks you in. Subscriptions, walled song libraries, guitar-and-bass-only tuning models. TWANGA goes the other way. You bring your own tabs and define your own tunings.
 
 - **Tabs** — record what you play, play back tabs, transpose across instruments, capo per-string. Native format is alphaTex (the open text format from the alphaTab project); MusicXML interop is a future open-standard target. Proprietary formats (Guitar Pro `.gp5`/`.gpx`) are explicit non-goals.
-- **Instrument** — `Tuning` is just `Vec<TunedString>`, so drop-D, the banjo's high-pitched 5th-string drone, the ukulele's reentrant G, baritone configurations, and 7-string layouts all fall out of the same data model.
+- **Instrument** — `Tuning` is just `Vec<TunedString>`. Drop-D, the banjo's high-pitched 5th-string drone, the ukulele's reentrant G, baritone configurations, and 7-string layouts are all the same shape.
 - **Audio device** — any CPAL-supported input. ASIO behind a feature flag on Windows for lower-latency USB instrument cables.
-
-The author is an amateur dev and amateur musician learning Rust through this project. Set your expectations accordingly.
 
 ## Getting started
 
-TWANGA ships **two first-class surfaces** — a GUI and a CLI, with the same feature set on each. Pick whichever fits.
+TWANGA ships a GUI and a CLI with the same feature set on each. Pick whichever fits.
 
 ### GUI
 
-Open the deployed app at **[andrewiankidd.github.io/TWANGA](https://andrewiankidd.github.io/TWANGA/)** — no install.
+Open the deployed app at **[andrewiankidd.github.io/TWANGA](https://andrewiankidd.github.io/TWANGA/)**. No install.
 
 ![TWANGA GUI — main menu](assets/screencaps/gui-menu.png)
 
@@ -73,7 +71,7 @@ Each subcommand prompts for anything you didn't pass on the command line, so the
 
 ## Workspace layout
 
-Multi-crate Cargo workspace. Each crate has a narrow, deliberately-enforced responsibility:
+Multi-crate Cargo workspace. Each crate has a narrow responsibility:
 
 | Crate | Role |
 |-------|------|
@@ -85,7 +83,7 @@ Multi-crate Cargo workspace. Each crate has a narrow, deliberately-enforced resp
 | **[twanga-tui](crates/twanga-tui/)** | Terminal UX primitives shared across TWANGA's CLIs — selection menus, refreshing displays, Ctrl-C handling, ANSI colours. |
 | **[twanga-cli](crates/twanga-cli/)** | CLI binary `twanga` — `tune`, `record`, `play`, `edit`, `patterns`, `tunings`, `docs`, `devices`, `convert` subcommands. |
 | **[twanga-bench](crates/twanga-bench/)** | Latency + pitch-detection accuracy benchmarks (placeholder). |
-| **[twanga-app](crates/twanga-app/)** | Tauri 2 desktop shell — hosts the shared [frontend/web/](frontend/web/) bundle (HTML + WASM bindings) in a native window. Same UI as the web build, just wrapped in a Tauri webview. |
+| **[twanga-app](crates/twanga-app/)** | Tauri 2 desktop shell hosting the shared [frontend/web/](frontend/web/) bundle (HTML + WASM bindings) in a native window. |
 | **[twanga-web](crates/twanga-web/)** | `wasm-bindgen` bridge that exposes `twanga-core` / `twanga-dsp` / `twanga-tabs` to the browser frontend. |
 
 ## Project docs
@@ -102,8 +100,8 @@ Multi-crate Cargo workspace. Each crate has a narrow, deliberately-enforced resp
 
 ## Acknowledgements
 
-- **[slopsmith](https://github.com/byrongamatos/slopsmith)** — found while scoping TWANGA; I haven't used it. Different audience and a different problem, but excellent prior art on plugin architecture, A-B loop UX, and JUCE-based desktop wrappers around web UIs. Worth studying carefully before TWANGA ever ships a plugin system.
-- **[alphaTab](https://github.com/CoderLine/alphaTab)** — the open-source tab project whose `alphaTex` text format the recorder writes to. We render tabs ourselves via a small pluggable renderer system in `frontend/web/render/` (column-grid and Rocksmith-style highway built in, custom renderers welcome) so user-extensible visual paradigms aren't locked behind alphaTab's engraving choices, but alphaTab remains the natural choice for engraved-staff tab rendering if and when we add it as a renderer plugin.
+- **[slopsmith](https://github.com/byrongamatos/slopsmith)** — found while scoping TWANGA; haven't used it. Prior art for plugin architecture, A-B loop UX, and JUCE-based desktop wrappers around web UIs.
+- **[alphaTab](https://github.com/CoderLine/alphaTab)** — the open-source tab project whose `alphaTex` text format the recorder writes to. We render tabs ourselves via a pluggable renderer system in `frontend/web/render/` (column-grid and highway built in). alphaTab remains the natural choice for engraved-staff rendering if we add it as a renderer plugin later.
 - **[CPAL](https://github.com/RustAudio/cpal)** and the wider [RustAudio](https://github.com/RustAudio) ecosystem — the realtime cross-platform audio stack that made Rust a viable choice over Godot, Flutter, or JUCE.
 - **[TuxGuitar](https://sourceforge.net/projects/tuxguitar/)** — long-standing open-source tab editor; reference for tab-editing UX even if not embeddable (GPL).
 - **de Cheveigné & Kawahara, _YIN, a fundamental frequency estimator for speech and music_ (2002)** — the pitch-detection algorithm TWANGA leans on for short-sustain plucked-string detection on banjo and ukulele.
