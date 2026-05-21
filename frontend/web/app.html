@@ -193,22 +193,80 @@
         }
 
         /* Tuner-screen widgets */
-        /* Tuning picker — horizontal button row. Active selection has the
-           highlight colour; rest are muted cards. */
-        .tuning-picker {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 0.4rem;
-            margin-bottom: 0.4rem;
+        /* Tuning + capo disclosure. Replaces the old picker-button row
+           with a `<select>` dropdown that scales as more tunings are
+           added, and folds the capo controls into the same group via
+           native `<details>` / `<summary>`. Collapsed → one-line
+           summary showing the current tuning + capo state; open →
+           full controls. */
+        .tuning-group {
+            margin-bottom: 1rem;
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
         }
-        /* Hint under the picker, mirrors the CLI's tuning-list footer
-           ("tip: define a custom tuning with `twanga tunings add`"). Links
-           straight to the Tunings screen via the hash route. */
+        .tuning-group > summary {
+            list-style: none;
+            cursor: pointer;
+            padding: 0.6rem 0.9rem;
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+            font-size: 0.95rem;
+            font-weight: 700;
+            color: var(--primary);
+            user-select: none;
+        }
+        .tuning-group > summary::-webkit-details-marker,
+        .tuning-group > summary::marker { display: none; }
+        .tuning-group > summary::before {
+            content: '▸';
+            color: var(--muted);
+            font-size: 0.7rem;
+            transition: transform 0.15s;
+        }
+        .tuning-group[open] > summary::before { transform: rotate(90deg); }
+        .tuning-group .tuning-group-meta {
+            color: var(--muted);
+            font-weight: 400;
+            font-size: 0.85rem;
+        }
+        .tuning-group .tuning-group-body {
+            padding: 0 0.9rem 0.8rem;
+            display: flex;
+            flex-direction: column;
+            gap: 0.6rem;
+            border-top: 1px solid var(--border);
+            padding-top: 0.8rem;
+        }
+        .tuning-group .tuning-select-label {
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+            font-size: 0.85rem;
+            color: var(--muted);
+        }
+        .tuning-group .tuning-select {
+            flex: 1;
+            background: var(--background);
+            border: 1px solid var(--border);
+            color: var(--text);
+            border-radius: 4px;
+            padding: 0.4rem 0.6rem;
+            font-family: inherit;
+            font-size: 0.9rem;
+            font-weight: 700;
+        }
+        /* Hint inside the disclosure — same role as the old standalone
+           hint under the picker buttons. Mirrors the CLI's tuning-list
+           footer ("tip: define a custom tuning with `twanga tunings
+           add`"). Links straight to the Tunings screen via the hash
+           route. */
         .picker-hint {
             color: var(--muted);
             font-size: 0.8rem;
             font-style: italic;
-            margin: 0 0 1.3rem 0.3rem;
+            margin: 0;
         }
         .picker-hint a {
             color: var(--highlight);
@@ -242,44 +300,11 @@
             font-family: inherit;
             font-size: 0.85rem;
         }
-        .tuning-option {
-            background: var(--card);
-            border: 1px solid var(--border);
-            color: var(--text);
-            padding: 0.5rem 0.9rem;
-            border-radius: var(--radius);
-            font-family: "Montserrat", sans-serif;
-            font-size: 0.85rem;
-            font-weight: 700;
-            cursor: pointer;
-            transition: background 0.15s, border-color 0.15s, color 0.15s;
-        }
-        .tuning-option:hover {
-            border-color: var(--highlight);
-        }
-        .tuning-option.active {
-            background: var(--highlight);
-            border-color: var(--highlight);
-            color: var(--background);
-        }
-
-        /* Active-tuning header — shows the full display name of the
-           currently-selected tuning and the capo control side-by-side. The
-           capo control is hidden for chromatic mode (no string targets to
-           shift). */
-        .active-tuning-row {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            gap: 1rem;
-            margin-bottom: 1rem;
-            padding: 0.6rem 0.2rem;
-        }
-        .active-tuning-name {
-            font-size: 1rem;
-            font-weight: 700;
-            color: var(--primary);
-        }
+        /* Old `.tuning-option` button row + `.active-tuning-row`
+           dropped — both replaced by `.tuning-group` above. The
+           `.active-tuning-name` span still exists (now inside the
+           summary), so its color/weight is inherited from the
+           summary rule. */
         .capo-control {
             display: inline-flex;
             align-items: center;
@@ -753,70 +778,30 @@
            lands) to mount a renderer plugin. The host owns the dropdown +
            the container div; the renderer fully owns what goes inside the
            container (canvas, DOM, SVG — its choice). */
-        .renderer-controls {
-            display: flex;
-            align-items: center;
-            gap: 0.6rem;
-            margin-bottom: 0.8rem;
-        }
-        .renderer-label {
-            font-size: 0.75rem;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-            color: var(--muted);
-            font-weight: 700;
-        }
-        .renderer-select {
-            background: var(--background);
-            border: 1px solid var(--border);
-            border-radius: 4px;
-            color: var(--text);
-            padding: 0.4rem 0.6rem;
-            font-family: "Montserrat", sans-serif;
-            font-size: 0.85rem;
-            cursor: pointer;
-        }
-        .renderer-select:focus {
-            outline: none;
-            border-color: var(--highlight);
-        }
         .renderer-host {
             margin-bottom: 1rem;
             min-height: 200px;
         }
-        /* Metronome toggle sits beside the View dropdown — same visual
-           weight, mid-recording toggleable (the click is generated per
-           beat tick, so changes take effect on the next beat). */
-        .rec-metronome-label {
+        /* Toggle-style label inside a `.rec-setting` card — used by the
+           Metronome / Wait checkboxes. Wraps the checkbox + its text
+           label together as a clickable unit, matching the visual
+           weight of the other .rec-setting controls (BPM, Loop, View,
+           Pre-roll). */
+        .rec-setting .rec-toggle-label {
             display: inline-flex;
             align-items: center;
             gap: 0.4rem;
             cursor: pointer;
             user-select: none;
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: var(--muted);
+            font-weight: 700;
         }
-        .rec-metronome-label input {
+        .rec-setting .rec-toggle-label input {
             accent-color: var(--highlight);
             cursor: pointer;
-        }
-        .rec-preroll-label {
-            display: inline-flex;
-            align-items: center;
-            gap: 0.4rem;
-        }
-        .rec-preroll-label input {
-            width: 3em;
-            background: var(--background);
-            border: 1px solid var(--border);
-            border-radius: 4px;
-            color: var(--text);
-            padding: 0.2rem 0.35rem;
-            font-family: monospace;
-            font-size: 0.85rem;
-            text-align: center;
-        }
-        .rec-preroll-label input:focus {
-            outline: none;
-            border-color: var(--highlight);
         }
 
         /* Recorder-specific settings (BPM / resolution / block-width). Each
@@ -1598,28 +1583,12 @@
                 through Web Audio.
             </p>
 
-            <div class="tuning-picker" id="tuning-picker"></div>
-            <p class="picker-hint">
-                Don't see your tuning? <a href="#tunings">Define a custom one →</a>
-            </p>
-
-            <div class="active-tuning-row">
-                <div class="active-tuning-name" id="active-tuning-name">Chromatic</div>
-                <div class="capo-control" id="capo-control" hidden>
-                    <span class="capo-label">Capo</span>
-                    <div class="capo-uniform" id="capo-uniform">
-                        <button class="capo-btn" id="capo-down" aria-label="Decrease capo">−</button>
-                        <span class="capo-value" id="capo-value">0</span>
-                        <button class="capo-btn" id="capo-up" aria-label="Increase capo">+</button>
-                    </div>
-                    <button class="capo-mode-toggle" id="capo-mode-toggle"
-                            title="Toggle per-string capo (drop-D / banjo 5th-string / partial capos)">
-                        Per-string
-                    </button>
-                </div>
-            </div>
-
-            <div class="capo-per-string" id="capo-per-string" hidden></div>
+            <!-- Tuning + capo group. The makeTuningController factory
+                 mounts the full disclosure markup into this container
+                 from its `tuner` prefix; per-screen HTML stays minimal
+                 so the three picker-using screens (Tuner / Recorder /
+                 Playback) don't duplicate the same ~30-line block. -->
+            <div id="tuner-tuning-mount"></div>
 
             <div class="strings" id="strings"></div>
 
@@ -1682,27 +1651,9 @@
                 and doesn't need this warning.
             </div>
 
-            <div class="tuning-picker" id="recorder-tuning-picker"></div>
-            <p class="picker-hint">
-                Don't see your tuning? <a href="#tunings">Define a custom one →</a>
-            </p>
-
-            <div class="active-tuning-row">
-                <div class="active-tuning-name" id="recorder-active-tuning-name">—</div>
-                <div class="capo-control" id="recorder-capo-control" hidden>
-                    <span class="capo-label">Capo</span>
-                    <div class="capo-uniform" id="recorder-capo-uniform">
-                        <button class="capo-btn" id="recorder-capo-down" aria-label="Decrease capo">−</button>
-                        <span class="capo-value" id="recorder-capo-value">0</span>
-                        <button class="capo-btn" id="recorder-capo-up" aria-label="Increase capo">+</button>
-                    </div>
-                    <button class="capo-mode-toggle" id="recorder-capo-mode-toggle"
-                            title="Toggle per-string capo (drop-D / banjo 5th-string / partial capos)">
-                        Per-string
-                    </button>
-                </div>
-            </div>
-            <div class="capo-per-string" id="recorder-capo-per-string" hidden></div>
+            <!-- Tuning + capo group, mounted by the shared
+                 makeTuningController factory (see ./controllers/tuning.js). -->
+            <div id="recorder-tuning-mount"></div>
 
             <div class="rec-settings" id="recorder-settings">
                 <div class="rec-setting">
@@ -1728,17 +1679,23 @@
                 </div>
             </div>
 
-            <div class="renderer-controls">
-                <label class="renderer-label" for="recorder-renderer-select">View</label>
-                <select id="recorder-renderer-select" class="renderer-select"></select>
-                <label class="renderer-label rec-metronome-label">
-                    <input type="checkbox" id="recorder-metronome-toggle" checked>
-                    Metronome
-                </label>
-                <label class="renderer-label rec-preroll-label" title="Count-in ticks before recording starts (0 disables)">
-                    Pre-roll
+            <div class="rec-settings">
+                <div class="rec-setting">
+                    <label for="recorder-renderer-select">View</label>
+                    <select id="recorder-renderer-select"></select>
+                </div>
+                <div class="rec-setting">
+                    <label class="rec-toggle-label">
+                        <input type="checkbox" id="recorder-metronome-toggle" checked>
+                        Metronome
+                    </label>
+                </div>
+                <div class="rec-setting" title="Count-in ticks before recording starts (0 disables)">
+                    <label for="recorder-preroll-input">Pre-roll</label>
+                    <button class="capo-btn" id="recorder-preroll-down" aria-label="Decrease pre-roll">−</button>
                     <input type="number" id="recorder-preroll-input" min="0" max="16" step="1" value="4">
-                </label>
+                    <button class="capo-btn" id="recorder-preroll-up" aria-label="Increase pre-roll">+</button>
+                </div>
             </div>
 
             <div class="renderer-host" id="recorder-renderer-host"></div>
@@ -1844,10 +1801,10 @@
                      factory). Used to transpose the loaded tab to a
                      different instrument and apply a capo for wait-mode
                      pitch comparison. -->
-                <div class="tuning-picker" id="playback-tuning-picker"></div>
-                <p class="picker-hint">
-                    Re-tune to play this tab on a different instrument. Notes that can't fit on the target are listed below.
-                </p>
+                <!-- Tuning + capo group, mounted by the shared
+                     makeTuningController factory. -->
+                <div id="playback-tuning-mount"></div>
+
                 <div class="transpose-mode-row">
                     <label for="playback-transpose-mode" class="transpose-mode-label">When a note doesn't fit:</label>
                     <select id="playback-transpose-mode">
@@ -1859,23 +1816,6 @@
                      dropdown so the user sees the consequence of their
                      choice immediately next to the choice itself. -->
                 <div class="form-error" id="playback-skipped-notes" hidden></div>
-
-                <div class="active-tuning-row">
-                    <div class="active-tuning-name" id="playback-active-tuning-name">—</div>
-                    <div class="capo-control" id="playback-capo-control" hidden>
-                        <span class="capo-label">Capo</span>
-                        <div class="capo-uniform" id="playback-capo-uniform">
-                            <button class="capo-btn" id="playback-capo-down" aria-label="Decrease capo">−</button>
-                            <span class="capo-value" id="playback-capo-value">0</span>
-                            <button class="capo-btn" id="playback-capo-up" aria-label="Increase capo">+</button>
-                        </div>
-                        <button class="capo-mode-toggle" id="playback-capo-mode-toggle"
-                                title="Toggle per-string capo">
-                            Per-string
-                        </button>
-                    </div>
-                </div>
-                <div class="capo-per-string" id="playback-capo-per-string" hidden></div>
 
                 <div class="rec-settings">
                     <div class="rec-setting">
@@ -1900,21 +1840,29 @@
                     </div>
                 </div>
 
-                <div class="renderer-controls">
-                    <label class="renderer-label" for="playback-renderer-select">View</label>
-                    <select id="playback-renderer-select" class="renderer-select"></select>
-                    <label class="renderer-label rec-metronome-label">
-                        <input type="checkbox" id="playback-metronome-toggle" checked>
-                        Metronome
-                    </label>
-                    <label class="renderer-label rec-preroll-label" title="Count-in ticks before playback starts">
-                        Pre-roll
+                <div class="rec-settings">
+                    <div class="rec-setting">
+                        <label for="playback-renderer-select">View</label>
+                        <select id="playback-renderer-select"></select>
+                    </div>
+                    <div class="rec-setting">
+                        <label class="rec-toggle-label">
+                            <input type="checkbox" id="playback-metronome-toggle" checked>
+                            Metronome
+                        </label>
+                    </div>
+                    <div class="rec-setting" title="Count-in ticks before playback starts">
+                        <label for="playback-preroll-input">Pre-roll</label>
+                        <button class="capo-btn" id="playback-preroll-down" aria-label="Decrease pre-roll">−</button>
                         <input type="number" id="playback-preroll-input" min="0" max="16" step="1" value="4">
-                    </label>
-                    <label class="renderer-label rec-metronome-label" title="Pause playhead until you play the next note">
-                        <input type="checkbox" id="playback-wait-toggle">
-                        Wait
-                    </label>
+                        <button class="capo-btn" id="playback-preroll-up" aria-label="Increase pre-roll">+</button>
+                    </div>
+                    <div class="rec-setting" title="Pause playhead until you play the next note">
+                        <label class="rec-toggle-label">
+                            <input type="checkbox" id="playback-wait-toggle">
+                            Wait
+                        </label>
+                    </div>
                 </div>
 
                 <div class="renderer-host" id="playback-renderer-host"></div>
@@ -2425,15 +2373,8 @@
             // tuning (saved slug → fall back to chromatic) and rebuild the
             // WebTuner whenever the controller fires onChange.
             tunerController = makeTuningController({
-                pickerId: 'tuning-picker',
-                activeNameId: null, // Tuner has its own `active-tuning-name` updated by rebuildTuner
-                capoControlId: 'capo-control',
-                capoUniformId: 'capo-uniform',
-                capoDownId: 'capo-down',
-                capoUpId: 'capo-up',
-                capoValueId: 'capo-value',
-                capoModeToggleId: 'capo-mode-toggle',
-                capoPerStringId: 'capo-per-string',
+                mountId: 'tuner-tuning-mount',
+                prefix: 'tuner',
                 storageKey: STORAGE_KEY,
                 includeChromatic: true,
                 onChange: () => rebuildTuner(),
@@ -2584,7 +2525,13 @@
                 tunerState.tuner.set_silence_rms(userRms);
             }
 
-            el('active-tuning-name').textContent = tunerState.tuner.name();
+            // Active-tuning-name + capo summary are now both managed
+            // by the shared tuningController (which mounts its own
+            // disclosure markup). The Tuner no longer needs to
+            // override the name with the WebTuner's effective name +
+            // capo annotation — the disclosure's summary already shows
+            // `<base name> · capo N` cleanly across all three picker-
+            // using screens.
             renderStringRows();
         }
 
@@ -3231,6 +3178,16 @@
 
             let active = null;
             let activeScore = initialScore;
+            // The controller caches the latest score / playhead /
+            // pre-roll so that swapping the active plugin (View
+            // dropdown, plugin upgrades, etc.) restores the new plugin
+            // to the host's CURRENT state instead of the plugin's
+            // constructor defaults. Without these caches a mid-play
+            // view switch would jump the new renderer back to col 0
+            // with no runway, even though the host is at e.g. col 12
+            // with preRoll=4.
+            let activePlayhead = 0;
+            let activePreRoll = 0;
 
             const mount = (pluginId) => {
                 if (active) {
@@ -3242,8 +3199,25 @@
                 const plugin = rendererRegistry.get(pluginId);
                 if (!plugin) return;
                 try {
-                    active = plugin.create(host, {});
+                    // Pass the cached pre-roll as a constructor option so
+                    // the plugin's first setScore-driven rebuild already
+                    // includes the runway — avoids a double rebuild on
+                    // mount. Plugins that don't honour the option just
+                    // ignore it (highway + tab both do).
+                    active = plugin.create(host, { preRoll: activePreRoll });
                     if (activeScore) active.setScore(activeScore);
+                    // Defensive: setPreRoll for plugins that DON'T accept
+                    // the constructor option. No-op on tab/highway since
+                    // activePreRoll already matches the constructed value.
+                    if (typeof active.setPreRoll === 'function') {
+                        active.setPreRoll(activePreRoll);
+                    }
+                    // Restore the host's current playhead — including
+                    // negative values during pre-roll. Without this the
+                    // new plugin starts at col 0 (its constructor default)
+                    // and the runway looks "ignored" until the user
+                    // touches a control that re-triggers setPlayhead.
+                    active.setPlayhead(activePlayhead);
                 } catch (e) {
                     console.error(`renderer '${pluginId}' failed to mount`, e);
                     active = null;
@@ -3264,8 +3238,24 @@
                 setScore(score) {
                     activeScore = score;
                     active?.setScore(score);
+                    // setScore rebuilds the plugin's grid; re-apply
+                    // pre-roll + playhead so runway cells and the
+                    // playhead position survive the rebuild.
+                    if (typeof active?.setPreRoll === 'function') {
+                        active.setPreRoll(activePreRoll);
+                    }
+                    active?.setPlayhead(activePlayhead);
                 },
-                setPlayhead(col) { active?.setPlayhead(col); },
+                setPlayhead(col) {
+                    activePlayhead = col;
+                    active?.setPlayhead(col);
+                },
+                setPreRoll(n) {
+                    activePreRoll = Math.max(0, Math.floor(n) || 0);
+                    if (typeof active?.setPreRoll === 'function') {
+                        active.setPreRoll(activePreRoll);
+                    }
+                },
                 destroy() {
                     active?.destroy();
                     active = null;
@@ -3410,15 +3400,8 @@
             // user-driven change → we reset any in-progress score because
             // string indices + post-capo labels both shift.
             recState.tuning = makeTuningController({
-                pickerId: 'recorder-tuning-picker',
-                activeNameId: 'recorder-active-tuning-name',
-                capoControlId: 'recorder-capo-control',
-                capoUniformId: 'recorder-capo-uniform',
-                capoDownId: 'recorder-capo-down',
-                capoUpId: 'recorder-capo-up',
-                capoValueId: 'recorder-capo-value',
-                capoModeToggleId: 'recorder-capo-mode-toggle',
-                capoPerStringId: 'recorder-capo-per-string',
+                mountId: 'recorder-tuning-mount',
+                prefix: 'recorder',
                 storageKey: 'twanga-recorder-tuning-v1',
                 includeChromatic: false,
                 onChange: () => recClear(),
@@ -3540,14 +3523,21 @@
 
             // Pre-roll input — locked while recording (pre-roll only
             // matters at the moment Start is clicked). 0 disables.
+            // The −/+ buttons match BPM / block-width's stepper UX
+            // so all the rec-setting cards have consistent shape.
             const prInput = el('recorder-preroll-input');
             prInput.value = String(recState.preRoll);
-            prInput.addEventListener('change', () => {
+            const prCommit = (next) => {
                 if (recState.isRecording) { prInput.value = String(recState.preRoll); return; }
-                recState.preRoll = clampInt(prInput.value, 0, 16, 4);
+                recState.preRoll = clampInt(next, 0, 16, 4);
                 prInput.value = String(recState.preRoll);
                 recSaveToStorage();
-            });
+            };
+            prInput.addEventListener('change', () => prCommit(prInput.value));
+            el('recorder-preroll-down').addEventListener('click', () =>
+                prCommit(recState.preRoll - 1));
+            el('recorder-preroll-up').addEventListener('click', () =>
+                prCommit(recState.preRoll + 1));
         }
 
         // ---- Score model construction --------------------------------------
@@ -4579,15 +4569,8 @@
             // initPlayback() for why deferring is needed.
             if (!playbackState.tuning) {
                 playbackState.tuning = makeTuningController({
-                    pickerId: 'playback-tuning-picker',
-                    activeNameId: 'playback-active-tuning-name',
-                    capoControlId: 'playback-capo-control',
-                    capoUniformId: 'playback-capo-uniform',
-                    capoDownId: 'playback-capo-down',
-                    capoUpId: 'playback-capo-up',
-                    capoValueId: 'playback-capo-value',
-                    capoModeToggleId: 'playback-capo-mode-toggle',
-                    capoPerStringId: 'playback-capo-per-string',
+                    mountId: 'playback-tuning-mount',
+                    prefix: 'playback',
                     storageKey: 'twanga-playback-tuning-v1',
                     includeChromatic: false,
                     onChange: () => playbackRecomputeTransposition(),
@@ -4739,7 +4722,20 @@
                 columns,
             };
             playbackState.rendererController?.setScore(score);
-            playbackState.rendererController?.setPlayhead(0);
+            // Tell the renderer how many runway slots to draw before
+            // col 0. The tab view renders these as faded "·" cells; the
+            // highway just lets the playhead go negative without any
+            // special handling (notes scroll in from above the now-line).
+            playbackState.rendererController?.setPreRoll?.(playbackState.preRoll);
+            // Park the playhead `preRoll` slots BEFORE the current
+            // column so the highway shows a runway leading into the
+            // first note in stopped state (the now-line sits where the
+            // first note will eventually land, rather than on top of
+            // column 0 making it look like the first note has already
+            // passed).
+            playbackState.rendererController?.setPlayhead(
+                playbackState.currentCol - playbackState.preRoll
+            );
         }
 
         function playbackUnload() {
@@ -4977,15 +4973,34 @@
                 playbackSaveToStorage();
             });
 
-            prInput.addEventListener('change', () => {
+            // Pre-roll stepper. Locked while playing — same pattern as
+            // BPM. −/+ buttons match the BPM stepper's UX so all the
+            // rec-setting cards have consistent shape.
+            const prCommit = (next) => {
                 if (playbackState.isPlaying) {
                     prInput.value = String(playbackState.preRoll);
                     return;
                 }
-                playbackState.preRoll = clampInt(prInput.value, 0, 16, 4);
+                playbackState.preRoll = clampInt(next, 0, 16, 4);
                 prInput.value = String(playbackState.preRoll);
                 playbackSaveToStorage();
-            });
+                // Tell the renderer to redraw runway cells (tab view) for
+                // the new pre-roll value. Highway ignores this.
+                playbackState.rendererController?.setPreRoll?.(playbackState.preRoll);
+                // Refresh the highway/tab runway so the now-line moves
+                // immediately when the pre-roll value changes. Skip
+                // during playback — the tick loop drives playhead then.
+                if (!playbackState.isPlaying && !playbackState.preRollActive) {
+                    playbackState.rendererController?.setPlayhead(
+                        playbackState.currentCol - playbackState.preRoll
+                    );
+                }
+            };
+            prInput.addEventListener('change', () => prCommit(prInput.value));
+            el('playback-preroll-down').addEventListener('click', () =>
+                prCommit(playbackState.preRoll - 1));
+            el('playback-preroll-up').addEventListener('click', () =>
+                prCommit(playbackState.preRoll + 1));
 
             waitToggle.addEventListener('change', () => {
                 if (playbackState.isPlaying) {
@@ -5203,16 +5218,32 @@
             }
 
             // Pre-roll: N audible clicks at one-per-beat (60 s / BPM ms).
+            // Visually, scroll the renderer's playhead from
+            // `startCol - preRoll` to `startCol` over the N beats so
+            // notes slide into the now-line just as the count finishes.
+            // The Highway renderer handles negative playheads natively
+            // (notes appear above the now-line); the Tab renderer hides
+            // its playhead bar while playhead < 0 and snaps it to the
+            // start column on the final beat. Both surface the "next
+            // imminent note" in their live-note cell during the count
+            // via Math.max(0, playhead) on the lookup column.
             if (playbackState.preRoll > 0) {
                 playbackState.preRollActive = true;
                 playbackState.preRollAbort = false;
                 el('playback-play-btn').textContent = 'Stop';
                 el('playback-play-btn').disabled = false;
                 const beatMs = 60_000 / Math.max(1, bpm);
+                const startCol = playbackState.currentCol;
+                playbackState.rendererController?.setPlayhead(
+                    startCol - playbackState.preRoll
+                );
                 for (let i = 1; i <= playbackState.preRoll; i++) {
                     if (playbackState.preRollAbort) break;
                     recPlayMetronomeClick();
                     el('playback-hint').textContent = `pre-roll: ${i} / ${playbackState.preRoll}`;
+                    playbackState.rendererController?.setPlayhead(
+                        startCol - (playbackState.preRoll - i)
+                    );
                     await new Promise((resolve) => setTimeout(resolve, beatMs));
                 }
                 playbackState.preRollActive = false;
@@ -5308,7 +5339,10 @@
 
             playbackState.tuning?.setEnabled(true);
             playbackState.currentCol = 0;
-            playbackState.rendererController?.setPlayhead(0);
+            // Restore the pre-roll runway (see playbackPushScoreToRenderer).
+            playbackState.rendererController?.setPlayhead(
+                playbackState.currentCol - playbackState.preRoll
+            );
 
             el('playback-play-btn').disabled = false;
             el('playback-play-btn').textContent = 'Play';

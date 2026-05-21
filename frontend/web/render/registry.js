@@ -17,8 +17,19 @@
 // The renderer instance it returns must implement:
 //
 //     setScore(scoreModel)        — replace the score being displayed
-//     setPlayhead(columnIndex)    — move the playhead cursor (integer column)
+//     setPlayhead(columnIndex)    — move the playhead cursor (integer column).
+//                                   columnIndex may be NEGATIVE during the
+//                                   pre-roll count-in; the renderer should
+//                                   draw a "runway" leading into col 0.
 //     destroy()                   — tear down DOM / event listeners
+//
+// And SHOULD implement (host gracefully no-ops if missing):
+//
+//     setPreRoll(n)               — declare how many runway slots precede
+//                                   col 0. Each renderer visualises this in
+//                                   its own metaphor (tab: faded leading
+//                                   cells; highway: widened upper zone so
+//                                   col 0 is visible during the full count).
 //
 // That's the entire contract. The renderer owns *everything* about its visual
 // layout (canvas vs DOM vs SVG, colours, sizing, animation). The host only

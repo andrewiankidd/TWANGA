@@ -8,7 +8,7 @@
 //!   exports. Proprietary binary formats (Guitar Pro `.gp5`/`.gpx`) are an
 //!   explicit non-goal — see `docs/SCOPE.md`.
 
-use twanga_core::Tuning;
+use twanga_core::{MidiNote, Tuning};
 
 pub mod musicxml {
     // MusicXML parser — placeholder. Open W3C-style XML schema; the natural
@@ -1185,6 +1185,11 @@ pub enum TabEvent {
 /// handle the returned [`TabEvent`]s.
 pub struct TabRecorder {
     string_names: Vec<String>,
+    /// Open-string MIDI per string. Used by `render_rows` to compute
+    /// the live-note cell (`open_midi + fret` → pitch class name) so
+    /// the user sees "this fret = B" without having to do mental
+    /// arithmetic against the open-string label.
+    string_open_midis: Vec<MidiNote>,
     samples_per_column: usize,
     columns_per_block: usize,
     name_width: usize,
@@ -1212,6 +1217,7 @@ impl TabRecorder {
         let n = tuning.strings.len();
         Self {
             string_names: tuning.strings.iter().map(|s| s.name.clone()).collect(),
+            string_open_midis: tuning.strings.iter().map(|s| s.open).collect(),
             samples_per_column: samples_per_column.max(1),
             columns_per_block: columns_per_block.max(1),
             name_width,
@@ -1316,10 +1322,24 @@ impl TabRecorder {
         self.string_names
             .iter()
             .zip(self.completed_columns.iter())
-            .map(|(name, marks)| {
+            .enumerate()
+            .map(|(i, (name, marks))| {
                 let padded = format!("{:<width$}", name, width = self.name_width);
+                // Live-note cell: shows the absolute note for the
+                // *last committed* column on this string. Empty when
+                // that column had no hit. 2-char-max (e.g. "F#") fixed
+                // width keeps the tab-body alignment stable as notes
+                // come and go.
+                let last_fret = marks.last().copied().flatten();
+                let note_cell = match (last_fret, self.string_open_midis.get(i)) {
+                    (Some(fret), Some(open)) => {
+                        let midi = MidiNote(open.0.saturating_add(fret));
+                        format!("{:<2}", midi.pitch_class_name())
+                    }
+                    _ => "  ".to_string(),
+                };
                 let content: String = marks.iter().map(|m| fret_char(*m)).collect();
-                format!("{padded} | {content}")
+                format!("{padded} | {note_cell} | {content}")
             })
             .collect()
     }
@@ -1342,7 +1362,9 @@ mod tests {
     }
 
     fn tab_after(rows: &[String], string_idx: usize) -> String {
-        rows[string_idx].split(" | ").nth(1).unwrap().to_string()
+        // Row shape is `<label> | <live-note> | <content>` — the
+        // content is the third pipe-separated cell.
+        rows[string_idx].split(" | ").nth(2).unwrap().to_string()
     }
 
     fn rows_of(event: &TabEvent) -> &[String] {

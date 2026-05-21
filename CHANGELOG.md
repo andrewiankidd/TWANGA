@@ -10,6 +10,95 @@ dated section.
 
 ### Added
 
+- **Pre-roll runway on every renderer (uniform contract, no view-
+  specific hacks).** Both built-in renderers — Tab and Highway — now
+  implement an optional `setPreRoll(n)` method declaring the count-in
+  slot count. Each visualises it in its own metaphor, but the host
+  treats them identically: one `setPreRoll` call, one `setPlayhead`
+  call, no branching on view.
+  - **Renderer contract** — `setPreRoll(n)` is documented in
+    `frontend/web/render/registry.js` as a SHOULD-implement method
+    alongside `setScore` / `setPlayhead` / `destroy`. `setPlayhead`
+    now explicitly accepts NEGATIVE column indices during pre-roll,
+    so a renderer that doesn't implement `setPreRoll` still has a
+    well-defined runway model (the host gracefully no-ops the call).
+  - **Tab renderer** — grid template extended from
+    `[label] [note] [body…]` to `[label] [note] [runway × N] [body…]`.
+    The runway is `N` faded `·` cells per string with a dashed
+    bar-line separator on the LAST runway cell so the user can see
+    where the count-in ends and real tab begins. Playhead bar slides
+    through these cells during the count instead of being hidden.
+  - **Highway renderer** — runway is implicit in lane geometry rather
+    than DOM. A new `_effectiveLookahead = max(lookahead, preRoll)`
+    helper widens the upper "future" zone when the pre-roll is bigger
+    than the default 10-slot lookahead, shrinking slot height so col 0
+    stays visible for the FULL count-in. (Previously: with `preRoll=16`
+    and `lookahead=10`, the first 6 count-in ticks showed nothing.)
+  - **Note-landing math fix** — a `delta=0` note now lands with its
+    BOTTOM edge on the line top (Guitar-Hero/Rocksmith style) instead
+    of its centre straddling the line. The renderer comment already
+    promised "notes land on this line at their moment in time" — the
+    geometry now matches.
+  - **View-switch state caching** — `wireRendererHost` in `app.html`
+    caches the host's current score, playhead, and pre-roll, and
+    replays all three on every mount. Without this, switching from
+    Tab to Highway mid-stopped-state would jump the new renderer back
+    to col 0 with no runway, even though the host was at e.g.
+    playhead=-4 with preRoll=4. Plugin constructors now receive
+    `preRoll` as an option too, so the first rebuild is correct
+    in one pass.
+  - **Host plumbing** — playback's `playbackPushScoreToRenderer`
+    calls `setPreRoll(playbackState.preRoll)` once on load; the
+    pre-roll `−`/`+` change handler calls it again on every nudge.
+    `playbackStop` parks the playhead at `-preRoll` so the runway
+    is visible in stopped state.
+
+- **Reusable tuning-picker disclosure component.** The tuning +
+  capo controls that appear on the Tuner / Recorder / Playback
+  screens were hand-duplicated HTML in three places, each ~30 lines
+  of nested markup with separate IDs and per-screen wiring. The
+  `makeTuningController` factory now mounts its OWN markup from a
+  `mountId` + `prefix` pair, deriving all internal element IDs from
+  the prefix. Each screen's HTML reduces to one line:
+  `<div id="tuner-tuning-mount"></div>`. The collapsed `<details>`
+  summary shows just `Standard Ukulele · capo 3`; opening reveals
+  the full dropdown + capo stepper + per-string toggle. Legacy
+  explicit-ID mode is kept for any consumer that hand-writes the
+  markup. Factory selected over per-screen duplication after the
+  user pointed out "if it's the same UI in every project shouldn't
+  it be reusable" — same pattern the mic-meter / device-picker /
+  silence-threshold factories already follow.
+
+- **Live-note column / pill on every renderer (CLI + GUI parity).**
+  Every per-string row in the Tab renderer (and per-lane on the
+  Highway renderer) now carries a small cell showing the absolute
+  pitch class (`C`, `F#`, …) for the fret being played at the
+  current playhead column on that string. The open-string label
+  already establishes octave context, so the cell shows letter +
+  accidental only — 2-char max, fixed width, doesn't shift the
+  surrounding layout.
+  - **Rust core**: new `MidiNote::pitch_class_name() -> &'static str`
+    sharing a `PITCH_CLASS_NAMES` table with the existing `name()`.
+  - **CLI**: row shape changes from `<label> | <body>` to
+    `<label> | <note> | <body>` on `twanga play` and `twanga record`.
+    Recorder shows the note for the last-committed fret per string;
+    Playback shows the note for the fret at the playhead column.
+  - **GUI Tab renderer**: new `noteColWidth: 32` option; grid
+    template extended to `[label] [note] [body…]`. In read-only
+    mode (Playback / Recorder) the cell follows the playhead; in
+    interactive mode (Editor) it follows the user's selected-for-
+    edit column.
+  - **GUI Highway renderer**: per-lane live-note pill pinned just
+    above the static string label, updated on every `setPlayhead`
+    call to show the pitch class crossing the now-line on each
+    lane. Empty when no note is at the current column.
+
+  Use case: tells the user "fret 7 on the A string is an E" without
+  any mental arithmetic. Particularly useful on banjo and uke where
+  the same physical fret-position carries different absolute pitches
+  per tuning. Same data shape on both surfaces; same `pitch_class_name`
+  math on Rust and JS sides.
+
 - **Runtime-tunable silence gate (CLI + GUI parity).** The YIN
   pitch detector's silence threshold (window-RMS below which no
   detection runs) was a hardcoded `Tuner::SILENCE_RMS = 0.005`;

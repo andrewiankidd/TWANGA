@@ -75,6 +75,11 @@ same two-view shape as Playback: a **library list** first, then a
   - **Double-click** to type a number directly (covers "I want fret
     17 without 17 clicks").
   - **Click a column index header** to select that column.
+  - **Live-note cell** sits between each row's string label and the
+    fret body, showing the absolute pitch class for the fret in the
+    currently-selected column on that string. Updates as you click
+    different cells; useful for "is fret 7 on the A string really a
+    D?" without doing the maths.
 - **Column controls** — Insert column after (the selected column),
   Delete column, Clear column.
 - **Dirty pill** — small "unsaved" badge when the in-memory grid

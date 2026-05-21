@@ -107,28 +107,130 @@ function computeBaseLabels(slug) {
     }
 }
 
+/// Build the `<details>` disclosure markup that all three picker-using
+/// screens share — Tuner / Recorder / Playback. Returns the set of
+/// derived IDs the controller wires into. Called once per controller
+/// instance when the caller passes a `mountId` + `prefix` instead of
+/// individual element IDs.
+///
+/// Markup shape (collapsed → one line, open → full controls):
+///
+///   <details class="tuning-group">
+///     <summary>
+///       <span class="active-tuning-name">Standard Ukulele</span>
+///       <span class="tuning-group-meta"> · capo 0</span>
+///     </summary>
+///     <div class="tuning-group-body">
+///       <label>Tuning <select></select></label>
+///       <div class="capo-control"> stepper + per-string toggle </div>
+///       <div class="capo-per-string" hidden></div>
+///       <p class="picker-hint">Don't see your tuning? …</p>
+///     </div>
+///   </details>
+function mountTuningGroup(container, prefix) {
+    container.replaceChildren();
+    const ids = {
+        pickerId: `${prefix}-tuning-picker`,
+        activeNameId: `${prefix}-active-tuning-name`,
+        summaryMetaId: `${prefix}-summary-meta`,
+        capoControlId: `${prefix}-capo-control`,
+        capoUniformId: `${prefix}-capo-uniform`,
+        capoDownId: `${prefix}-capo-down`,
+        capoUpId: `${prefix}-capo-up`,
+        capoValueId: `${prefix}-capo-value`,
+        capoModeToggleId: `${prefix}-capo-mode-toggle`,
+        capoPerStringId: `${prefix}-capo-per-string`,
+    };
+
+    const details = document.createElement('details');
+    details.className = 'tuning-group';
+    details.innerHTML = `
+        <summary>
+            <span class="active-tuning-name" id="${ids.activeNameId}">—</span>
+            <span class="tuning-group-meta" id="${ids.summaryMetaId}"></span>
+        </summary>
+        <div class="tuning-group-body">
+            <label class="tuning-select-label">
+                Tuning
+                <select class="tuning-select" id="${ids.pickerId}"></select>
+            </label>
+            <div class="capo-control" id="${ids.capoControlId}" hidden>
+                <span class="capo-label">Capo</span>
+                <div class="capo-uniform" id="${ids.capoUniformId}">
+                    <button class="capo-btn" id="${ids.capoDownId}" aria-label="Decrease capo">−</button>
+                    <span class="capo-value" id="${ids.capoValueId}">0</span>
+                    <button class="capo-btn" id="${ids.capoUpId}" aria-label="Increase capo">+</button>
+                </div>
+                <button class="capo-mode-toggle" id="${ids.capoModeToggleId}"
+                        title="Toggle per-string capo (drop-D / banjo 5th-string / partial capos)">
+                    Per-string
+                </button>
+            </div>
+            <div class="capo-per-string" id="${ids.capoPerStringId}" hidden></div>
+            <p class="picker-hint">
+                Don't see your tuning? <a href="#tunings">Define a custom one →</a>
+            </p>
+        </div>
+    `;
+    container.appendChild(details);
+    return ids;
+}
+
 /**
  * Factory. Returns a controller object — see the methods listed at the
  * bottom for the surface consumers use.
  *
+ * Two ways to provide DOM bindings:
+ *
+ * 1. **Mount mode (preferred)** — pass `mountId` + `prefix`. The
+ *    controller builds the entire disclosure markup inside the
+ *    container, deriving all the inner element IDs from `prefix`.
+ *    The screen's HTML stays one line:
+ *      `<div id="tuner-tuning-mount"></div>`
+ *
+ * 2. **Legacy mode** — pass each element ID individually
+ *    (`pickerId`, `capoControlId`, …) for cases where the markup is
+ *    hand-written in the page. Kept for backwards compat; new
+ *    consumers should use mount mode.
+ *
  * @param {object} opts
- * @param {string} opts.pickerId           Container element ID for the tuning-button row.
- * @param {string} [opts.activeNameId]     Optional element ID that gets the full-name text.
- * @param {string} opts.capoControlId      Wrapper element for the capo controls.
- * @param {string} opts.capoUniformId      Wrapper element for the uniform-mode stepper.
- * @param {string} opts.capoDownId         Decrement button.
- * @param {string} opts.capoUpId           Increment button.
- * @param {string} opts.capoValueId        Element that gets the current value as text.
- * @param {string} opts.capoModeToggleId   Button toggling uniform <-> per-string.
- * @param {string} opts.capoPerStringId    Container for the per-string steppers (gets rebuilt on tuning change).
- * @param {string} opts.storageKey         localStorage key under which to persist state.
+ * @param {string} [opts.mountId]           Container element ID; the controller mounts the disclosure markup inside it (preferred).
+ * @param {string} [opts.prefix]            ID prefix for the auto-generated inner elements. Required with `mountId`.
+ * @param {string} [opts.pickerId]          Legacy: ID of an existing `<select>` element.
+ * @param {string} [opts.activeNameId]      Legacy: element ID that gets the full-name text.
+ * @param {string} [opts.summaryMetaId]     Legacy: element ID for the capo summary string.
+ * @param {string} [opts.capoControlId]     Legacy: wrapper for the capo controls.
+ * @param {string} [opts.capoUniformId]     Legacy: wrapper for the uniform-mode stepper.
+ * @param {string} [opts.capoDownId]        Legacy: decrement button.
+ * @param {string} [opts.capoUpId]          Legacy: increment button.
+ * @param {string} [opts.capoValueId]       Legacy: element that gets the current value as text.
+ * @param {string} [opts.capoModeToggleId]  Legacy: button toggling uniform <-> per-string.
+ * @param {string} [opts.capoPerStringId]   Legacy: container for the per-string steppers.
+ * @param {string} opts.storageKey          localStorage key under which to persist state.
  * @param {boolean} [opts.includeChromatic=false]  Include the chromatic sentinel in the picker (Tuner only).
- * @param {function} [opts.onChange]       Fires after every state change (tuning select, capo change, mode toggle).
+ * @param {function} [opts.onChange]        Fires after every state change.
  */
 export function makeTuningController(opts) {
+    // Mount-mode: if `mountId` is provided, build the markup ourselves
+    // and derive all the inner IDs from `prefix`. Otherwise fall back
+    // to the explicit IDs in `opts` (legacy mode).
+    let resolvedIds = opts;
+    if (opts.mountId) {
+        const container = document.getElementById(opts.mountId);
+        if (!container) {
+            throw new Error(`makeTuningController: missing mount container '${opts.mountId}'`);
+        }
+        if (!opts.prefix) {
+            throw new Error(`makeTuningController: 'prefix' is required when 'mountId' is set`);
+        }
+        const ids = mountTuningGroup(container, opts.prefix);
+        resolvedIds = { ...opts, ...ids };
+    }
+
     const {
         pickerId,
         activeNameId,
+        summaryMetaId,
         capoControlId,
         capoUniformId,
         capoDownId,
@@ -139,7 +241,7 @@ export function makeTuningController(opts) {
         storageKey,
         includeChromatic = false,
         onChange,
-    } = opts;
+    } = resolvedIds;
 
     const $ = (id) => document.getElementById(id);
 
@@ -194,17 +296,24 @@ export function makeTuningController(opts) {
 
     function renderPicker() {
         const picker = $(pickerId);
+        if (!picker) return;
+        // The picker element is a `<select>` directly (per-screen
+        // markup uses `<select id="...">`). Refill its options to
+        // reflect the current slug list — user tunings can be added /
+        // removed in the Tunings screen and this re-renders on next
+        // visit to a picker-using screen via the controller's init.
         picker.replaceChildren();
         for (const slug of allKnownSlugs()) {
-            const btn = document.createElement('button');
-            btn.className = 'tuning-option';
-            btn.dataset.slug = slug;
-            btn.textContent = shortName(slug);
-            btn.title = fullName(slug);
-            if (slug === state.mode) btn.classList.add('active');
-            btn.addEventListener('click', () => select(slug));
-            picker.appendChild(btn);
+            const opt = document.createElement('option');
+            opt.value = slug;
+            opt.textContent = fullName(slug);
+            if (slug === state.mode) opt.selected = true;
+            picker.appendChild(opt);
         }
+        // Re-bind change handler (replaceChildren doesn't drop the
+        // listener but re-binding is cheap and safe in case the
+        // element itself was replaced upstream).
+        picker.onchange = (e) => select(e.target.value);
     }
 
     function updateCapoDisplay() {
@@ -220,6 +329,34 @@ export function makeTuningController(opts) {
         if (activeNameId) {
             const el = $(activeNameId);
             if (el) el.textContent = fullName(state.mode ?? '—');
+        }
+        updateSummaryMeta();
+    }
+
+    /// Compose the capo summary string shown next to the tuning name
+    /// in the disclosure's `<summary>`. Empty for chromatic or zero-
+    /// capo cases so the summary stays "Standard Ukulele" alone; non-
+    /// empty when there's something to surface. Per-string capos
+    /// render as " · capo 0,2,2,2,2,2" matching the alphaTex spec.
+    function updateSummaryMeta() {
+        if (!summaryMetaId) return;
+        const el = $(summaryMetaId);
+        if (!el) return;
+        const isChromatic = state.mode === 'chromatic' || !state.mode;
+        if (isChromatic) {
+            el.textContent = '';
+            return;
+        }
+        if (state.capoMode === 'per-string') {
+            const spec = state.capoSpec ?? [];
+            // Only label as capo'd if at least one string is fretted up.
+            if (spec.some((v) => v > 0)) {
+                el.textContent = ` · capo ${spec.join(',')}`;
+            } else {
+                el.textContent = '';
+            }
+        } else {
+            el.textContent = state.capo > 0 ? ` · capo ${state.capo}` : '';
         }
     }
 
@@ -327,9 +464,14 @@ export function makeTuningController(opts) {
             state.capoSpec = state.baseLabels.map(() => 0);
         }
         refreshPresetEntry();
-        document.querySelectorAll(`#${pickerId} .tuning-option`).forEach((b) => {
-            b.classList.toggle('active', b.dataset.slug === slug);
-        });
+        // Sync the `<select>`'s value with the new slug. Native
+        // change events trigger this same select() callback, so we
+        // also need to handle programmatic calls (e.g. Playback
+        // pre-loading the file's tuning) that come from outside.
+        const picker = $(pickerId);
+        if (picker && picker.value !== slug) {
+            picker.value = slug;
+        }
         updateCapoDisplay();
         renderPerStringCapo();
         savePersisted();

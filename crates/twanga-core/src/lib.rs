@@ -35,6 +35,13 @@ impl fmt::Display for Frequency {
     }
 }
 
+/// Sharps-only, octave-less pitch-class table. Indexed by `midi % 12`.
+/// Used by both [`MidiNote::name`] (which appends an octave) and
+/// [`MidiNote::pitch_class_name`] (which doesn't).
+const PITCH_CLASS_NAMES: [&str; 12] = [
+    "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B",
+];
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct MidiNote(pub u8);
 
@@ -44,12 +51,19 @@ impl MidiNote {
     }
 
     pub fn name(self) -> String {
-        const NAMES: [&str; 12] = [
-            "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B",
-        ];
+        let n = PITCH_CLASS_NAMES[(self.0 % 12) as usize];
         let octave = (self.0 as i32 / 12) - 1;
-        let n = NAMES[(self.0 % 12) as usize];
         format!("{n}{octave}")
+    }
+
+    /// Letter + accidental only, without the octave digit. `A4` becomes
+    /// `"A"`; `F#3` becomes `"F#"`. Used by the playback / recorder
+    /// renderers to show the absolute note for the fret currently being
+    /// played alongside the string-label column: the open-string label
+    /// (e.g. `A4`) already establishes octave context, so repeating it
+    /// in the live-note cell would be noise.
+    pub fn pitch_class_name(self) -> &'static str {
+        PITCH_CLASS_NAMES[(self.0 % 12) as usize]
     }
 
     /// Nearest MIDI note (12-TET) to the given frequency, plus the signed cents

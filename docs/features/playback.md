@@ -117,7 +117,11 @@ The screen has two views: a **library list** until a tab is loaded, then a
   meter (with input device picker + silence-threshold slider) the
   Recorder uses. Choices persist independently under
   `twanga-playback-device-v1` / `twanga-playback-silence-rms-v1`.
-- **Renderer picker** — Tab or Highway view.
+- **Renderer picker** — Tab or Highway view. Both surface a per-string
+  **live-note cell** that shows the absolute pitch class (e.g. `C`,
+  `F#`) for the fret being played at the playhead column on that
+  string. Empty when the string isn't playing in the current column.
+  Mirrors the CLI's `<label> | <note> | <body>` row shape.
 - **Play / Pause / Stop** — spacebar shortcut for pause/resume. Pause
   pressed during wait closes out the wait segment so resume doesn't
   double-count time.

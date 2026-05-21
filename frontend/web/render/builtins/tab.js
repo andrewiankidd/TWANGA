@@ -6,6 +6,16 @@
 // third-party plugin would export. Built-ins enjoy no privileges — they just
 // happen to be registered at startup by the host. See ../registry.js.
 
+// Sharps-only pitch-class table indexed by `midi % 12`. Mirrors
+// twanga-core's PITCH_CLASS_NAMES so the JS-side live-note cell and
+// the CLI's equivalent show the same letter+accidental for the same
+// played MIDI. No octave — the open-string label in the row's first
+// cell already establishes octave context.
+const PITCH_CLASS_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+function pitchClassName(midi) {
+    return PITCH_CLASS_NAMES[((midi % 12) + 12) % 12];
+}
+
 class TabRenderer {
     constructor(container, options = {}) {
         this.container = container;
@@ -13,6 +23,11 @@ class TabRenderer {
             cellWidth: 30,
             cellHeight: 30,
             labelWidth: 56,
+            // Width of the live-note column that sits between the
+            // string label and the tab body. Just wide enough for
+            // "F#" — keeps the tab-body alignment tight while still
+            // giving the user "what note is this fret" at a glance.
+            noteColWidth: 32,
             // Interactive mode — when true, cells become clickable (with a
             // pointer cursor + hover halo) and an extra header row on top
             // gets per-column click targets. Editor uses this to drive
@@ -24,10 +39,19 @@ class TabRenderer {
             onCellDblClick: null,     // (stringIdx, colIdx, event) — double-click
             onColHeaderClick: null,   // (colIdx, event)
             selectedColumn: -1,       // column index to highlight (-1 = none)
+            // Pre-roll runway — N faded cells rendered BEFORE col 0 so a
+            // negative playhead (count-in) has somewhere visible to sit.
+            // The host (playback / recorder) calls setPreRoll(N) to keep
+            // this in sync with the user's pre-roll setting.
+            preRoll: 0,
             ...options,
         };
         this.score = null;
         this.playhead = 0;
+        // Per-string handles for the live-note cells. Populated on
+        // _rebuild, mutated in-place by _refreshLiveNotes(); no grid
+        // rebuild required when the playhead moves.
+        this.noteCells = [];
 
         this.root = document.createElement('div');
         this.root.className = 'tw-rt-tab';
@@ -88,6 +112,22 @@ class TabRenderer {
     setPlayhead(columnIndex) {
         this.playhead = columnIndex;
         this._positionPlayhead();
+        this._refreshLiveNotes();
+    }
+
+    /// Host-driven pre-roll size. Triggers a rebuild because the
+    /// runway is implemented as extra leading grid cells (cheaper than
+    /// trying to fake them with margins / transforms). The host calls
+    /// this on load and whenever the user changes the pre-roll value;
+    /// no-op if the value hasn't actually changed.
+    setPreRoll(n) {
+        const next = Math.max(0, Math.floor(n) || 0);
+        if (next === this.options.preRoll) return;
+        this.options.preRoll = next;
+        if (this.score) {
+            this._rebuild();
+            this._positionPlayhead();
+        }
     }
 
     /// Update interactive-mode options (selected column, click handlers)
@@ -97,7 +137,12 @@ class TabRenderer {
     /// listener set is wired per-cell at build time.
     setInteractiveOptions(opts) {
         Object.assign(this.options, opts);
-        if (this.score) this._rebuild();
+        if (this.score) {
+            this._rebuild();
+            // _rebuild already calls _refreshLiveNotes, but call it
+            // again explicitly so the dependency is obvious.
+            this._refreshLiveNotes();
+        }
     }
 
     destroy() {
@@ -131,18 +176,24 @@ class TabRenderer {
         // changes are needed there.
         const headerRows = interactive ? 1 : 0;
         const headerRowHeight = Math.round(cellHeight * 0.6);
+        const { noteColWidth, preRoll } = this.options;
+        // Grid layout: `[labelWidth] [noteColWidth] [runway × preRoll] [body × numCols]`.
+        // Runway cells live in grid columns 3..3+preRoll-1; body cells
+        // live in grid columns 3+preRoll..3+preRoll+numCols-1. Existing
+        // body references (`${c + 3}`) shift to `${c + 3 + preRoll}`.
         this.grid.style.gridTemplateColumns =
-            `${labelWidth}px repeat(${numCols}, ${cellWidth}px)`;
+            `${labelWidth}px ${noteColWidth}px repeat(${preRoll + numCols}, ${cellWidth}px)`;
         this.grid.style.gridTemplateRows =
             (headerRows ? `${headerRowHeight}px ` : '') +
             `repeat(${strings.length}, ${cellHeight}px)`;
 
         if (interactive) {
             // Top-left corner of the header row (empty cell over the
-            // string labels). Placeholder so the grid lines up.
+            // string labels). Placeholder so the grid lines up — now
+            // spans both the label and live-note columns.
             const corner = document.createElement('div');
             Object.assign(corner.style, {
-                gridColumn: '1',
+                gridColumn: '1 / span 2',
                 gridRow: '1',
             });
             this.grid.appendChild(corner);
@@ -152,7 +203,7 @@ class TabRenderer {
                 head.textContent = String(c + 1);
                 const isSel = c === selectedColumn;
                 Object.assign(head.style, {
-                    gridColumn: `${c + 2}`,
+                    gridColumn: `${c + 3 + preRoll}`,
                     gridRow: '1',
                     display: 'flex',
                     alignItems: 'center',
@@ -173,14 +224,14 @@ class TabRenderer {
         }
 
         // Optional "capo: N" / "capo: [...]" badge in the top-left
-        // corner (over the string-label column, where the column-index
-        // header doesn't apply). Only shown when there's actually a
-        // capo set; mirrors the CLI's "Capo:" header line.
+        // corner (over the string-label + live-note columns, where the
+        // column-index header doesn't apply). Only shown when there's
+        // actually a capo set; mirrors the CLI's "Capo:" header line.
         if (hasCapo) {
             const badge = document.createElement('div');
             badge.textContent = capoBadgeText(capoSpec);
             Object.assign(badge.style, {
-                gridColumn: '1',
+                gridColumn: '1 / span 2',
                 gridRow: headerRows ? '1' : '1 / 1',
                 display: 'flex',
                 alignItems: 'center',
@@ -208,6 +259,10 @@ class TabRenderer {
         // accounted for the offset.
         const stringRowOffset = headerRows + (hasCapo && !headerRows ? 1 : 0);
 
+        // Reset the live-note-cell handle array; populated as we
+        // build each string row below.
+        this.noteCells = new Array(strings.length).fill(null);
+
         for (let s = 0; s < strings.length; s++) {
             // String label on the left of the row, with optional "+N"
             // capo annotation when that string is fretted up by the
@@ -233,6 +288,53 @@ class TabRenderer {
             });
             this.grid.appendChild(label);
 
+            // Live-note cell. Shows the absolute pitch class for the
+            // fret being played on this string at the current playhead
+            // (or selectedColumn in interactive mode). Empty when this
+            // string isn't playing at the active column. Populated
+            // initially via _refreshLiveNotes at the end of _rebuild;
+            // updated in-place on every setPlayhead call after that.
+            const noteCell = document.createElement('div');
+            noteCell.title = `Live note — ${baseName} + current fret`;
+            Object.assign(noteCell.style, {
+                gridColumn: '2',
+                gridRow: `${s + 1 + stringRowOffset}`,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: 'var(--highlight)',
+                fontWeight: '700',
+                fontSize: '0.85rem',
+                fontFamily: 'monospace',
+                borderRight: '1px solid var(--border)',
+            });
+            this.grid.appendChild(noteCell);
+            this.noteCells[s] = noteCell;
+
+            // Runway cells — `preRoll` faded "·" cells before col 0, one
+            // per pre-roll tick. Purely cosmetic: they give the playhead
+            // bar somewhere visible to sit during the count-in instead
+            // of being hidden until column 0 lands. Styled muted so the
+            // user reads them as "not real tab content."
+            for (let r = 0; r < preRoll; r++) {
+                const runway = document.createElement('div');
+                runway.textContent = '·';
+                Object.assign(runway.style, {
+                    gridColumn: `${r + 3}`,
+                    gridRow: `${s + 1 + stringRowOffset}`,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: 'var(--muted)',
+                    opacity: '0.35',
+                    fontSize: '0.95rem',
+                    // Bar-line separator on the LAST runway cell so the
+                    // boundary between count-in and real tab is obvious.
+                    borderRight: r === preRoll - 1 ? '1px dashed var(--border)' : 'none',
+                });
+                this.grid.appendChild(runway);
+            }
+
             for (let c = 0; c < numCols; c++) {
                 const cell = document.createElement('div');
                 const fret = columns[c]?.[s];
@@ -240,7 +342,7 @@ class TabRenderer {
                 const onBar = columnsPerBar > 0 && c > 0 && c % columnsPerBar === 0;
                 const isSelCol = interactive && c === selectedColumn;
                 Object.assign(cell.style, {
-                    gridColumn: `${c + 2}`,
+                    gridColumn: `${c + 3 + preRoll}`,
                     gridRow: `${s + 1 + stringRowOffset}`,
                     display: 'flex',
                     alignItems: 'center',
@@ -268,6 +370,47 @@ class TabRenderer {
                 this.grid.appendChild(cell);
             }
         }
+
+        // Populate the live-note cells against the current playhead /
+        // selectedColumn. Subsequent setPlayhead / setInteractiveOptions
+        // calls update these in place without rebuilding.
+        this._refreshLiveNotes();
+    }
+
+    /// Update the per-string live-note cells to reflect the active
+    /// column (selectedColumn in interactive mode if valid; otherwise
+    /// the playhead). Cheap — just text-content writes, no DOM
+    /// reshape. Called from _rebuild, setPlayhead, and
+    /// setInteractiveOptions.
+    _refreshLiveNotes() {
+        if (!this.score || this.noteCells.length === 0) return;
+        const { columns, tuning, capoSpec } = this.score;
+        const strings = tuning?.strings ?? [];
+        const capoOffsets = parseCapoForLabels(capoSpec, strings.length);
+        const { interactive, selectedColumn } = this.options;
+        // Editor (interactive) tracks the user's selected-for-edit
+        // column independently from the playhead. Read-only mode
+        // (Playback / Recorder) follows the playhead. Either way, the
+        // live-note cell shows the note for whichever column is
+        // "active" for this surface. During pre-roll the playhead is
+        // negative (the highway renderer shows notes scrolling in from
+        // above); for the tab side we clamp to 0 so the cell shows
+        // what's *about to* play — the imminent first note.
+        const activeCol = interactive && selectedColumn >= 0 && selectedColumn < columns.length
+            ? selectedColumn
+            : Math.max(0, this.playhead);
+        for (let s = 0; s < this.noteCells.length; s++) {
+            const cell = this.noteCells[s];
+            if (!cell) continue;
+            const fret = columns[activeCol]?.[s];
+            const baseMidi = strings[s]?.midi;
+            if (fret == null || baseMidi == null) {
+                cell.textContent = '';
+                continue;
+            }
+            const off = capoOffsets[s] ?? 0;
+            cell.textContent = pitchClassName(baseMidi + off + fret);
+        }
     }
 
     _positionPlayhead() {
@@ -275,10 +418,20 @@ class TabRenderer {
             this.playheadEl.style.display = 'none';
             return;
         }
-        const { cellWidth, labelWidth } = this.options;
+        const { cellWidth, labelWidth, noteColWidth, preRoll } = this.options;
         const max = this.score.columns.length - 1;
-        const clamped = Math.max(0, Math.min(max, this.playhead));
-        const playheadX = labelWidth + clamped * cellWidth;
+        // Pre-roll: playhead can be negative down to `-preRoll`, where
+        // the bar sits over the leftmost runway cell. When preRoll is
+        // 0 and playhead < 0, hide the bar (no runway to sit on).
+        if (this.playhead < 0 && preRoll === 0) {
+            this.playheadEl.style.display = 'none';
+            return;
+        }
+        const clamped = Math.max(-preRoll, Math.min(max, this.playhead));
+        // Body cells start `preRoll` slots after the label+note columns;
+        // a playhead of -preRoll lands on runway cell 0, a playhead of 0
+        // lands on body cell 0.
+        const playheadX = labelWidth + noteColWidth + (clamped + preRoll) * cellWidth;
         this.playheadEl.style.display = 'block';
         this.playheadEl.style.left = `${playheadX}px`;
 

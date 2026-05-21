@@ -56,11 +56,16 @@ Tempo:      120 BPM, 1/8 notes (250 ms/col)
 Block:      32 cols (8000 ms wide)
 Saving to:  recordings/recording-1779133041.alphatex
 
-A4             | --------0000--------------------
-E4             | ----------------11110000--------
-C4             | 0000--------------------222200--
-g4 (reentrant) | ----0000----00------------------
+A4             | A  | --------0000--------------------
+E4             | G  | ----------------11110000--------
+C4             | D  | 0000--------------------222200--
+g4 (reentrant) |    | ----0000----00------------------
 ```
+
+The middle cell (`A`, `G`, `D` …) is the live-note column: the
+absolute pitch class for the last-committed fret on that string.
+Empty when the string isn't currently playing. Same shape on
+`twanga play` — see [playback](playback.md).
 
 ## GUI
 
@@ -78,17 +83,24 @@ Open the Recorder card from the main menu (or `#recorder`).
   resume doesn't fire a phantom catch-up click. Click repeatedly to undo
   multiple. Disabled when nothing has been committed.
 - **Renderer picker** — Tab (column-grid) or Highway (notes drop down
-  lanes toward a "now" line) for the live in-progress view.
+  lanes toward a "now" line) for the live in-progress view. Both
+  surface a per-string **live-note cell** showing the absolute pitch
+  class (e.g. `C`, `F#`) of the fret most recently committed on that
+  string — useful for sanity-checking that "fret 2 on the A string" is
+  what you actually played.
 - **Input device picker** — dropdown above the meter, populated via
   `navigator.mediaDevices.enumerateDevices()`. Persists in
   `localStorage` under `twanga-recorder-device-v1`. Hot-plug supported.
   No mid-take swap; the choice takes effect on the next Start.
-- **Mic-level meter + silence-threshold slider** — small RMS bar
-  surfaces "no signal" diagnostics (helps distinguish missing pitch
-  detection from a dead input; particularly useful on macOS where the
-  AudioContext can start suspended). The slider thumb overlays the
-  bar; drag to set the silence gate on the same dB axis. Persisted
-  under `twanga-recorder-silence-rms-v1`.
+- **Mic-level meter + silence-threshold slider + detected-note pill** —
+  small RMS bar surfaces "no signal" diagnostics (helps distinguish
+  missing pitch detection from a dead input; particularly useful on
+  macOS where the AudioContext can start suspended). The slider thumb
+  overlays the bar; drag to set the silence gate on the same dB axis.
+  A detected-note pill to the right shows the absolute pitch the
+  detector picked up (`A4`, `C#3`, etc.) — only populated while the
+  detector is firing (i.e. signal cleared the silence + YIN gates).
+  Persisted under `twanga-recorder-silence-rms-v1`.
 - **Save** — writes the take as `.alphatex` into the in-browser library
   (IndexedDB). Title field on the save dialog populates the alphaTex
   `\title` field and the derived row title in the library.

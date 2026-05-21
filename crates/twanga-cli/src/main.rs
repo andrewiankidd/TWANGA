@@ -2308,6 +2308,29 @@ fn run_playback(
         .collect();
     let name_width = labels.iter().map(|l| l.len()).max().unwrap_or(0);
 
+    // Per-string open MIDI (post-capo) so `render_playback_rows` can
+    // derive the absolute note name for the fret at the playhead
+    // column. Parsed from the tab's tuning_names + the resolved capo
+    // offsets so labels and notes stay in sync.
+    let open_midis: Vec<MidiNote> = tab
+        .tuning_names
+        .iter()
+        .enumerate()
+        .map(|(i, name)| {
+            let base = MidiNote::from_name(name).unwrap_or(MidiNote(0));
+            // Capo offsets are i32 (Capo allows reentrant-string drops
+            // in theory) but in practice for the live-note display
+            // we only care about positive offsets; clamp to [0, 127]
+            // and saturating_add into u8.
+            let off: u8 = header_capo
+                .as_ref()
+                .and_then(|c| c.offsets.get(i).copied())
+                .map(|o| o.clamp(0, 127) as u8)
+                .unwrap_or(0);
+            MidiNote(base.0.saturating_add(off))
+        })
+        .collect();
+
     eprintln!("Playback:   {}", path.display());
     if let Some(title) = tab.title.as_deref() {
         eprintln!("Title:      {title}");
@@ -2473,6 +2496,7 @@ fn run_playback(
             let rows = render_playback_rows(
                 &tab,
                 &labels,
+                &open_midis,
                 col_idx,
                 PLAYBACK_WINDOW_COLS,
                 name_width,
@@ -2552,9 +2576,14 @@ fn parse_loop_spec(spec: Option<&str>, total: usize) -> Result<(usize, usize, bo
 /// Render the playback view: one row per string showing a window of columns
 /// centred on `current_col`, with the current column bracketed. Last row is a
 /// `[col / total]` progress + `M:SS / M:SS` elapsed line.
+// Render-function args are inherently coupled (tab + view state +
+// timing for the status line). Splitting into a struct would just
+// move the noise around.
+#[allow(clippy::too_many_arguments)]
 fn render_playback_rows(
     tab: &ParsedTab,
     labels: &[String],
+    open_midis: &[MidiNote],
     current_col: usize,
     window_cols: usize,
     name_width: usize,
@@ -2579,12 +2608,17 @@ fn render_playback_rows(
             }
         }
         let padded = format!("{:<width$}", label, width = name_width);
-        rows.push(format!("{padded} | {content}"));
+        // Live-note cell: absolute note name (e.g. "B", "F#") for the
+        // fret being played on this string at the playhead column.
+        // Empty when this string isn't playing in the current column.
+        // 2-char-max fixed width keeps the tab-body alignment stable.
+        let note_cell = note_at_playhead(tab, string_idx, current_col, open_midis);
+        rows.push(format!("{padded} | {note_cell} | {content}"));
     }
 
     let pad = format!("{:<width$}", "", width = name_width);
     rows.push(format!(
-        "{pad}   col {}/{}  (bar {}, beat {})  {} / {}",
+        "{pad}        col {}/{}  (bar {}, beat {})  {} / {}",
         current_col + 1,
         tab.columns.len(),
         current_col / tab.columns[0].duration_denom as usize + 1,
@@ -2596,6 +2630,32 @@ fn render_playback_rows(
     ));
 
     rows
+}
+
+/// Pitch-class name (e.g. "C#", "F", "B") for the fret being played on
+/// `string_idx` at `current_col`. Two-char-wide left-padded so the
+/// tab-body column stays aligned even when the cell is empty.
+fn note_at_playhead(
+    tab: &ParsedTab,
+    string_idx: usize,
+    current_col: usize,
+    open_midis: &[MidiNote],
+) -> String {
+    let column = tab.columns.get(current_col);
+    let string_num = (string_idx + 1) as u8;
+    let fret = column.and_then(|c| {
+        c.hits
+            .iter()
+            .find(|(s, _)| *s == string_num)
+            .map(|(_, f)| *f)
+    });
+    match (fret, open_midis.get(string_idx)) {
+        (Some(fret), Some(open)) => {
+            let midi = MidiNote(open.0.saturating_add(fret));
+            format!("{:<2}", midi.pitch_class_name())
+        }
+        _ => "  ".to_string(),
+    }
 }
 
 /// Format seconds as `M:SS`. Shared between record + play; record uses it
