@@ -1,0 +1,11 @@
+{
+  "//": "Per-tool npm setup. The screenshot capture script depends on Playwright, which is too heavy to put at the repo root just to drive screencaps. Scoping it here keeps the rest of the workspace dep-free.",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "screenshots": "node capture-doc-screenshots.mjs"
+  },
+  "devDependencies": {
+    "playwright": "^1.60.0"
+  }
+}

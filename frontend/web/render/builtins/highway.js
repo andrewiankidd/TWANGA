@@ -33,6 +33,11 @@ class HighwayRenderer {
             // Same contract as the tab renderer's `preRoll` option;
             // the host calls setPreRoll(n) to keep it in sync.
             preRoll: 0,
+            // Note-circle label mode — 'fret' (default) shows the fret
+            // number on each note circle; 'note' shows the absolute
+            // pitch class ("C", "F#") given the string's open MIDI +
+            // capo offset. Same contract as the tab renderer.
+            cellLabel: 'fret',
             ...options,
         };
         this.score = null;
@@ -100,6 +105,30 @@ class HighwayRenderer {
         // CSS value, then reposition every note.
         this.nowLine.style.bottom = this._nowLineBottomPx();
         this._repositionAll();
+    }
+
+    /// Toggle note-circle labels between 'fret' and 'note'. Same
+    /// contract as the tab renderer. Unlike the tab, the highway can
+    /// update in-place without a rebuild — each note circle is an
+    /// already-tracked DOM node in `noteEls`. We re-derive the label
+    /// per note from the score state captured at rebuild time.
+    setCellLabel(mode) {
+        const next = mode === 'note' ? 'note' : 'fret';
+        if (next === this.options.cellLabel) return;
+        this.options.cellLabel = next;
+        this._refreshNoteCircleLabels();
+    }
+
+    _refreshNoteCircleLabels() {
+        if (!this.score || !this.noteEls) return;
+        const strings = this.score.tuning?.strings ?? [];
+        const capoOffsets = parseCapoForLabels(this.score.capoSpec, strings.length);
+        for (const { string: s, column: c, el } of this.noteEls) {
+            const fret = this.score.columns[c]?.[s];
+            el.textContent = formatCellLabel(
+                fret, strings[s]?.midi, capoOffsets[s] ?? 0, this.options.cellLabel,
+            );
+        }
     }
 
     destroy() {
@@ -213,7 +242,9 @@ class HighwayRenderer {
                 const fret = this.score.columns[c]?.[s];
                 if (fret == null) continue;
                 const note = document.createElement('div');
-                note.textContent = String(fret);
+                note.textContent = formatCellLabel(
+                    fret, strings[s]?.midi, capoOffsets[s] ?? 0, this.options.cellLabel,
+                );
                 Object.assign(note.style, {
                     position: 'absolute',
                     left: '50%',
@@ -304,6 +335,20 @@ class HighwayRenderer {
 const PITCH_CLASS_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 function pitchClassName(midi) {
     return PITCH_CLASS_NAMES[((midi % 12) + 12) % 12];
+}
+
+/// Format a single note-circle label. 'fret' shows the fret number,
+/// 'note' shows the absolute pitch class for that fret on this
+/// string (with capo applied). Duplicated in `tab.js` — see the
+/// parseCapoForLabels comment for the "hoist when more is needed"
+/// note. Returns `''` for empty cells (the highway only creates
+/// note elements for non-null frets so this branch is defensive).
+function formatCellLabel(fret, baseMidi, capoOffset, mode) {
+    if (fret == null) return '';
+    if (mode === 'note' && baseMidi != null) {
+        return pitchClassName(baseMidi + (capoOffset ?? 0) + fret);
+    }
+    return String(fret);
 }
 
 /// Parse a Capo spec string into per-string offsets. Duplicates the

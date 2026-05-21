@@ -8,6 +8,12 @@
 # Frontend
 /frontend/dist/
 /frontend/node_modules/
+
+# Tooling — npm setup for the doc-screenshot capture script. Real
+# Playwright dependency lives here so we don't pollute the repo root
+# with node_modules just to drive screencaps.
+/tools/node_modules/
+/tools/package-lock.json
 # wasm-bindgen build artifacts — regenerated from twanga-web via
 # `cargo build --target wasm32-unknown-unknown -p twanga-web --release`
 # followed by `wasm-bindgen --target web --out-dir frontend/web/pkg ...`.

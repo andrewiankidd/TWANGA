@@ -5,83 +5,24 @@ metronome. Wait mode pauses at each note until you play it. Loop a section or
 the whole file. Transpose onto a different instrument with the same alphaTex
 parser used everywhere else.
 
-## CLI — `twanga play [path]`
-
-```bash
-twanga play                                                        # interactive picker
-twanga play assets/examples/twinkle-twinkle-uke.alphatex --bpm 60 --wait
-```
-
-The audio loop is gated by either time (default) or detected input
-(`--wait`). In wait mode the cursor pauses on each note until the mic detects
-a matching pitch (±50 cents on any expected string/fret). Rests still advance
-with time so the metronome stays musical.
-
-Omit `path` to open an interactive picker that merges bundled examples,
-bundled patterns, and any `.alphatex` files in `./recordings/` — same
-library the GUI's Playback screen shows. The picker prefixes each row with
-`[example]` / `[pattern · <group>]` / `[recording]` so the source is clear.
-
-| Flag | Description |
-|------|-------------|
-| `path` (positional, optional) | Path to a `.alphatex` file. Omit to open the picker. |
-| `--tuning <slug>` | Re-tune the tab to a different instrument. Notes are transposed by absolute pitch. |
-| `--transpose-mode <drop\|octave-shift>` | What to do with notes that don't fit on the target tuning. `drop` (default) silently omits them and reports a "Skipped:" pre-flight summary. `octave-shift` retries each unreachable note at ±12-semitone offsets before giving up — the standard TuxGuitar / MuseScore convention. Particularly relevant for banjo→ukulele where bass drones would otherwise vanish. |
-| `--capo <spec>` | Capo applied to the tab's tuning. Precedence: `--capo` wins; otherwise falls back to whatever the file embedded in its `\subtitle` field. |
-| `--bpm <N>` | Override the tempo from the file. |
-| `--no-metronome` | Silence the click (default is on). |
-| `--wait` | Practice mode — cursor pauses at each note until you play it. |
-| `--loop` | Loop the entire file continuously. |
-| `--loop <START:END>` | Loop a column range (0-indexed, end exclusive). |
-| `--pre-roll <N>` | Audible count-in ticks before playback starts (0–16). Default 4. |
-| `--resume` | Auto-accept the saved bookmark for this file (if any) and jump to that column without the interactive prompt. Mirrors the GUI's "Resume" banner button. |
-| `--no-resume` | Auto-decline any saved bookmark. Useful in scripts where you want a predictable start from column 0 regardless of history. |
-| `--device "<name>"` | Wait-mode only. Substring-match against the audio input device list (see `twanga devices`). No-op without `--wait`. |
-| `--silence-rms <RMS>` | Wait-mode only. Override the silence-gate threshold (linear-amplitude window-RMS, 0..1; default 0.005 ≈ -46 dB). |
-
-Examples:
-
-```bash
-# Play the uke arrangement on uke
-twanga play assets/examples/twinkle-twinkle-uke.alphatex --bpm 60 --wait
-
-# Transpose it to banjo, loop the first phrase
-twanga play assets/examples/twinkle-twinkle-uke.alphatex \
-    --tuning standard-banjo --bpm 70 --loop 0:16
-
-# Same arrangement, with a capo on fret 3
-twanga play assets/examples/twinkle-twinkle-uke.alphatex --capo 3
-
-# Banjo tab on uke, octave-shifting bass drones up so they don't vanish
-twanga play assets/examples/cripple-creek-banjo.alphatex \
-    --tuning standard-ukulele --transpose-mode octave-shift
-```
-
-Controls during playback (all `+ Enter`):
-
-- `q` — stop (or Ctrl-C)
-- `p` — pause / resume
-- `[` / `]` — drop / raise the silence threshold by ~6 dB. Wait mode
-  only — no-op without `--wait` since no mic is open.
-
-**Last-session resume.** On any user-initiated stop, the CLI saves a
-bookmark (the file's path + the current column + a `when` timestamp) to
-`$CONFIG/twanga/play-resume.toml`. The next time you `twanga play` the
-same file, you're prompted to resume from that column (`Y/n`, default
-yes). Stale bookmarks pointing past the file's current length are
-silently cleared. Naturally-finished plays don't save a bookmark.
-Scripts can pass `--resume` (auto-accept) or `--no-resume` (auto-decline)
-to skip the prompt. Same shape as the GUI's resume banner, just per-file
-rather than most-recent-only.
+A last-session resume bookmark is saved per file (or per session) on stop, so
+re-opening the same tab offers to pick up where you left off. The library is
+the same on both surfaces — bundled public-domain examples plus your own
+recordings.
 
 ## GUI
 
 Open the Playback card from the main menu (or `#playback`).
 
 The screen has two views: a **library list** until a tab is loaded, then a
-**per-tab playback view** with transport + settings.
+**per-tab playback view** with transport + settings. The library shows the
+bundled public-domain examples that ship with every install — once you've
+recorded a take in the sibling Recorder, your recordings appear above the
+bundled rows (newest first).
 
 ### Library view
+
+![Playback library view](screenshots/playback.png)
 
 - **Tab rows** — bundled examples first, then user recordings (newest
   first). Each row shows the title, the tuning/instrument subtitle, and a
@@ -94,6 +35,15 @@ The screen has two views: a **library list** until a tab is loaded, then a
   column; **Dismiss** clears the bookmark.
 
 ### Per-tab playback view
+
+Two renderer choices — Tab (column-grid notation) and Highway (Rocksmith-
+style falling notes) — pair with two label modes (Frets / Notes) so you can
+focus on either the *position* you need to play or the *note* it produces.
+The same loaded tab in each combination:
+
+![Tab renderer with fret labels](screenshots/playback-tab-fret.png)
+
+![Highway renderer with note labels](screenshots/playback-highway-note.png)
 
 - **Tuning picker + capo** — same shared controller as Tuner / Recorder.
   Lets you transpose the loaded tab onto a different instrument before
@@ -132,6 +82,96 @@ Saved position (per-tab last column played) lives in `localStorage`
 under `twanga-playback-resume-v1`. Bookmark writes happen on Stop and on
 Back-to-library. "Finished" stops don't save (replaying from the end is
 useless).
+
+## CLI
+
+The audio loop is gated by either time (default) or detected input
+(`--wait`). In wait mode the cursor pauses on each note until the mic detects
+a matching pitch (±50 cents on any expected string/fret). Rests still advance
+with time so the metronome stays musical.
+
+```
+$ twanga play assets/examples/twinkle-twinkle-uke.alphatex --bpm 60
+
+════════════════════════════════════════════════════════════════
+████████ ██     ██  █████  ███    ██  ██████   █████
+   ██    ██     ██ ██   ██ ████   ██ ██       ██   ██
+   ██    ██  █  ██ ███████ ██ ██  ██ ██   ███ ███████
+   ██    ██ ███ ██ ██   ██ ██  ██ ██ ██    ██ ██   ██
+   ██     ███ ███  ██   ██ ██   ████  ██████  ██   ██
+════════════════════════════════════════════════════════════════
+  Track, Watch, Adjust, Notate, Grade, Again
+════════════════════════════════════════════════════════════════
+
+Title:   Twinkle Twinkle Little Star
+Tuning:  Standard Ukulele (Reentrant GCEA) (4 strings)
+Tempo:   60 BPM, 1/4 notes (1000 ms/col)
+Length:  32 cols (32000 ms)
+
+A4             | C  | 0 0 - - - - - - - - - - - - - -
+E4             | G  | - - - - - - - - - - - - - - - -
+C4             | C  | - - 3 3 - - - - 1 1 0 0 - - 2 2
+g4 (reentrant) |    | - - - - - - - - - - - - - - - -
+                       ^
+[col 2 / 32, 1.0s elapsed]
+```
+
+Omit `path` to open an interactive picker that merges bundled examples,
+bundled patterns, and any `.alphatex` files in `./recordings/` — same
+library the GUI's Playback screen shows. The picker prefixes each row with
+`[example]` / `[pattern · <group>]` / `[recording]` so the source is clear.
+
+More examples:
+
+```bash
+# Play the uke arrangement on uke
+twanga play assets/examples/twinkle-twinkle-uke.alphatex --bpm 60 --wait
+
+# Transpose it to banjo, loop the first phrase
+twanga play assets/examples/twinkle-twinkle-uke.alphatex \
+    --tuning standard-banjo --bpm 70 --loop 0:16
+
+# Same arrangement, with a capo on fret 3
+twanga play assets/examples/twinkle-twinkle-uke.alphatex --capo 3
+
+# Banjo tab on uke, octave-shifting bass drones up so they don't vanish
+twanga play assets/examples/cripple-creek-banjo.alphatex \
+    --tuning standard-ukulele --transpose-mode octave-shift
+```
+
+| Flag | Description |
+|------|-------------|
+| `path` (positional, optional) | Path to a `.alphatex` file. Omit to open the picker. |
+| `--tuning <slug>` | Re-tune the tab to a different instrument. Notes are transposed by absolute pitch. |
+| `--transpose-mode <drop\|octave-shift>` | What to do with notes that don't fit on the target tuning. `drop` (default) silently omits them and reports a "Skipped:" pre-flight summary. `octave-shift` retries each unreachable note at ±12-semitone offsets before giving up — the standard TuxGuitar / MuseScore convention. Particularly relevant for banjo→ukulele where bass drones would otherwise vanish. |
+| `--capo <spec>` | Capo applied to the tab's tuning. Precedence: `--capo` wins; otherwise falls back to whatever the file embedded in its `\subtitle` field. |
+| `--bpm <N>` | Override the tempo from the file. |
+| `--no-metronome` | Silence the click (default is on). |
+| `--wait` | Practice mode — cursor pauses at each note until you play it. |
+| `--loop` | Loop the entire file continuously. |
+| `--loop <START:END>` | Loop a column range (0-indexed, end exclusive). |
+| `--pre-roll <N>` | Audible count-in ticks before playback starts (0–16). Default 4. |
+| `--resume` | Auto-accept the saved bookmark for this file (if any) and jump to that column without the interactive prompt. Mirrors the GUI's "Resume" banner button. |
+| `--no-resume` | Auto-decline any saved bookmark. Useful in scripts where you want a predictable start from column 0 regardless of history. |
+| `--device "<name>"` | Wait-mode only. Substring-match against the audio input device list (see `twanga devices`). No-op without `--wait`. |
+| `--silence-rms <RMS>` | Wait-mode only. Override the silence-gate threshold (linear-amplitude window-RMS, 0..1; default 0.005 ≈ -46 dB). |
+
+Controls during playback (all `+ Enter`):
+
+- `q` — stop (or Ctrl-C)
+- `p` — pause / resume
+- `[` / `]` — drop / raise the silence threshold by ~6 dB. Wait mode
+  only — no-op without `--wait` since no mic is open.
+
+**Last-session resume.** On any user-initiated stop, the CLI saves a
+bookmark (the file's path + the current column + a `when` timestamp) to
+`$CONFIG/twanga/play-resume.toml`. The next time you `twanga play` the
+same file, you're prompted to resume from that column (`Y/n`, default
+yes). Stale bookmarks pointing past the file's current length are
+silently cleared. Naturally-finished plays don't save a bookmark.
+Scripts can pass `--resume` (auto-accept) or `--no-resume` (auto-decline)
+to skip the prompt. Same shape as the GUI's resume banner, just per-file
+rather than most-recent-only.
 
 ## Where things live
 

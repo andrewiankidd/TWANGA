@@ -870,10 +870,13 @@
             outline: none;
             border-color: var(--highlight);
         }
-        .rec-settings.is-recording .rec-setting,
-        .rec-settings.is-recording input,
-        .rec-settings.is-recording select,
-        .rec-settings.is-recording button {
+        /* While recording, grey out the structural settings (BPM,
+           Resolution, Block-width, Pre-roll) so the user can't
+           change the grid mid-take. Display-only cards opt OUT via
+           `.rec-setting.keep-active` — View / Labels / Metronome
+           stay interactive because they're rendering choices that
+           don't affect the captured tab. */
+        .rec-settings.is-recording .rec-setting:not(.keep-active) {
             opacity: 0.5;
             pointer-events: none;
         }
@@ -1452,7 +1455,63 @@
             margin: 0 0 0.8rem;
         }
         .docs-view strong { color: var(--primary); }
-        .docs-view img { max-width: 100%; height: auto; border-radius: 4px; }
+        /* Screenshots embedded in feature docs. Block-level so they
+           don't sit inline with paragraph text; bordered + drop-shadowed
+           so the dark-on-dark UI captures separate cleanly from the
+           docs page background. */
+        .docs-view img {
+            display: block;
+            max-width: 100%;
+            height: auto;
+            margin: 1rem auto;
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+        }
+        /* GUI / CLI tabs — injected by `_wrapDocsTabs` after a
+           feature doc is rendered. The markdown source stays plain
+           `## GUI` + `## CLI` so it still reads as a flat document
+           on GitHub / any other markdown viewer; only the in-app
+           shell collapses the two sections into a tabbed widget. */
+        .docs-tabs {
+            margin: 1rem 0 1.2rem;
+        }
+        .docs-tabs-bar {
+            display: flex;
+            gap: 0.25rem;
+            border-bottom: 1px solid var(--border);
+            margin-bottom: 1rem;
+        }
+        .docs-tab {
+            background: transparent;
+            border: 1px solid transparent;
+            border-bottom: none;
+            color: var(--muted);
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            font-size: 0.75rem;
+            padding: 0.45rem 1rem;
+            cursor: pointer;
+            border-radius: 4px 4px 0 0;
+            position: relative;
+            top: 1px;
+            font-family: inherit;
+        }
+        .docs-tab.active {
+            background: var(--card);
+            border-color: var(--border);
+            color: var(--highlight);
+            /* Pull the bottom border out from under the tab so the
+               active tab visually merges with the panel below it. */
+            border-bottom-color: var(--card);
+        }
+        .docs-tab:hover:not(.active) {
+            color: var(--primary);
+        }
+        .docs-tab-panel > *:first-child {
+            margin-top: 0;
+        }
         .docs-feature-grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
@@ -1655,13 +1714,40 @@
                  makeTuningController factory (see ./controllers/tuning.js). -->
             <div id="recorder-tuning-mount"></div>
 
+            <!-- All recorder settings in one flex-wrap container so cards
+                 pack densely into available width and reflow naturally
+                 when the viewport narrows. The single `#recorder-settings`
+                 host means `.is-recording` greys out structural cards
+                 together; display-only cards opt out via `keep-active`.
+                 Source order = mental-model order: display (most-toggled
+                 "lens"), then timing, then grid shape, then practice aids. -->
             <div class="rec-settings" id="recorder-settings">
+                <!-- Display lens — toggled most often during a session. -->
+                <div class="rec-setting keep-active">
+                    <label for="recorder-renderer-select">View</label>
+                    <select id="recorder-renderer-select"></select>
+                </div>
+                <div class="rec-setting keep-active">
+                    <label for="recorder-cell-label-select">Labels</label>
+                    <select id="recorder-cell-label-select">
+                        <option value="fret">Frets</option>
+                        <option value="note">Notes</option>
+                    </select>
+                </div>
+                <!-- Headline timing. -->
                 <div class="rec-setting">
                     <label for="recorder-bpm">BPM</label>
                     <button class="capo-btn" id="recorder-bpm-down" aria-label="Decrease BPM">−</button>
                     <input type="number" id="recorder-bpm" min="20" max="400" step="1" value="120">
                     <button class="capo-btn" id="recorder-bpm-up" aria-label="Increase BPM">+</button>
                 </div>
+                <div class="rec-setting" title="Count-in ticks before recording starts (0 disables)">
+                    <label for="recorder-preroll-input">Pre-roll</label>
+                    <button class="capo-btn" id="recorder-preroll-down" aria-label="Decrease pre-roll">−</button>
+                    <input type="number" id="recorder-preroll-input" min="0" max="16" step="1" value="4">
+                    <button class="capo-btn" id="recorder-preroll-up" aria-label="Increase pre-roll">+</button>
+                </div>
+                <!-- Grid shape — set once per take. -->
                 <div class="rec-setting">
                     <label for="recorder-resolution">Resolution</label>
                     <select id="recorder-resolution">
@@ -1677,24 +1763,12 @@
                     <input type="number" id="recorder-blockwidth" min="4" max="200" step="1" value="32">
                     <button class="capo-btn" id="recorder-blockwidth-up" aria-label="Increase block width">+</button>
                 </div>
-            </div>
-
-            <div class="rec-settings">
-                <div class="rec-setting">
-                    <label for="recorder-renderer-select">View</label>
-                    <select id="recorder-renderer-select"></select>
-                </div>
-                <div class="rec-setting">
+                <!-- Practice aids — set-and-forget. -->
+                <div class="rec-setting keep-active">
                     <label class="rec-toggle-label">
                         <input type="checkbox" id="recorder-metronome-toggle" checked>
                         Metronome
                     </label>
-                </div>
-                <div class="rec-setting" title="Count-in ticks before recording starts (0 disables)">
-                    <label for="recorder-preroll-input">Pre-roll</label>
-                    <button class="capo-btn" id="recorder-preroll-down" aria-label="Decrease pre-roll">−</button>
-                    <input type="number" id="recorder-preroll-input" min="0" max="16" step="1" value="4">
-                    <button class="capo-btn" id="recorder-preroll-up" aria-label="Increase pre-roll">+</button>
                 </div>
             </div>
 
@@ -1817,7 +1891,25 @@
                      choice immediately next to the choice itself. -->
                 <div class="form-error" id="playback-skipped-notes" hidden></div>
 
+                <!-- All playback settings in one flex-wrap container so
+                     cards pack densely into available width and reflow
+                     naturally when the viewport narrows. Source order =
+                     mental-model order: display (most-toggled "lens"),
+                     then timing, then loop range, then practice aids. -->
                 <div class="rec-settings">
+                    <!-- Display lens — toggled most often during a session. -->
+                    <div class="rec-setting">
+                        <label for="playback-renderer-select">View</label>
+                        <select id="playback-renderer-select"></select>
+                    </div>
+                    <div class="rec-setting">
+                        <label for="playback-cell-label-select">Labels</label>
+                        <select id="playback-cell-label-select">
+                            <option value="fret">Frets</option>
+                            <option value="note">Notes</option>
+                        </select>
+                    </div>
+                    <!-- Headline timing. -->
                     <div class="rec-setting">
                         <label for="playback-bpm">BPM</label>
                         <button class="capo-btn" id="playback-bpm-down" aria-label="Decrease BPM">−</button>
@@ -1825,6 +1917,13 @@
                         <button class="capo-btn" id="playback-bpm-up" aria-label="Increase BPM">+</button>
                         <button class="capo-btn" id="playback-bpm-reset" aria-label="Reset to file tempo" title="Reset to file tempo">↺</button>
                     </div>
+                    <div class="rec-setting" title="Count-in ticks before playback starts">
+                        <label for="playback-preroll-input">Pre-roll</label>
+                        <button class="capo-btn" id="playback-preroll-down" aria-label="Decrease pre-roll">−</button>
+                        <input type="number" id="playback-preroll-input" min="0" max="16" step="1" value="4">
+                        <button class="capo-btn" id="playback-preroll-up" aria-label="Increase pre-roll">+</button>
+                    </div>
+                    <!-- Content selection. -->
                     <div class="rec-setting">
                         <label for="playback-loop-mode">Loop</label>
                         <select id="playback-loop-mode">
@@ -1838,24 +1937,12 @@
                         <input type="number" id="playback-loop-end" min="1" step="1" value="20"
                                placeholder="end" title="loop end column (exclusive)" hidden>
                     </div>
-                </div>
-
-                <div class="rec-settings">
-                    <div class="rec-setting">
-                        <label for="playback-renderer-select">View</label>
-                        <select id="playback-renderer-select"></select>
-                    </div>
+                    <!-- Practice aids — set-and-forget. -->
                     <div class="rec-setting">
                         <label class="rec-toggle-label">
                             <input type="checkbox" id="playback-metronome-toggle" checked>
                             Metronome
                         </label>
-                    </div>
-                    <div class="rec-setting" title="Count-in ticks before playback starts">
-                        <label for="playback-preroll-input">Pre-roll</label>
-                        <button class="capo-btn" id="playback-preroll-down" aria-label="Decrease pre-roll">−</button>
-                        <input type="number" id="playback-preroll-input" min="0" max="16" step="1" value="4">
-                        <button class="capo-btn" id="playback-preroll-up" aria-label="Increase pre-roll">+</button>
                     </div>
                     <div class="rec-setting" title="Pause playhead until you play the next note">
                         <label class="rec-toggle-label">
@@ -3146,6 +3233,29 @@
         // requires zero changes here — the new plugin just appears in the
         // dropdown as soon as it's registered.
 
+        /// Wire a "Frets / Notes" select to a renderer controller.
+        /// Reads the saved choice from localStorage on mount, pushes
+        /// it into the controller, and re-saves whenever the user
+        /// changes it. Used identically by the Recorder + Playback
+        /// screens (same pattern as the device-picker / silence-
+        /// threshold helpers).
+        function wireCellLabelSelect({ selectId, storageKey, controller }) {
+            const select = el(selectId);
+            if (!select || !controller) return;
+            const saved = (() => {
+                try { return localStorage.getItem(storageKey); }
+                catch { return null; }
+            })();
+            const initial = saved === 'note' ? 'note' : 'fret';
+            select.value = initial;
+            controller.setCellLabel(initial);
+            select.addEventListener('change', () => {
+                const next = select.value === 'note' ? 'note' : 'fret';
+                controller.setCellLabel(next);
+                try { localStorage.setItem(storageKey, next); } catch {}
+            });
+        }
+
         function wireRendererHost({ selectId, hostId, storageKey, initialScore }) {
             const select = el(selectId);
             const host = el(hostId);
@@ -3188,6 +3298,7 @@
             // with preRoll=4.
             let activePlayhead = 0;
             let activePreRoll = 0;
+            let activeCellLabel = 'fret';
 
             const mount = (pluginId) => {
                 if (active) {
@@ -3199,18 +3310,25 @@
                 const plugin = rendererRegistry.get(pluginId);
                 if (!plugin) return;
                 try {
-                    // Pass the cached pre-roll as a constructor option so
-                    // the plugin's first setScore-driven rebuild already
-                    // includes the runway — avoids a double rebuild on
-                    // mount. Plugins that don't honour the option just
-                    // ignore it (highway + tab both do).
-                    active = plugin.create(host, { preRoll: activePreRoll });
+                    // Pass cached state as constructor options so the
+                    // plugin's first setScore-driven rebuild already
+                    // honours pre-roll + label mode — avoids extra
+                    // rebuilds on mount. Plugins that don't honour an
+                    // option just ignore it (highway + tab both do).
+                    active = plugin.create(host, {
+                        preRoll: activePreRoll,
+                        cellLabel: activeCellLabel,
+                    });
                     if (activeScore) active.setScore(activeScore);
-                    // Defensive: setPreRoll for plugins that DON'T accept
-                    // the constructor option. No-op on tab/highway since
-                    // activePreRoll already matches the constructed value.
+                    // Defensive: setPreRoll / setCellLabel for plugins
+                    // that DON'T accept the constructor options. No-op
+                    // on tab/highway since cached values already match
+                    // the constructed plugin state.
                     if (typeof active.setPreRoll === 'function') {
                         active.setPreRoll(activePreRoll);
+                    }
+                    if (typeof active.setCellLabel === 'function') {
+                        active.setCellLabel(activeCellLabel);
                     }
                     // Restore the host's current playhead — including
                     // negative values during pre-roll. Without this the
@@ -3239,10 +3357,14 @@
                     activeScore = score;
                     active?.setScore(score);
                     // setScore rebuilds the plugin's grid; re-apply
-                    // pre-roll + playhead so runway cells and the
-                    // playhead position survive the rebuild.
+                    // pre-roll + label mode + playhead so the runway,
+                    // cell labels, and playhead position all survive
+                    // the rebuild.
                     if (typeof active?.setPreRoll === 'function') {
                         active.setPreRoll(activePreRoll);
+                    }
+                    if (typeof active?.setCellLabel === 'function') {
+                        active.setCellLabel(activeCellLabel);
                     }
                     active?.setPlayhead(activePlayhead);
                 },
@@ -3254,6 +3376,12 @@
                     activePreRoll = Math.max(0, Math.floor(n) || 0);
                     if (typeof active?.setPreRoll === 'function') {
                         active.setPreRoll(activePreRoll);
+                    }
+                },
+                setCellLabel(mode) {
+                    activeCellLabel = mode === 'note' ? 'note' : 'fret';
+                    if (typeof active?.setCellLabel === 'function') {
+                        active.setCellLabel(activeCellLabel);
                     }
                 },
                 destroy() {
@@ -3393,6 +3521,11 @@
                 hostId: 'recorder-renderer-host',
                 storageKey: 'twanga-recorder-renderer-v1',
                 initialScore: recEmptyScoreOrSample(),
+            });
+            wireCellLabelSelect({
+                selectId: 'recorder-cell-label-select',
+                storageKey: 'twanga-recorder-cell-label-v1',
+                controller: recState.rendererController,
             });
 
             // Tuning + capo controller. Owns picker / capo stepper /
@@ -4312,6 +4445,11 @@
                 hostId: 'playback-renderer-host',
                 storageKey: 'twanga-playback-renderer-v1',
                 initialScore: sampleScore(),
+            });
+            wireCellLabelSelect({
+                selectId: 'playback-cell-label-select',
+                storageKey: 'twanga-playback-cell-label-v1',
+                controller: playbackState.rendererController,
             });
 
             renderPlaybackLibrary();
@@ -5533,11 +5671,23 @@
             try {
                 const md = await _fetchDoc(slug);
                 view.innerHTML = renderMarkdown(md);
+                // Rewrite relative image src so screenshots resolve
+                // against the bundled docs dir, not the app shell's
+                // root. Source paths like `screenshots/tuner.png`
+                // (which work on GitHub because the markdown file
+                // lives in `docs/features/`) need `assets/docs/`
+                // prepended to resolve from `app.html`.
+                _rewriteDocsImages(view);
                 // Rewrite relative links between feature pages so they
                 // route through the SPA's hash router instead of trying
                 // to load a `.md` file directly (which works on GH
                 // Pages with raw markdown but not inside the app shell).
                 _rewriteDocsLinks(view, slug);
+                // Collapse `## GUI` + `## CLI` sections into a tabbed
+                // widget. Doc-internal sections that follow CLI (e.g.
+                // "Where things live", "See also") stay outside the
+                // tabs since they're surface-agnostic.
+                _wrapDocsTabs(view);
             } catch (e) {
                 view.innerHTML = `<div class="docs-error">Failed to load "${escapeHtmlText(slug)}": ${escapeHtmlText(String(e?.message ?? e))}</div>`;
             }
@@ -5559,6 +5709,104 @@
                 + `<a href="https://github.com/andrewiankidd/TWANGA/blob/main/docs/GUI.md">GUI.md</a>. `
                 + `Full per-flag reference: `
                 + `<a href="https://github.com/andrewiankidd/TWANGA/blob/main/crates/twanga-cli/README.md">twanga-cli README</a>.</p>`;
+        }
+
+        /// Prepend `assets/docs/` to any relative image src so embedded
+        /// screenshots resolve against the bundled docs dir, not the
+        /// app-shell root. Markdown source paths like
+        /// `screenshots/tuner.png` work on GitHub (where the .md file
+        /// lives in `docs/features/`) but break in the SPA because the
+        /// base URL is `app.html`. Absolute / external URLs are left
+        /// alone.
+        function _rewriteDocsImages(viewEl) {
+            for (const img of viewEl.querySelectorAll('img[src]')) {
+                const src = img.getAttribute('src');
+                if (!src) continue;
+                if (/^https?:\/\//i.test(src)) continue;
+                if (src.startsWith('/') || src.startsWith('assets/')) continue;
+                img.setAttribute('src', `assets/docs/${src}`);
+            }
+        }
+
+        /// Collapse `## GUI` and `## CLI` sections into a tabbed
+        /// widget within a rendered docs page. Each tab gets the
+        /// elements that follow its heading until the next H2
+        /// (typically the other tab's heading, or a shared section
+        /// like "Where things live"). The H2s themselves are removed
+        /// — their text becomes the tab label. GUI is the default
+        /// active tab.
+        ///
+        /// No-op when the page doesn't contain BOTH headings (e.g.
+        /// `hardware.md` is a single-surface reference page). The
+        /// markdown source stays plain so any other markdown viewer
+        /// (GitHub web, IDE preview) renders the page as a flat
+        /// document with the two sections one after the other.
+        function _wrapDocsTabs(viewEl) {
+            const children = Array.from(viewEl.children);
+            let guiIdx = -1;
+            let cliIdx = -1;
+            let endIdx = children.length;
+            for (let i = 0; i < children.length; i++) {
+                const node = children[i];
+                if (node.tagName !== 'H2') continue;
+                const text = node.textContent.trim();
+                if (text === 'GUI' && guiIdx < 0) guiIdx = i;
+                else if (text === 'CLI' && cliIdx < 0) cliIdx = i;
+                else if (cliIdx >= 0 && endIdx === children.length) {
+                    // First H2 after CLI marks the end of the CLI
+                    // panel. Everything from here on stays outside
+                    // the tabs (Where things live / See also / etc.).
+                    endIdx = i;
+                }
+            }
+            if (guiIdx < 0 || cliIdx < 0) return;
+            if (guiIdx > cliIdx) return; // require GUI-first source order
+
+            const guiPanel = document.createElement('div');
+            guiPanel.className = 'docs-tab-panel';
+            guiPanel.dataset.tab = 'gui';
+            for (let i = guiIdx + 1; i < cliIdx; i++) {
+                guiPanel.appendChild(children[i]);
+            }
+
+            const cliPanel = document.createElement('div');
+            cliPanel.className = 'docs-tab-panel';
+            cliPanel.dataset.tab = 'cli';
+            cliPanel.hidden = true;
+            for (let i = cliIdx + 1; i < endIdx; i++) {
+                cliPanel.appendChild(children[i]);
+            }
+
+            const tabs = document.createElement('div');
+            tabs.className = 'docs-tabs';
+            const bar = document.createElement('div');
+            bar.className = 'docs-tabs-bar';
+            for (const label of ['GUI', 'CLI']) {
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = 'docs-tab' + (label === 'GUI' ? ' active' : '');
+                btn.dataset.tab = label.toLowerCase();
+                btn.textContent = label;
+                btn.addEventListener('click', () => {
+                    for (const b of bar.querySelectorAll('.docs-tab')) {
+                        b.classList.toggle('active', b === btn);
+                    }
+                    guiPanel.hidden = btn.dataset.tab !== 'gui';
+                    cliPanel.hidden = btn.dataset.tab !== 'cli';
+                });
+                bar.appendChild(btn);
+            }
+            tabs.appendChild(bar);
+            tabs.appendChild(guiPanel);
+            tabs.appendChild(cliPanel);
+
+            // Insert the tabs widget where the GUI H2 was, then
+            // remove the two H2 markers (their text is the tab label).
+            const guiH2 = children[guiIdx];
+            const cliH2 = children[cliIdx];
+            guiH2.parentNode.insertBefore(tabs, guiH2);
+            guiH2.remove();
+            cliH2.remove();
         }
 
         /// Rewrite cross-page links so they route through the SPA hash

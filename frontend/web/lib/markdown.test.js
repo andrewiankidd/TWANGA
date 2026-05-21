@@ -143,6 +143,32 @@ test('javascript: URLs are neutered defensively', () => {
     assert.match(html, /<a href="#">x<\/a>/);
 });
 
+// ── Images ────────────────────────────────────────────────────────────
+
+test('image syntax renders as <img>', () => {
+    const html = renderMarkdown('![Tuner screen](screenshots/tuner.png)');
+    assert.match(html, /<img src="screenshots\/tuner\.png" alt="Tuner screen">/);
+});
+
+test('image with empty alt still produces a valid tag', () => {
+    const html = renderMarkdown('![](foo.png)');
+    assert.match(html, /<img src="foo\.png" alt="">/);
+});
+
+test('image takes precedence over link (no stray "!" leftover)', () => {
+    // Without ordering, `![alt](url)` would match the link regex and
+    // leave a literal `!` in front of the resulting <a>.
+    const html = renderMarkdown('![alt](url)');
+    assert.doesNotMatch(html, /^!<a/);
+    assert.match(html, /<img /);
+});
+
+test('image javascript: URLs are neutered defensively', () => {
+    const html = renderMarkdown('![x](javascript:alert(1))');
+    assert.doesNotMatch(html, /javascript:/i);
+    assert.match(html, /<img src="#" alt="x">/);
+});
+
 // ── XSS / escaping ────────────────────────────────────────────────────
 
 test('raw HTML in paragraph text is escaped, not rendered', () => {

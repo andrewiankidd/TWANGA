@@ -13,6 +13,8 @@ and play through the same engine.
 
 Open the Patterns card from the main menu (or `#patterns`).
 
+![Patterns screen](screenshots/patterns.png)
+
 The screen renders a tree grouped by tradition. Each group has a short
 description and a list of patterns; each pattern row shows the title, the
 target tuning, and a difficulty marker.
@@ -48,6 +50,44 @@ twanga patterns                    # interactive picker (groups + difficulty pip
 twanga patterns list               # catalog dump — scriptable
 twanga patterns play <id>          # non-interactive play; loops by default
 twanga patterns path               # print the manifest path
+```
+
+`twanga patterns list` — catalog dump, same ordering as the GUI:
+
+```
+$ twanga patterns list
+
+════════════════════════════════════════════════════════════════
+████████ ██     ██  █████  ███    ██  ██████   █████
+   ██    ██     ██ ██   ██ ████   ██ ██       ██   ██
+   ██    ██  █  ██ ███████ ██ ██  ██ ██   ███ ███████
+   ██    ██ ███ ██ ██   ██ ██  ██ ██ ██    ██ ██   ██
+   ██     ███ ███  ██   ██ ██   ████  ██████  ██   ██
+════════════════════════════════════════════════════════════════
+  Try, Wait, Adjust, Notate, Grumble, Again
+════════════════════════════════════════════════════════════════
+
+Clawhammer (banjo)
+  Old-time banjo rhythmic patterns built around the bum-diddy figure: melody note + brush + drone-string pluck.
+  ★☆☆    Bum-diddy (basic)  (bum-diddy-basic-banjo, tuning: standard-banjo)
+  ★★☆    Bum-diddy with drop-thumb  (bum-diddy-drop-thumb-banjo, tuning: standard-banjo)
+
+Bluegrass picking (banjo)
+  Three-finger picking patterns. Loop them under tempo to lock in the muscle memory before applying them to a melody.
+  ★☆☆    Forward roll  (forward-roll-banjo, tuning: standard-banjo)
+  ★☆☆    Reverse roll  (reverse-roll-banjo, tuning: standard-banjo)
+  ★★☆    Alternating-thumb roll  (alternating-thumb-roll-banjo, tuning: standard-banjo)
+
+Ukulele strums
+  Simple strumming patterns over a held C-major shape (all open strings).
+  ★☆☆    Baseline strum (D-D-U-U-D-U)  (uke-baseline-strum, tuning: standard-ukulele)
+  ★☆☆    Waltz strum (3/4)  (uke-waltz-strum, tuning: standard-ukulele)
+  ★★☆    Island strum (D D-U U-D-U)  (uke-island-strum, tuning: standard-ukulele)
+
+Guitar (standard tuning)
+  Open-G chord drills. Both share the G shape (3 2 0 0 0 3 low → high).
+  ★☆☆    Boom-chick  (boom-chick-guitar, tuning: standard-guitar)
+  ★★☆    Travis picking  (travis-picking-guitar, tuning: standard-guitar)
 ```
 
 Examples:

@@ -30,6 +30,11 @@
 //                                   its own metaphor (tab: faded leading
 //                                   cells; highway: widened upper zone so
 //                                   col 0 is visible during the full count).
+//     setCellLabel(mode)          — body-cell label mode: 'fret' shows the
+//                                   fret number (default); 'note' shows the
+//                                   absolute pitch class for that fret on
+//                                   that string (open MIDI + capo offset).
+//                                   Unrecognised modes coerce to 'fret'.
 //
 // That's the entire contract. The renderer owns *everything* about its visual
 // layout (canvas vs DOM vs SVG, colours, sizing, animation). The host only

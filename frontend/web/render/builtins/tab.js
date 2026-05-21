@@ -44,6 +44,12 @@ class TabRenderer {
             // The host (playback / recorder) calls setPreRoll(N) to keep
             // this in sync with the user's pre-roll setting.
             preRoll: 0,
+            // Body-cell label mode — 'fret' (default) shows the fret
+            // number ("0", "3", "12"); 'note' shows the absolute pitch
+            // class ("C", "F#") that the fret produces given the string's
+            // open MIDI + capo offset. Same uniform contract on every
+            // renderer; host toggles via setCellLabel(mode).
+            cellLabel: 'fret',
             ...options,
         };
         this.score = null;
@@ -124,6 +130,23 @@ class TabRenderer {
         const next = Math.max(0, Math.floor(n) || 0);
         if (next === this.options.preRoll) return;
         this.options.preRoll = next;
+        if (this.score) {
+            this._rebuild();
+            this._positionPlayhead();
+        }
+    }
+
+    /// Toggle body-cell labels between 'fret' (default) and 'note'
+    /// (absolute pitch class). Same contract as the highway renderer.
+    /// Unrecognised modes are coerced to 'fret' so the host can't
+    /// drift the renderer into an undefined state. Triggers a rebuild
+    /// because every body cell's text content depends on the mode —
+    /// cheaper to rebuild than to track per-cell handles for a rare
+    /// toggle.
+    setCellLabel(mode) {
+        const next = mode === 'note' ? 'note' : 'fret';
+        if (next === this.options.cellLabel) return;
+        this.options.cellLabel = next;
         if (this.score) {
             this._rebuild();
             this._positionPlayhead();
@@ -338,7 +361,9 @@ class TabRenderer {
             for (let c = 0; c < numCols; c++) {
                 const cell = document.createElement('div');
                 const fret = columns[c]?.[s];
-                cell.textContent = fret == null ? '—' : String(fret);
+                cell.textContent = formatCellLabel(
+                    fret, strings[s]?.midi, capoOffsets[s] ?? 0, this.options.cellLabel,
+                );
                 const onBar = columnsPerBar > 0 && c > 0 && c % columnsPerBar === 0;
                 const isSelCol = interactive && c === selectedColumn;
                 Object.assign(cell.style, {
@@ -472,6 +497,21 @@ function parseCapoForLabels(spec, stringCount) {
     const n = Number.parseInt(spec, 10);
     if (!Number.isFinite(n) || n <= 0) return new Array(stringCount).fill(0);
     return new Array(stringCount).fill(n);
+}
+
+/// Format a single body-cell label. 'fret' mode shows the fret
+/// number (or '—' for an empty cell); 'note' mode shows the absolute
+/// pitch class for the fret on this string (with capo applied).
+/// Duplicated in highway.js — see the parseCapoForLabels comment
+/// for the "hoist when more renderers need it" note. Empty cells
+/// render the same dash in either mode so the user can still see
+/// the rhythmic grid.
+function formatCellLabel(fret, baseMidi, capoOffset, mode) {
+    if (fret == null) return '—';
+    if (mode === 'note' && baseMidi != null) {
+        return pitchClassName(baseMidi + (capoOffset ?? 0) + fret);
+    }
+    return String(fret);
 }
 
 /// Short text label for the top-left capo badge. "capo 3" for a

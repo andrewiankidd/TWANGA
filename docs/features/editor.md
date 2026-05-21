@@ -6,53 +6,22 @@ surface is a set of scriptable subcommands. Both write through the same
 `AlphaTexWriter` path the Recorder uses on save, so edited output is
 bit-for-bit indistinguishable from a fresh recording with the same notes.
 
-## CLI — `twanga edit <path> <action>`
-
-Each invocation applies one operation and writes the result back to the
-file in place. Pass `--out <path>` to write to a different file instead
-(handy for branching an edit without touching the original).
-
-| Action | Description |
-|--------|-------------|
-| `set <column> <string> <fret>` | Set a single cell. `string` is 1-based (string 1 = top of tab); `column` is 0-based; `fret` is any non-negative integer (no upper cap). |
-| `clear <column> <string>` | Clear a single cell. |
-| `clear-col <column>` | Clear every cell in the column (rest the entire beat). |
-| `insert-col [--after <n>]` | Insert a blank column. `--after N` inserts at position N+1; omit to append at the end. New column inherits the file's first column's duration. |
-| `delete-col <column>` | Delete the column at `column`. Columns after it shift down by one. |
-| `title <text>` | Set the `\title` directive. Pass `""` to clear. |
-| `bpm <n>` | Set the `\tempo` (20–400 BPM). |
-
-Examples:
-
-```bash
-# Bump string 1 / col 0 to fret 7 in twinkle
-twanga edit assets/examples/twinkle-twinkle-uke.alphatex set 0 1 7
-
-# Branch an edit to a new file instead of overwriting
-twanga edit my-take.alphatex --out my-take-edited.alphatex bpm 90
-
-# Insert a rest column at the start
-twanga edit foo.alphatex insert-col
-
-# Insert a column after column 7
-twanga edit foo.alphatex insert-col --after 7
-
-# Chain edits with a shell script — one op per invocation, file is the state
-twanga edit foo.alphatex set 0 1 3 && \
-twanga edit foo.alphatex set 0 2 0 && \
-twanga edit foo.alphatex title "Adjusted Take"
-```
-
-Each action returns 0 on success and a friendly error on out-of-range
-inputs (column past the file's end, string outside the tuning's range,
-etc.). The capo + subtitle round-trip correctly: the subtitle's human
-name + `; capo=...` annotation are both preserved.
+The CLI is one-shot-per-edit (great for scripting in a loop); the GUI is
+session-based with a dirty-state indicator and an explicit Save step. Both
+surfaces preserve the file's `\title`, `\subtitle`, capo annotation, and
+tuning across edits.
 
 ## GUI
 
 Open the Editor card from the main menu (or `#editor`). The screen has the
 same two-view shape as Playback: a **library list** first, then a
 **per-tab edit view** once a tab is loaded.
+
+![Editor screen](screenshots/editor.png)
+
+The library view shares its rows with Playback — bundled examples plus
+any user recordings. Each row has an **Edit** button instead of Play.
+Clicking it swaps the screen into the per-tab edit view described below.
 
 ### Library view
 
@@ -98,6 +67,58 @@ same two-view shape as Playback: a **library list** first, then a
 The serialised output goes through the same `serialize_recording` Rust
 path the Recorder uses on save, so the Editor's output is bit-for-bit
 indistinguishable from a fresh recording with the same notes.
+
+## CLI
+
+`twanga edit <path> <action>` applies one operation and writes the result
+back to the file in place. Pass `--out <path>` to write to a different file
+instead (handy for branching an edit without touching the original).
+
+```
+$ twanga edit my-take.alphatex set 0 1 7
+
+════════════════════════════════════════════════════════════════
+████████ ██     ██  █████  ███    ██  ██████   █████
+   ██    ██     ██ ██   ██ ████   ██ ██       ██   ██
+   ██    ██  █  ██ ███████ ██ ██  ██ ██   ███ ███████
+   ██    ██ ███ ██ ██   ██ ██  ██ ██ ██    ██ ██   ██
+   ██     ███ ███  ██   ██ ██   ████  ██████  ██   ██
+════════════════════════════════════════════════════════════════
+  Tweaks, Warps, Aligns, Notates, Grades, Analyses
+════════════════════════════════════════════════════════════════
+
+edit: set col 0, string 1, fret 7 → my-take.alphatex
+```
+
+More examples:
+
+```bash
+# Branch an edit to a new file instead of overwriting
+twanga edit my-take.alphatex --out my-take-edited.alphatex bpm 90
+
+# Insert a rest column at the start
+twanga edit foo.alphatex insert-col --after -1
+
+# Chain edits with a shell script — one op per invocation, file is the state
+twanga edit foo.alphatex set 0 1 3 && \
+twanga edit foo.alphatex set 0 2 0 && \
+twanga edit foo.alphatex title "Adjusted Take"
+```
+
+| Action | Description |
+|--------|-------------|
+| `set <column> <string> <fret>` | Set a single cell. `string` is 1-based (string 1 = top of tab); `column` is 0-based; `fret` is any non-negative integer (no upper cap). |
+| `clear <column> <string>` | Clear a single cell. |
+| `clear-col <column>` | Clear every cell in the column (rest the entire beat). |
+| `insert-col [--after <n>]` | Insert a blank column. `--after N` inserts at position N+1; omit to append at the end. New column inherits the file's first column's duration. |
+| `delete-col <column>` | Delete the column at `column`. Columns after it shift down by one. |
+| `title <text>` | Set the `\title` directive. Pass `""` to clear. |
+| `bpm <n>` | Set the `\tempo` (20–400 BPM). |
+
+Each action returns 0 on success and a friendly error on out-of-range
+inputs (column past the file's end, string outside the tuning's range,
+etc.). The capo + subtitle round-trip correctly: the subtitle's human
+name + `; capo=...` annotation are both preserved.
 
 ## Where things live
 

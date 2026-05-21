@@ -5,71 +5,24 @@ play; each detected pitch maps to the smallest non-negative fret on the active
 tuning. Capo, BPM, resolution, metronome, pre-roll count-in, and pause/resume
 all work identically on CLI and GUI.
 
-## CLI — `twanga record`
-
-```bash
-twanga record
-```
-
-Each detected pitch is mapped to the smallest non-negative fret position on the
-(capo'd) tuning, so a played D5 on uke registers as fret 5 on the A string, not
-fret 14 on the C string. A status line below the scrolling block tracks elapsed
-time, total columns, and (when non-zero) a count of pitches that didn't fit on
-the active fretboard.
-
-When a capo is set, logged frets are **capo-relative** (the musical
-convention) and the file's `\subtitle` field carries the capo via a
-`; capo=<spec>` suffix so the recording round-trips through playback without
-the user having to remember and re-pass the same value. Any `--title` you
-supply gets written to the alphaTex `\title` directive so playback (CLI or
-GUI) shows it in the header.
-
-| Flag | Description |
-|------|-------------|
-| `--tuning <slug>` | Built-in slug (see `twanga tunings list`) or user-defined. Omit to be prompted. |
-| `--capo <spec>` | Uniform integer (`--capo 3`) or per-string list (`--capo "0,2,2,2,2,2"`). |
-| `--bpm <N>` | Tempo (20–400). Prompted if omitted; default 120. |
-| `--resolution <1/N>` | Note value per column: `1/4`, `1/8`, `1/16`, `1/32`. Default `1/8`. |
-| `--block-width <N>` | Columns per scrolling block (4–200). Default 32. |
-| `--no-metronome` | Disable the metronome click on each beat (default: on). |
-| `--pre-roll <N>` | Audible count-in ticks before recording starts (0–16). Default 4. Always audible, even when `--no-metronome` is set. Aborts cleanly on Ctrl-C / `q + Enter`. |
-| `--title <text>` | Human-readable title — written to `\title` AND used to derive the filename (`<slug>-<unix-secs>.alphatex`). Blank input falls back to `recording-<unix-secs>.alphatex`. |
-| `--device "<name>"` | Substring-match against the audio input device list (see `twanga devices`). Omit to use the OS default. |
-| `--silence-rms <RMS>` | Override the silence-gate threshold (linear-amplitude window-RMS, 0..1; default 0.005 ≈ -46 dB). Lower for quiet plucks at the cost of more cable-hum / room-noise false positives. |
-
-Controls during a take (all `+ Enter`):
-
-- `q` — stop (or Ctrl-C)
-- `p` — pause / resume
-- `u` (while paused) — undo last committed column. Pops it from the
-  score and rewinds the sample counter so resume doesn't fire a
-  phantom catch-up click. Match for the GUI's "Undo last column"
-  button.
-- `[` / `]` — drop / raise the silence threshold by ~6 dB. Prints the
-  new value on its own line.
-
-Example output:
-
-```
-Tuning:     Standard Ukulele (Reentrant GCEA) (4 strings)
-Tempo:      120 BPM, 1/8 notes (250 ms/col)
-Block:      32 cols (8000 ms wide)
-Saving to:  recordings/recording-1779133041.alphatex
-
-A4             | A  | --------0000--------------------
-E4             | G  | ----------------11110000--------
-C4             | D  | 0000--------------------222200--
-g4 (reentrant) |    | ----0000----00------------------
-```
-
-The middle cell (`A`, `G`, `D` …) is the live-note column: the
-absolute pitch class for the last-committed fret on that string.
-Empty when the string isn't currently playing. Same shape on
-`twanga play` — see [playback](playback.md).
+When a capo is set, logged frets are **capo-relative** (the musical convention)
+and the file's `\subtitle` field carries the capo via a `; capo=<spec>` suffix
+so the recording round-trips through playback without the user having to
+remember and re-pass the same value. Any user-supplied title gets written to
+the alphaTex `\title` directive so playback shows it in the header.
 
 ## GUI
 
 Open the Recorder card from the main menu (or `#recorder`).
+
+![Recorder screen](screenshots/recorder.png)
+
+Settings flow in mental-model order: **display lens** (View, Labels)
+first since you'll re-toggle them mid-session, then **headline timing**
+(BPM, Pre-roll), then **grid shape** (Resolution, Block width) which is
+set once per take, then **practice aids** (Metronome). The cards pack
+horizontally and reflow on narrower viewports; structural cards grey
+out while recording is in-flight, display-only cards stay live.
 
 - **Tuning + capo** — same controller widget as the Tuner.
 - **BPM / resolution / block width** — number steppers with the same
@@ -107,6 +60,67 @@ Open the Recorder card from the main menu (or `#recorder`).
 
 State persists to `localStorage` (tuning + capo + BPM + resolution +
 block width + metronome flag + pre-roll value + last-used renderer).
+
+## CLI
+
+Each detected pitch is mapped to the smallest non-negative fret position on the
+(capo'd) tuning, so a played D5 on uke registers as fret 5 on the A string, not
+fret 14 on the C string. A status line below the scrolling block tracks elapsed
+time, total columns, and (when non-zero) a count of pitches that didn't fit on
+the active fretboard.
+
+```
+$ twanga record --tuning standard-ukulele --bpm 120
+
+════════════════════════════════════════════════════════════════
+████████ ██     ██  █████  ███    ██  ██████   █████
+   ██    ██     ██ ██   ██ ████   ██ ██       ██   ██
+   ██    ██  █  ██ ███████ ██ ██  ██ ██   ███ ███████
+   ██    ██ ███ ██ ██   ██ ██  ██ ██ ██    ██ ██   ██
+   ██     ███ ███  ██   ██ ██   ████  ██████  ██   ██
+════════════════════════════════════════════════════════════════
+  Tablature, Woodshed, Arrangement, Notation, Grade, Analytics
+════════════════════════════════════════════════════════════════
+
+Tuning:     Standard Ukulele (Reentrant GCEA) (4 strings)
+Tempo:      120 BPM, 1/8 notes (250 ms/col)
+Block:      32 cols (8000 ms wide)
+Saving to:  recordings/recording-1779133041.alphatex
+
+A4             | A  | --------0000--------------------
+E4             | G  | ----------------11110000--------
+C4             | D  | 0000--------------------222200--
+g4 (reentrant) |    | ----0000----00------------------
+```
+
+The middle cell (`A`, `G`, `D` …) is the live-note column: the
+absolute pitch class for the last-committed fret on that string.
+Empty when the string isn't currently playing. Same shape on
+`twanga play` — see [playback](playback.md).
+
+| Flag | Description |
+|------|-------------|
+| `--tuning <slug>` | Built-in slug (see `twanga tunings list`) or user-defined. Omit to be prompted. |
+| `--capo <spec>` | Uniform integer (`--capo 3`) or per-string list (`--capo "0,2,2,2,2,2"`). |
+| `--bpm <N>` | Tempo (20–400). Prompted if omitted; default 120. |
+| `--resolution <1/N>` | Note value per column: `1/4`, `1/8`, `1/16`, `1/32`. Default `1/8`. |
+| `--block-width <N>` | Columns per scrolling block (4–200). Default 32. |
+| `--no-metronome` | Disable the metronome click on each beat (default: on). |
+| `--pre-roll <N>` | Audible count-in ticks before recording starts (0–16). Default 4. Always audible, even when `--no-metronome` is set. Aborts cleanly on Ctrl-C / `q + Enter`. |
+| `--title <text>` | Human-readable title — written to `\title` AND used to derive the filename (`<slug>-<unix-secs>.alphatex`). Blank input falls back to `recording-<unix-secs>.alphatex`. |
+| `--device "<name>"` | Substring-match against the audio input device list (see `twanga devices`). Omit to use the OS default. |
+| `--silence-rms <RMS>` | Override the silence-gate threshold (linear-amplitude window-RMS, 0..1; default 0.005 ≈ -46 dB). Lower for quiet plucks at the cost of more cable-hum / room-noise false positives. |
+
+Controls during a take (all `+ Enter`):
+
+- `q` — stop (or Ctrl-C)
+- `p` — pause / resume
+- `u` (while paused) — undo last committed column. Pops it from the
+  score and rewinds the sample counter so resume doesn't fire a
+  phantom catch-up click. Match for the GUI's "Undo last column"
+  button.
+- `[` / `]` — drop / raise the silence threshold by ~6 dB. Prints the
+  new value on its own line.
 
 ## Where things live
 

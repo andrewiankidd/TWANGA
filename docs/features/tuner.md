@@ -6,50 +6,14 @@ indicators; chromatic mode (no instrument) snaps to the nearest 12-TET note.
 The same Rust YIN implementation drives both surfaces — CPAL audio in the CLI,
 Web Audio + AudioWorklet in the GUI, with the WASM bindings calling the
 identical `twanga-dsp::Tuner`. Cable hum and silence are gated out the same way
-on both.
-
-## CLI — `twanga tune`
-
-```bash
-twanga tune
-```
-
-Prompts for a tuning if `--tuning` is omitted; the prompt includes
-"(no instrument — chromatic tuner)" to disable per-string targets and just show
-the nearest 12-TET note. When a tuning is selected, prompts again for a capo
-position (default 0).
-
-| Flag | Description |
-|------|-------------|
-| `--tuning <slug>` | Any built-in slug (see `twanga tunings list`) or a user-defined one. Omit to be prompted. |
-| `--capo <spec>` | Uniform integer (`--capo 3`) or per-string list (`--capo "0,2,2,2,2,2"`). Omit to be prompted (uniform only via prompt). |
-| `--device "<name>"` | Substring-match against the audio input device list (see `twanga devices`). Omit to use the OS default. |
-| `--silence-rms <RMS>` | Override the silence-gate threshold (window-RMS in linear amplitude, 0..1; default 0.005 ≈ -46 dB). Lower for quieter plucks at the cost of more cable-hum / room-noise false positives. |
-
-Example output:
-
-```
-Tuning: Standard Ukulele (Reentrant GCEA) (4 strings)
-Device: Microphone (Default)
-Audio:  48000 Hz, 1 channel(s)
-
-A4               | current:    442.10 Hz | target:    440.00 Hz | Tune Down! (+8.2 cents)
-E4               | current:    326.40 Hz | target:    329.63 Hz | Tune Up! (-17.0 cents)
-C4               | current:    261.10 Hz | target:    261.63 Hz | Tuned! (-3.5 cents)
-g4 (reentrant)   | current:    392.10 Hz | target:    392.00 Hz | Tuned! (+0.4 cents)
-```
-
-Runtime keys (line-input, all `+ Enter`):
-
-- `q` — stop (or Ctrl-C)
-- `[` — drop silence threshold by ~6 dB (×0.5 RMS)
-- `]` — raise silence threshold by ~6 dB (×2 RMS)
-
-The threshold change prints a line like `[silence: 0.00500 RMS (-46.0 dB)]` so you can see what you've set. Useful when the default gate is rejecting genuine plucks; halve it twice and try again.
+on both. State (selected tuning, capo, silence threshold, input device) is
+persisted per-surface so the next launch starts where you left off.
 
 ## GUI
 
 Open the Tuner card from the main menu (or hash route `#tuner`).
+
+![Tuner screen](screenshots/tuner.png)
 
 - **Tuning picker** — built-in + user-defined tunings merged into one
   registry. First option is "chromatic (no instrument)" for a generic tuner.
@@ -71,10 +35,54 @@ Open the Tuner card from the main menu (or hash route `#tuner`).
   below → it doesn't. Same -6 dB / +6 dB intent as the CLI's
   `[` / `]` keys.
 
-State (selected tuning, capo, last-used renderer) persists to `localStorage`
-under `twanga-tuner-tuning-v1`. On Tauri the same shape will round-trip to
-`$CONFIG/twanga/tunings.toml` once the filesystem-sync command lands
-([see the ROADMAP](../ROADMAP.md)).
+State persists to `localStorage` under `twanga-tuner-tuning-v1`. On Tauri the
+same shape will round-trip to `$CONFIG/twanga/tunings.toml` once the
+filesystem-sync command lands ([see the ROADMAP](../ROADMAP.md)).
+
+## CLI
+
+Prompts for a tuning if `--tuning` is omitted; the prompt includes
+"(no instrument — chromatic tuner)" to disable per-string targets and just show
+the nearest 12-TET note. When a tuning is selected, prompts again for a capo
+position (default 0).
+
+```
+$ twanga tune --tuning standard-ukulele
+
+════════════════════════════════════════════════════════════════
+████████ ██     ██  █████  ███    ██  ██████   █████
+   ██    ██     ██ ██   ██ ████   ██ ██       ██   ██
+   ██    ██  █  ██ ███████ ██ ██  ██ ██   ███ ███████
+   ██    ██ ███ ██ ██   ██ ██  ██ ██ ██    ██ ██   ██
+   ██     ███ ███  ██   ██ ██   ████  ██████  ██   ██
+════════════════════════════════════════════════════════════════
+  Tuner, Waveforms, Arpeggios, Notation, Grading, Audio
+════════════════════════════════════════════════════════════════
+
+Tuning: Standard Ukulele (Reentrant GCEA) (4 strings)
+Device: Microphone (Default)
+Audio:  48000 Hz, 1 channel(s)
+
+A4               | current:    442.10 Hz | target:    440.00 Hz | Tune Down! (+8.2 cents)
+E4               | current:    326.40 Hz | target:    329.63 Hz | Tune Up! (-17.0 cents)
+C4               | current:    261.10 Hz | target:    261.63 Hz | Tuned! (-3.5 cents)
+g4 (reentrant)   | current:    392.10 Hz | target:    392.00 Hz | Tuned! (+0.4 cents)
+```
+
+| Flag | Description |
+|------|-------------|
+| `--tuning <slug>` | Any built-in slug (see `twanga tunings list`) or a user-defined one. Omit to be prompted. |
+| `--capo <spec>` | Uniform integer (`--capo 3`) or per-string list (`--capo "0,2,2,2,2,2"`). Omit to be prompted (uniform only via prompt). |
+| `--device "<name>"` | Substring-match against the audio input device list (see `twanga devices`). Omit to use the OS default. |
+| `--silence-rms <RMS>` | Override the silence-gate threshold (window-RMS in linear amplitude, 0..1; default 0.005 ≈ -46 dB). Lower for quieter plucks at the cost of more cable-hum / room-noise false positives. |
+
+Runtime keys (line-input, all `+ Enter`):
+
+- `q` — stop (or Ctrl-C)
+- `[` — drop silence threshold by ~6 dB (×0.5 RMS)
+- `]` — raise silence threshold by ~6 dB (×2 RMS)
+
+The threshold change prints a line like `[silence: 0.00500 RMS (-46.0 dB)]` so you can see what you've set. Useful when the default gate is rejecting genuine plucks; halve it twice and try again.
 
 ## Where things live
 
