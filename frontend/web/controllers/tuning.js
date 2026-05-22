@@ -489,6 +489,17 @@ export function makeTuningController(opts) {
 
     function init() {
         loadPersisted();
+        // Materialise the PresetEntry for the loaded slug. Without
+        // this, callers that rely on `getPresetEntry()` immediately
+        // after init (e.g. Playback computing the initial transpose
+        // on tab load) see `null` and skip the transposition entirely,
+        // leaving the renderer on the source tab's strings instead of
+        // the user's CURRENT_TUNING.
+        refreshPresetEntry();
+        // Compute the no-capo string labels for the per-string capo
+        // panel. Same reasoning — without this, the panel renders
+        // empty until the user picks a tuning manually.
+        state.baseLabels = computeBaseLabels(state.mode);
         renderPicker();
         // Capo wiring (uniform stepper + mode toggle):
         $(capoDownId).addEventListener('click', () => {
