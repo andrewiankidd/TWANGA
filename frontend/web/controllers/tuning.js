@@ -263,7 +263,16 @@ export function makeTuningController(opts) {
         } catch (e) {
             console.warn(`tuning-controller load failed for ${storageKey}`, e);
         }
-        state.mode = typeof saved.mode === 'string' ? saved.mode : null;
+        let mode = typeof saved.mode === 'string' ? saved.mode : null;
+        // Screens that don't include chromatic in their picker (Recorder,
+        // Playback) can still have `chromatic` saved in the shared key
+        // because the Tuner wrote it. Treat it as "no real tuning yet"
+        // so init() falls through to the first-builtin default rather
+        // than putting the controller into an unreachable mode.
+        if (mode === 'chromatic' && !includeChromatic) {
+            mode = null;
+        }
+        state.mode = mode;
         state.capoMode = saved.capoMode === 'per-string' ? 'per-string' : 'uniform';
         state.capo = Number.isInteger(saved.capo) && saved.capo >= 0 && saved.capo <= MAX_CAPO
             ? saved.capo : 0;
@@ -594,6 +603,45 @@ export function makeTuningController(opts) {
                     : (builtin_tuning_slugs()[0] ?? null);
                 if (fallback) select(fallback);
             }
+        },
+        /// Reload state from localStorage and re-render the UI. Used by
+        /// callers that share a `storageKey` across multiple screens —
+        /// when the user changes the tuning on one screen and navigates
+        /// to another, the second screen's controller (initialised
+        /// earlier) holds stale in-memory state. Calling `reload()` on
+        /// hashchange-in picks up the new shared value.
+        ///
+        /// Deliberately does NOT trigger `savePersisted` even if it
+        /// applies a local fallback (e.g. chromatic loaded into a
+        /// chromatic-disallowed picker). Reload is read-only; another
+        /// screen's saved state stays intact so navigating back doesn't
+        /// silently overwrite their choice.
+        reload() {
+            loadPersisted();
+            // Apply the same in-memory fallback `init()` would have
+            // applied on first mount, without persisting it.
+            const valid = new Set(allKnownSlugs());
+            if (state.mode && !valid.has(state.mode)) {
+                const fallback = includeChromatic
+                    ? 'chromatic'
+                    : (builtin_tuning_slugs()[0] ?? null);
+                state.mode = fallback;
+            }
+            state.baseLabels = computeBaseLabels(state.mode);
+            refreshPresetEntry();
+            renderPicker();
+            updateCapoDisplay();
+            renderPerStringCapo();
+            // Sync the `<select>`'s value with the reloaded slug — the
+            // picker was rebuilt above, but the active option's
+            // `selected` attribute may need a nudge.
+            const picker = $(pickerId);
+            if (picker && state.mode && picker.value !== state.mode) {
+                picker.value = state.mode;
+            }
+            // Notify consumers so they can re-render their views
+            // (transposition, renderer, etc.) against the new tuning.
+            onChange?.();
         },
     };
 }

@@ -2961,6 +2961,26 @@ fn wait_for_expected_note(
     stdin_rx: &std::sync::mpsc::Receiver<String>,
 ) -> Result<()> {
     let (stream, tuner) = input_state.as_mut().expect("wait mode needs input");
+
+    // Drain whatever audio has accumulated in the cpal stream since the
+    // last wait (or since the session began). Without this, the FIRST
+    // wait sees seconds of pre-wait mic buffering — pre-roll noise,
+    // mic-warmup transients, the user shuffling — and any of those
+    // happening to YIN-match the expected pitch exits the wait
+    // immediately. Symptom: "the first note always continues anyway
+    // even if I don't play." Drain feeds the tuner so calibration
+    // state advances, but then drops the resulting readings so we
+    // only ever accept readings produced by audio that arrived AFTER
+    // this wait started.
+    loop {
+        let n = stream.read(buf);
+        if n == 0 {
+            break;
+        }
+        tuner.feed(&buf[..n]);
+    }
+    let _ = tuner.take_readings();
+
     loop {
         if twanga_tui::is_shutdown_requested() {
             return Ok(());

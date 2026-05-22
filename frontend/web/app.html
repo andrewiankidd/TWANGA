@@ -2664,7 +2664,7 @@
             tunerController = makeTuningController({
                 mountId: 'tuner-tuning-mount',
                 prefix: 'tuner',
-                storageKey: STORAGE_KEY,
+                storageKey: CURRENT_TUNING_KEY,
                 includeChromatic: true,
                 onChange: () => rebuildTuner(),
             });
@@ -2750,6 +2750,17 @@
         const CENTS_FULL_SCALE = 50.0;
         const MAX_CAPO = 12;
         const STORAGE_KEY = 'twanga-tuner-v1';
+
+        /// Shared "current tuning" across the Tuner, Recorder, and
+        /// Playback screens. When a user picks a tuning on any of them
+        /// it becomes the global default for all three — the assumption
+        /// is "I'm playing this instrument right now," so the rest of
+        /// the app transposes / records against it without per-screen
+        /// re-selection. Chromatic (Tuner-only display option) is also
+        /// persisted here; non-chromatic screens fall back to the first
+        /// built-in when they load chromatic — see the loadPersisted
+        /// fallback in `controllers/tuning.js`.
+        const CURRENT_TUNING_KEY = 'twanga-current-tuning-v1';
 
         const tunerState = {
             tuner: null,            // active WebTuner instance
@@ -3185,13 +3196,19 @@
         }
 
         function stopMic() {
-            // Only react if WE are the active consumer; if Recorder took
-            // over via screen navigation, don't clobber its UI.
-            if (micSession.consumerName !== 'tuner') return;
-            micSession.stop();
+            // The tuner's button + hint reflect THIS screen's intent — they
+            // go stale if left saying "Stop mic" after the session was torn
+            // down by some other path (e.g. hashchange away from tuner →
+            // Playback → micSession.stop without ever calling stopMic).
+            // Always reset the tuner UI first; only tear down the session
+            // if WE are still the active consumer so we don't clobber a
+            // recorder that's currently using the mic.
             tunerState.micMeter?.stop();
             el('mic-btn').textContent = 'Start mic';
             el('tuner-hint').textContent = 'mic stopped';
+            if (micSession.consumerName === 'tuner') {
+                micSession.stop();
+            }
         }
 
         // Mic-session ownership on screen changes. Each mic-using screen
@@ -3208,8 +3225,31 @@
                 // Navigated INTO recorder — release tuner's mic.
                 stopMic();
             } else {
-                // Anywhere else — release whichever session is active.
+                // Anywhere else — reset tuner UI + release whichever
+                // session is active. Routing through stopMic ensures the
+                // tuner button text resets even when the consumer wasn't
+                // tuner (defensive against future code paths that leave
+                // the label saying "Stop mic" after teardown).
+                stopMic();
                 micSession.stop();
+            }
+        });
+
+        // Cross-screen CURRENT_TUNING sync. Tuner / Recorder / Playback
+        // all share a single localStorage key — when the user picks a
+        // tuning on one screen, the others' in-memory controller state
+        // goes stale (controllers are initialised once, never re-read
+        // localStorage). On hashchange-INTO any of those screens, call
+        // its controller's `reload()` so the picker + transposition
+        // reflect the latest shared selection.
+        window.addEventListener('hashchange', () => {
+            const screen = location.hash.replace(/^#/, '');
+            if (screen === 'tuner') {
+                tunerController?.reload();
+            } else if (screen === 'recorder') {
+                recState.tuning?.reload();
+            } else if (screen === 'playback') {
+                playbackState.tuning?.reload();
             }
         });
 
@@ -3806,7 +3846,7 @@
             recState.tuning = makeTuningController({
                 mountId: 'recorder-tuning-mount',
                 prefix: 'recorder',
-                storageKey: 'twanga-recorder-tuning-v1',
+                storageKey: CURRENT_TUNING_KEY,
                 includeChromatic: false,
                 onChange: () => recClear(),
             });
@@ -4994,30 +5034,42 @@
                 playbackState.tuning = makeTuningController({
                     mountId: 'playback-tuning-mount',
                     prefix: 'playback',
-                    storageKey: 'twanga-playback-tuning-v1',
+                    storageKey: CURRENT_TUNING_KEY,
                     includeChromatic: false,
                     onChange: () => playbackRecomputeTransposition(),
                 });
             }
 
-            // Prefer the file's tuning if it matches a registry entry —
-            // loading e.g. a uke tab while the controller is on guitar
-            // would otherwise silently transpose. Falls back to the
-            // controller's restored state (or first built-in for first-
-            // visit users) if no match is found; the "Skipped:" preamble
-            // surfaces any drops on the resulting transpose.
-            const fileSlug = matchRegistrySlugForTuningNames(parsed.tuning_names());
-            if (fileSlug) {
-                playbackState.tuning.select(fileSlug);
-                // File's embedded capo (from the `\subtitle ; capo=<spec>`
-                // convention) is only applied when the tuning matched.
-                // A capo spec for the wrong string count would be
-                // rejected by `setCapo` anyway.
-                const fileCapo = parsed.capo_spec();
-                if (fileCapo) playbackState.tuning.setCapo(fileCapo);
-            } else if (!playbackState.tuning.getMode()) {
+            // Honour the user's shared CURRENT_TUNING — the assumption
+            // is "I'm playing this instrument right now," so whatever
+            // they last picked (on any screen) wins. Loading a uke tab
+            // while the user is set up on banjo auto-transposes to
+            // banjo rather than reverting to uke. First-ever-visit
+            // (no saved tuning) seeds from the file's tuning when
+            // matchable, else the first built-in.
+            if (!playbackState.tuning.getMode()) {
+                const fileSlug = matchRegistrySlugForTuningNames(parsed.tuning_names());
                 const builtins = builtin_tuning_slugs();
-                if (builtins.length) playbackState.tuning.select(builtins[0]);
+                if (fileSlug) {
+                    playbackState.tuning.select(fileSlug);
+                } else if (builtins.length) {
+                    playbackState.tuning.select(builtins[0]);
+                }
+            }
+
+            // Auto-apply the file's capo ONLY when the user's current
+            // tuning matches the file's — capo specs are tied to a
+            // specific string count + open-string pitches, so they
+            // only round-trip cleanly when both sides agree. Cross-
+            // instrument loads leave the user's capo state alone;
+            // they can set one manually if the song calls for it.
+            const fileCapo = parsed.capo_spec();
+            if (fileCapo) {
+                const currentSlug = playbackState.tuning.getMode();
+                const fileSlug = matchRegistrySlugForTuningNames(parsed.tuning_names());
+                if (currentSlug && currentSlug === fileSlug) {
+                    playbackState.tuning.setCapo(fileCapo);
+                }
             }
 
             // Header
@@ -5785,6 +5837,15 @@
                     if (col && Array.isArray(col.hits) && col.hits.length > 0) {
                         playbackState.waitingForCol = newCol;
                         playbackState.waitStartedAt = performance.now();
+                        // Discard whatever readings the chromatic tuner
+                        // accumulated BEFORE this transition — pre-roll
+                        // metronome leakage, mic-warmup transients, or
+                        // any audio from before the user could've known
+                        // what column to play. Without this, the first
+                        // column's wait often matches instantly on
+                        // pre-wait audio. Subsequent transitions also
+                        // benefit (cheap; readings are usually empty).
+                        playbackState.chromaticTuner?.take_readings();
                     }
                 }
             }
