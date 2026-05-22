@@ -133,6 +133,58 @@ const SCREENS = [
         waitFor: '#editor-library-list .tab-library-row',
     },
     {
+        id: 'importer',
+        // Importer is a static drop-zone screen — no async load.
+        // Two shots: the empty drop-zone (pre-staged) and the
+        // post-parse preview card (after a non-alphaTex file has
+        // been "dropped"). We drive the preview shot with the ABC
+        // fixture rather than the MusicXML one because ABC carries
+        // no tuning info, which forces the parser to fall back to
+        // standard guitar and surface an `InferredTuning` warning —
+        // exercising the preflight-warning badge in the screenshot
+        // makes the importer's full UI surface visible to the docs
+        // reader.
+        shots: [
+            {
+                // 1) Empty drop-zone — the first-arrival shot.
+                name: 'importer',
+            },
+            {
+                // 2) Preview card populated after parsing a non-
+                //    alphaTex source. Shows the converter UI:
+                //    detected format, tempo, tuning (inferred),
+                //    column count, the InferredTuning warning, and
+                //    the Add-to-library / Discard actions.
+                name: 'importer-preview',
+                maxHeight: 1200,
+                async setup(page) {
+                    const fixture = resolve(
+                        REPO_ROOT,
+                        'crates',
+                        'twanga-tabs',
+                        'tests',
+                        'fixtures',
+                        'twinkle-twinkle.abc',
+                    );
+                    await page.setInputFiles('#importer-file-input', fixture);
+                    // The change handler runs an async parse via the
+                    // WASM bridge; wait until the preview card has
+                    // dropped its `hidden` attribute and the source-
+                    // format field has been populated with a non-
+                    // placeholder value.
+                    await page.waitForSelector('#importer-preview:not([hidden])', { timeout: 5000 });
+                    await page.waitForFunction(() => {
+                        const fmt = document.getElementById('importer-source-format');
+                        return fmt && fmt.textContent && fmt.textContent !== '—';
+                    }, { timeout: 5000 });
+                    // Brief settle so the layout reflow after the
+                    // preview card unhides is fully committed.
+                    await page.waitForTimeout(200);
+                },
+            },
+        ],
+    },
+    {
         id: 'tunings',
         // Tunings renders from the synchronous built-in registry +
         // a localStorage read; no fetch chain to wait on.

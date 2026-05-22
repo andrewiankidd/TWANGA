@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!DOCTYPE score-partwise PUBLIC
+    "-//Recordare//DTD MusicXML 3.1 Partwise//EN"
+    "http://www.musicxml.org/dtds/partwise.dtd">
+<!--
+  Twinkle Twinkle Little Star — MusicXML test fixture.
+
+  Public-domain melody: traditional, melody widely attributed to
+  Jean-Philippe Rameau (1761), popularised via Mozart's K. 265
+  variations and the English lyric by Jane Taylor (1806). All
+  comfortably out of copyright everywhere TWANGA ships.
+
+  This arrangement (string + fret assignments, columnisation,
+  encoded for the standard reentrant ukulele tuning A4/E4/C4/G4)
+  is released under MIT OR Apache-2.0, matching the rest of the
+  TWANGA repo.
+
+  Fixture only — exercises the MusicXML parser's element coverage
+  (work-title, identification creator, sound tempo, staff-tuning
+  for the reentrant ukulele, technical string+fret per note).
+  Mirrors assets/examples/twinkle-twinkle-uke.alphatex so the
+  cross-format integration test can assert the same melody parses
+  consistently from either source.
+-->
+<score-partwise version="3.1">
+  <work>
+    <work-title>Twinkle Twinkle Little Star</work-title>
+  </work>
+  <identification>
+    <creator type="composer">Traditional</creator>
+    <rights>Public domain melody. Arrangement under MIT or Apache-2.0.</rights>
+  </identification>
+  <part-list>
+    <score-part id="P1">
+      <part-name>Ukulele</part-name>
+    </score-part>
+  </part-list>
+  <part id="P1">
+    <measure number="1">
+      <attributes>
+        <divisions>2</divisions>
+        <staff-details number="1">
+          <staff-lines>4</staff-lines>
+          <staff-tuning line="1"><tuning-step>G</tuning-step><tuning-octave>4</tuning-octave></staff-tuning>
+          <staff-tuning line="2"><tuning-step>C</tuning-step><tuning-octave>4</tuning-octave></staff-tuning>
+          <staff-tuning line="3"><tuning-step>E</tuning-step><tuning-octave>4</tuning-octave></staff-tuning>
+          <staff-tuning line="4"><tuning-step>A</tuning-step><tuning-octave>4</tuning-octave></staff-tuning>
+        </staff-details>
+      </attributes>
+      <sound tempo="100"/>
+      <!-- "Twinkle twinkle" — C C on the C string (string 2 in
+           MusicXML's bottom-up indexing = the C4 line). -->
+      <note>
+        <pitch><step>C</step><octave>4</octave></pitch>
+        <duration>2</duration>
+        <technical><string>2</string><fret>0</fret></technical>
+      </note>
+      <note>
+        <pitch><step>C</step><octave>4</octave></pitch>
+        <duration>2</duration>
+        <technical><string>2</string><fret>0</fret></technical>
+      </note>
+      <!-- "little star" — G G on the E string fret 3 (string 3 = E4). -->
+      <note>
+        <pitch><step>G</step><octave>4</octave></pitch>
+        <duration>2</duration>
+        <technical><string>3</string><fret>3</fret></technical>
+      </note>
+      <note>
+        <pitch><step>G</step><octave>4</octave></pitch>
+        <duration>2</duration>
+        <technical><string>3</string><fret>3</fret></technical>
+      </note>
+    </measure>
+    <measure number="2">
+      <!-- "How I wonder" — A A on the A string fret 0 (string 4 = A4). -->
+      <note>
+        <pitch><step>A</step><octave>4</octave></pitch>
+        <duration>2</duration>
+        <technical><string>4</string><fret>0</fret></technical>
+      </note>
+      <note>
+        <pitch><step>A</step><octave>4</octave></pitch>
+        <duration>2</duration>
+        <technical><string>4</string><fret>0</fret></technical>
+      </note>
+      <!-- "what you are" — G (E string fret 3) then a quarter rest. -->
+      <note>
+        <pitch><step>G</step><octave>4</octave></pitch>
+        <duration>2</duration>
+        <technical><string>3</string><fret>3</fret></technical>
+      </note>
+      <note>
+        <rest/>
+        <duration>2</duration>
+      </note>
+    </measure>
+  </part>
+</score-partwise>

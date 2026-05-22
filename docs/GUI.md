@@ -9,10 +9,13 @@ served two ways:
 - **Desktop (Tauri)** — [`crates/twanga-app/`](../crates/twanga-app/)
   wraps the same bundle in a native window. The shell now reads + writes
   the same filesystem the CLI does: recordings land in
-  `$CONFIG/twanga/recordings/` (visible to `twanga play` immediately),
-  user tunings sync with `$CONFIG/twanga/tunings.toml` (the file
-  `twanga tunings add` writes), and external-link clicks open in the
-  OS browser via the shell plugin.
+  `<data-root>/recordings/` (visible to `twanga play` immediately),
+  imported tabs in `<data-root>/library/`, and user tunings sync with
+  `<data-root>/tunings.toml` (the file `twanga tunings add` writes).
+  `<data-root>` is `~/twanga/` by default or a portable dir next to
+  the binary — see
+  [Paths and portable mode](features/user-guide.md#paths-and-portable-mode).
+  External-link clicks open in the OS browser via the shell plugin.
 
 Feature parity with the CLI ([docs/CLI.md](CLI.md)) is enforced — every
 flag on `twanga` has an equivalent GUI control, and vice versa.
@@ -31,8 +34,10 @@ in one place.
 | Playback | `#playback` | [features/playback.md](features/playback.md) |
 | Patterns | `#patterns` | [features/patterns.md](features/patterns.md) |
 | Tab editor | `#editor` | [features/editor.md](features/editor.md) |
+| Importer | `#importer` | [features/importer.md](features/importer.md) |
 | Tunings | `#tunings` | [features/tunings.md](features/tunings.md) |
 | Hardware | (setup guide — `#docs/hardware`) | [features/hardware.md](features/hardware.md) |
+| User guide | `#docs/user-guide` | [features/user-guide.md](features/user-guide.md) |
 | Docs | `#docs` | (the per-feature pages above, rendered inline) |
 
 ## Running it
@@ -112,12 +117,18 @@ Editor screens reminding the user that browser storage can be evicted
 each entry shows a "Backed up &lt;when&gt; / Never backed up" tag.
 
 **The Tauri desktop shell swaps both backends for the filesystem.**
-Recordings live at `$CONFIG/twanga/recordings/` and user tunings at
-`$CONFIG/twanga/tunings.toml` — the same paths `twanga record` /
-`twanga tunings add` use. The storage warning is hidden under Tauri
-(no eviction possible). A new tuning defined in the GUI shows up in
-`twanga tunings list` immediately; a tab recorded via `twanga record`
+Recordings live at `<data-root>/recordings/`, imported tabs at
+`<data-root>/library/`, and user tunings at `<data-root>/tunings.toml`
+— the same paths `twanga record` / `twanga import` / `twanga tunings
+add` use. `<data-root>` is `~/twanga/` by default, or
+`<binary-dir>/twanga-data/` when portable mode is enabled (drop a
+`twanga.portable` file next to the binary). The storage warning is
+hidden under Tauri (no eviction possible). A new tuning defined in
+the GUI shows up in `twanga tunings list` immediately; a tab
+recorded via `twanga record` or imported via `twanga import`
 appears in the GUI's Playback library. See
+[Paths and portable mode](features/user-guide.md#paths-and-portable-mode)
+for the full layout, and
 [`crates/twanga-app/README.md`](../crates/twanga-app/README.md) for
 the Tauri command list.
 
@@ -138,7 +149,7 @@ host: a small registry + plugin shape lives in
 - **Tab** — column-grid notation, the same view as the CLI's scrolling
   tab. The Editor uses an `interactive: true` variant of this same
   plugin for cell-by-cell editing.
-- **Highway** — Rocksmith-style falling notes, full-width playhead.
+- **Highway** — falling-notes view, full-width playhead.
 
 Both register through the same path a third-party plugin would. The
 renderer picker on each screen is populated from the registry; there's

@@ -84,11 +84,14 @@ struct PatternsManifest {
     groups: Vec<PatternGroup>,
 }
 
-/// One `.alphatex` file under `./recordings/`. Title is best-effort:
-/// we parse the `\title` directive out of the file if present, otherwise
-/// fall back to the filename stem.
+/// One `.alphatex` file living somewhere on the local filesystem —
+/// either a recording (`<root>/recordings/`) or an imported tab
+/// (`<root>/library/`). Title is best-effort: we parse the `\title`
+/// directive out of the file if present, otherwise fall back to the
+/// filename stem. Both use sites share this shape so the picker
+/// pipeline doesn't fork.
 #[derive(Debug, Clone)]
-pub struct RecordingEntry {
+pub struct LocalTabEntry {
     /// Filesystem path (relative or absolute — whatever discovery used).
     pub path: PathBuf,
     /// Human-readable label for the picker. Either the file's `\title`
@@ -116,6 +119,17 @@ pub fn recordings_dir_path() -> PathBuf {
     twanga_paths::data_root()
         .map(|r| r.recordings_dir())
         .unwrap_or_else(|| PathBuf::from("recordings"))
+}
+
+/// Default location of the user-imports library dir. Same resolution
+/// rules as [`recordings_dir_path`]. Holds `.alphatex` files brought
+/// in via the GUI Importer or `twanga import` — distinct from
+/// recordings (which are live captures from this machine) so the
+/// file-system layout mirrors the data model.
+pub fn library_dir_path() -> PathBuf {
+    twanga_paths::data_root()
+        .map(|r| r.library_dir())
+        .unwrap_or_else(|| PathBuf::from("library"))
 }
 
 /// Load + parse the bundled-examples manifest. Returns an empty list
@@ -160,8 +174,10 @@ pub fn load_patterns() -> Result<Vec<PatternGroup>> {
 
 /// Scan a directory for `*.alphatex` files. Skips on missing dir
 /// (returns empty). Sort order: most-recently-modified first — matches
-/// the GUI's IDB list, which is `createdAt DESC`.
-pub fn scan_recordings_at(dir: &Path) -> Result<Vec<RecordingEntry>> {
+/// the GUI's IDB list, which is `createdAt DESC`. Generic over which
+/// dir is passed in; thin wrappers below resolve the recordings vs
+/// library locations.
+pub fn scan_alphatex_dir(dir: &Path) -> Result<Vec<LocalTabEntry>> {
     if !dir.exists() {
         return Ok(Vec::new());
     }
@@ -185,17 +201,24 @@ pub fn scan_recordings_at(dir: &Path) -> Result<Vec<RecordingEntry>> {
             let title = title_from_alphatex(&path).unwrap_or_else(|_| {
                 path.file_stem()
                     .and_then(|s| s.to_str())
-                    .unwrap_or("recording")
+                    .unwrap_or("tab")
                     .to_string()
             });
-            RecordingEntry { path, title }
+            LocalTabEntry { path, title }
         })
         .collect())
 }
 
-/// Production wrapper around [`scan_recordings_at`].
-pub fn scan_recordings() -> Result<Vec<RecordingEntry>> {
-    scan_recordings_at(&recordings_dir_path())
+/// Production wrapper: scan the recordings dir at its resolved location.
+pub fn scan_recordings() -> Result<Vec<LocalTabEntry>> {
+    scan_alphatex_dir(&recordings_dir_path())
+}
+
+/// Production wrapper: scan the imports library dir at its resolved
+/// location. Same shape as [`scan_recordings`] so the picker can
+/// merge both lists without forking.
+pub fn scan_library() -> Result<Vec<LocalTabEntry>> {
+    scan_alphatex_dir(&library_dir_path())
 }
 
 /// Cheap title extraction — read the first ~200 bytes of the file and
@@ -409,14 +432,14 @@ mod tests {
     }
 
     #[test]
-    fn scan_recordings_skips_non_alphatex_and_handles_missing_dir() {
-        let dir = scratch_dir("recordings_scan");
-        let recordings = dir.join("recordings");
-        fs::create_dir_all(&recordings).unwrap();
-        fs::write(recordings.join("a.alphatex"), "\\title \"A\"\n").unwrap();
-        fs::write(recordings.join("b.alphatex"), "no title here\n").unwrap();
-        fs::write(recordings.join("notes.txt"), "not a tab").unwrap();
-        let entries = scan_recordings_at(&recordings).expect("scan");
+    fn scan_alphatex_dir_skips_non_alphatex_and_handles_missing_dir() {
+        let dir = scratch_dir("alphatex_scan");
+        let tabs = dir.join("tabs");
+        fs::create_dir_all(&tabs).unwrap();
+        fs::write(tabs.join("a.alphatex"), "\\title \"A\"\n").unwrap();
+        fs::write(tabs.join("b.alphatex"), "no title here\n").unwrap();
+        fs::write(tabs.join("notes.txt"), "not a tab").unwrap();
+        let entries = scan_alphatex_dir(&tabs).expect("scan");
         assert_eq!(entries.len(), 2, "should ignore the .txt file");
         // Title parsing picks up the \title directive when present.
         let titles: Vec<String> = entries.iter().map(|e| e.title.clone()).collect();
@@ -425,7 +448,28 @@ mod tests {
         assert!(titles.contains(&"b".to_string()));
 
         let absent = dir.join("does-not-exist");
-        let empty = scan_recordings_at(&absent).expect("missing dir → empty");
+        let empty = scan_alphatex_dir(&absent).expect("missing dir → empty");
         assert!(empty.is_empty());
+    }
+
+    #[test]
+    fn library_dir_path_and_recordings_dir_path_are_distinct() {
+        // Confirms the two wrappers resolve to different subdirs so a
+        // recording write doesn't accidentally land in the library
+        // listing and vice versa. Goes through the real data-root
+        // resolver; we only check that the two paths don't collide.
+        let recs = recordings_dir_path();
+        let lib = library_dir_path();
+        assert_ne!(
+            recs, lib,
+            "recordings and library dirs must resolve to distinct paths"
+        );
+        // Subdir names should be the documented `recordings/` and
+        // `library/` regardless of the data-root mode.
+        assert_eq!(
+            recs.file_name().and_then(|s| s.to_str()),
+            Some("recordings")
+        );
+        assert_eq!(lib.file_name().and_then(|s| s.to_str()), Some("library"));
     }
 }

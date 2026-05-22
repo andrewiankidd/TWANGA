@@ -10,6 +10,81 @@ dated section.
 
 ### Added
 
+- **Tab importer — MIDI / ABC notation / ASCII tab.** Three new
+  open-format parsers extend the importer beyond alphaTex /
+  MusicXML / MXL. CLI (`twanga import` / `twanga convert`), WASM
+  bridge, and GUI Importer all gain `.mid` / `.midi` / `.abc` /
+  `.tab` support in parity; ambiguous `.txt` now content-sniffs to
+  decide alphaTex vs ASCII tab. MIDI uses the first note-bearing
+  track (others surface as `ParseWarning::SkippedTrack`); MIDI / ABC
+  / non-recognised ASCII surface a `ParseWarning::InferredTuning`
+  since those formats carry no string/fret data. ASCII tab labels
+  are matched against the built-in tuning registry exactly first
+  (so `D B G D g` pins to banjo cleanly), then fall back to
+  nearest-by-string-count.
+- **Articulation preserved through ASCII tab → alphaTex.**
+  `TabColumn` now carries `articulation: Option<u8>` and the
+  alphaTex writer + parser round-trip the `h` (hammer-on), `p`
+  (pull-off), `s` (slide) prefixes. The data survives even though
+  TWANGA's playback / renderer don't yet consume it — backlog
+  entry tracks wiring it through the rest of the stack.
+- **`.txt` content sniffing.** `.txt` no longer assumes alphaTex;
+  the resolver now peeks the first 8 KiB and routes the file to
+  alphaTex or ASCII tab based on which format's shape dominates
+  (backslash directives vs string-label-pipe-content lines).
+  `--from` still overrides unconditionally.
+- **Tab importer — MusicXML / MXL / alphaTex, CLI + GUI parity.**
+  TWANGA now ingests external tab files into the user library
+  (`<data-root>/library/`, distinct from `recordings/`) via a
+  shared conversion pipeline. Lands as the format-agnostic "tab
+  ingestion Phase 2" on the roadmap.
+  - **`twanga-paths::DataRoot::library_dir()`** — `<root>/library/`,
+    parallel to `recordings_dir()`. Both resolve through the
+    portable / home modes; both have CLI scanning helpers
+    (`bundled::scan_recordings` + `bundled::scan_library`) and
+    Tauri shim coverage (`list_library_tabs` / `load_library_tab`
+    / `save_library_tab` / `update_library_tab` /
+    `delete_library_tab`).
+  - **`twanga-tabs::musicxml`** — new MusicXML 3.1 partwise
+    parser via `quick-xml` (streaming pull-parser, no DOM allocation).
+    Covers `<work-title>` / `<creator>` / `<sound tempo>` /
+    `<staff-tuning>` / `<staff-details><capo>` / `<note>` (incl.
+    `<chord/>` chord members, `<rest>`, `<technical><string>` +
+    `<fret>` explicit placements, and pitch-only notes inferred
+    against the staff tuning). Surfaces non-fatal observations
+    (irregular durations, unreachable notes, missing string
+    tuning) via a `ParseWarning` enum so the importer UI can
+    show a preflight summary. `.mxl` (zipped MusicXML, the
+    MuseScore default export) supported via `musicxml::parse_mxl`
+    — container manifest read first, fallback to "first
+    `.xml`/`.musicxml` entry in the archive".
+  - **`twanga import <path>`** — accepts `.alphatex` /
+    `.musicxml` / `.xml` / `.mxl`, format detection by extension
+    (override via `--from`). Title override via `--title`.
+    Writes to `<data-root>/library/<slug>-<unix-secs>.alphatex`,
+    same filename convention as `twanga record`.
+  - **`twanga convert <input> --out <output>`** — sibling
+    stateless transform (no library involvement). Useful for
+    scripting bulk MusicXML→alphaTex conversion before importing.
+  - **GUI Importer screen** — dedicated `#importer` route from the
+    main menu. Drop-zone accepts the same extensions as the CLI;
+    parses via WASM (`parse_musicxml` / `parse_mxl` /
+    `parse_alphatex`); preview card shows title / source / tempo /
+    tuning / column count + any parse warnings before the user
+    commits. Title is editable in the preview before "Add to
+    library". The previous Playback drop-zone was removed —
+    `#importer` is the single entry point now.
+  - **Format-agnostic `ParsedTab`** — promoted from `alphatex` to
+    the `twanga_tabs` crate root via `pub use` so both parsers
+    return the canonical type without weird namespacing. Existing
+    `alphatex::ParsedTab` paths still work (re-export).
+  - **CLI picker** — `twanga play` with no path now also lists
+    imported tabs alongside bundled examples / patterns /
+    recordings, with an `[imported]` prefix.
+  - **New `docs/features/importer.md`** with the standard
+    GUI / CLI tabs. CLI's `twanga docs importer` + the in-app
+    docs viewer both surface it.
+
 - **Pre-roll runway on every renderer (uniform contract, no view-
   specific hacks).** Both built-in renderers — Tab and Highway — now
   implement an optional `setPreRoll(n)` method declaring the count-in
@@ -35,10 +110,10 @@ dated section.
     stays visible for the FULL count-in. (Previously: with `preRoll=16`
     and `lookahead=10`, the first 6 count-in ticks showed nothing.)
   - **Note-landing math fix** — a `delta=0` note now lands with its
-    BOTTOM edge on the line top (Guitar-Hero/Rocksmith style) instead
-    of its centre straddling the line. The renderer comment already
-    promised "notes land on this line at their moment in time" — the
-    geometry now matches.
+    BOTTOM edge on the line top (falling-notes-strike geometry)
+    instead of its centre straddling the line. The renderer comment
+    already promised "notes land on this line at their moment in
+    time" — the geometry now matches.
   - **View-switch state caching** — `wireRendererHost` in `app.html`
     caches the host's current score, playhead, and pre-roll, and
     replays all three on every mount. Without this, switching from
@@ -1014,7 +1089,7 @@ dated section.
   A `RendererRegistry` holds plugin objects (`{ id, name, version, create }`)
   that return instances implementing `setScore` / `setPlayhead` / `destroy`.
   Built-in `twanga.tab` (column-grid, CLI-style) and `twanga.highway`
-  (Rocksmith-style notes-toward-you) plugins register through the *same*
+  (falling-notes view) plugins register through the *same*
   path future third-party renderers will use — no special-cased "core" lane.
   Recorder screen now hosts a "View" dropdown that swaps renderers live,
   with the selection persisting in `localStorage`. The renderer fully owns

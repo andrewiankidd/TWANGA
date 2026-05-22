@@ -1,4 +1,5 @@
 mod bundled;
+mod import;
 mod play_resume;
 mod tunings;
 
@@ -189,8 +190,49 @@ enum Command {
     },
     /// List available audio input devices.
     Devices,
-    /// Convert a tab file from one format to another.
-    Convert { input: String, output: String },
+    /// Import a tab file into the user library. Accepts alphaTex
+    /// (`.alphatex`), MusicXML (`.musicxml` / `.xml` / `.mxl`), and
+    /// Standard MIDI File (`.mid` / `.midi`) inputs. Non-alphaTex
+    /// sources are converted on the way in via the canonical
+    /// `AlphaTexWriter`, so the saved file is bit-for-bit identical
+    /// to what `twanga record` would have produced from the same
+    /// notes. Lands at `<data-root>/library/`; the picker on
+    /// `twanga play` and the GUI Playback library both surface it.
+    Import {
+        /// Path to the source file. Format is detected from the
+        /// extension unless `--from` is set.
+        input: PathBuf,
+        /// Force the source format. Accepts `alphatex`, `musicxml`,
+        /// `mxl`, or `midi`. Use when the extension is missing or
+        /// wrong (a `.txt` containing alphaTex, for example).
+        #[arg(long, value_parser = ["alphatex", "musicxml", "mxl", "midi", "mid", "abc", "ascii", "ascii-tab", "tab"])]
+        from: Option<String>,
+        /// Override the title. Otherwise we take the source's
+        /// embedded title (`\title` for alphaTex, `<work-title>` for
+        /// MusicXML) or fall back to `imported`. The slug derived
+        /// from this title is part of the destination filename.
+        #[arg(long)]
+        title: Option<String>,
+    },
+    /// Convert a tab file from one format to another (stateless —
+    /// no library involvement, both paths are explicit). Useful for
+    /// scripting bulk MusicXML-to-alphaTex transforms before importing
+    /// or for one-off sharing of a converted file. The output is
+    /// always alphaTex today; other targets land if a use case
+    /// shows up.
+    Convert {
+        /// Path to the source file. Format detected from extension
+        /// unless `--from` is set.
+        input: PathBuf,
+        /// Destination path. Will be overwritten if it already
+        /// exists.
+        #[arg(long)]
+        out: PathBuf,
+        /// Force the source format. Accepts `alphatex`, `musicxml`,
+        /// `mxl`, or `midi`.
+        #[arg(long, value_parser = ["alphatex", "musicxml", "mxl", "midi", "mid", "abc", "ascii", "ascii-tab", "tab"])]
+        from: Option<String>,
+    },
     /// Manage user-defined tunings stored at the platform config dir alongside
     /// the built-in presets.
     Tunings {
@@ -513,8 +555,11 @@ fn prompt_required_note(prompt: &str) -> Result<MidiNote> {
 }
 
 /// Lowercase, replace non-alphanumeric runs with single hyphens, trim hyphens.
-/// `"Tenor Banjo (CGDA)"` → `"tenor-banjo-cgda"`.
-fn slugify(name: &str) -> String {
+/// `"Tenor Banjo (CGDA)"` → `"tenor-banjo-cgda"`. Used by the recorder
+/// (filename derivation) and by the importer's library-write helper —
+/// both want the same kebab-case behaviour, so `pub(crate)` exposes a
+/// single implementation across the crate's modules.
+pub(crate) fn slugify(name: &str) -> String {
     let mut out = String::with_capacity(name.len());
     let mut last_was_hyphen = true;
     for c in name.chars() {
@@ -1714,9 +1759,8 @@ fn main() -> Result<()> {
                 println!("{name}");
             }
         }
-        Command::Convert { input, output } => {
-            println!("convert: not yet implemented ({input} -> {output})");
-        }
+        Command::Import { input, from, title } => import::run_import(input, from, title)?,
+        Command::Convert { input, out, from } => import::run_convert(input, out, from)?,
         Command::Tunings { action } => match action {
             TuningsAction::List => run_tunings_list()?,
             TuningsAction::Path => run_tunings_path()?,
@@ -1764,6 +1808,7 @@ const DOC_EDITOR: &str = include_str!("../../../docs/features/editor.md");
 const DOC_TUNINGS: &str = include_str!("../../../docs/features/tunings.md");
 const DOC_HARDWARE: &str = include_str!("../../../docs/features/hardware.md");
 const DOC_USER_GUIDE: &str = include_str!("../../../docs/features/user-guide.md");
+const DOC_IMPORTER: &str = include_str!("../../../docs/features/importer.md");
 
 /// Slug → embedded markdown body. Order here is the listing order shown
 /// to the user when they run `twanga docs` with no arg.
@@ -1788,6 +1833,11 @@ const DOCS_PAGES: &[(&str, &str, &str)] = &[
         "editor",
         "Post-capture cell-level edits to recordings.",
         DOC_EDITOR,
+    ),
+    (
+        "importer",
+        "Add alphaTex / MusicXML / MXL files to your library.",
+        DOC_IMPORTER,
     ),
     (
         "tunings",
@@ -1896,6 +1946,24 @@ fn collect_play_choices() -> Vec<PlayChoice> {
         }
     }
 
+    // User-imported tabs next — distinct from recordings (those are
+    // live captures from this machine; these arrived from external
+    // files via the Importer or `twanga import`). Most-recent first
+    // matches the recordings ordering below.
+    if let Ok(imports) = bundled::scan_library() {
+        for tab in imports {
+            let stem = tab
+                .path
+                .file_name()
+                .and_then(|s| s.to_str())
+                .unwrap_or("tab");
+            choices.push(PlayChoice {
+                label: format!("[imported] {} ({stem})", tab.title),
+                path: tab.path,
+            });
+        }
+    }
+
     // Finally any local recordings — those are the user's own takes,
     // most-recent first so the natural use case ("play back what I
     // just recorded") works without scrolling.
@@ -1929,9 +1997,10 @@ fn prompt_play_target() -> Result<Option<PathBuf>> {
     let choices = collect_play_choices();
     if choices.is_empty() {
         eprintln!(
-            "No alphaTex files found. Looked in:\n  {}\n  {}\n  {}/",
+            "No alphaTex files found. Looked in:\n  {}\n  {}\n  {}/\n  {}/",
             bundled::examples_manifest_path().display(),
             bundled::patterns_manifest_path().display(),
+            bundled::library_dir_path().display(),
             bundled::recordings_dir_path().display(),
         );
         eprintln!("Pass a `.alphatex` path explicitly (e.g. `twanga play path/to/file.alphatex`),");
@@ -2200,6 +2269,7 @@ fn run_edit(path: PathBuf, out: Option<PathBuf>, action: EditAction) -> Result<(
                 alphatex::TabColumn {
                     duration_denom,
                     hits: Vec::new(),
+                    articulation: None,
                 },
             );
             eprintln!("inserted blank column at position {insert_at}");
@@ -3059,6 +3129,7 @@ mod docs_tests {
             "playback",
             "patterns",
             "editor",
+            "importer",
             "tunings",
             "hardware",
             "user-guide",

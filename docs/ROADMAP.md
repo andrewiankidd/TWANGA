@@ -16,7 +16,6 @@ surfaces. Ordered by current best-guess ROI / scope, not by commitment.
 | Slow-down practice (time-stretch via `rubato` or signalsmith-stretch) | Depends on tab audio generation above — until there's audio to slow down, the existing BPM override already covers the user-plays-themselves case. Once audio exists, `rubato`/`signalsmith-stretch` gives you time-stretch without pitch shift. |
 | Chord trainer with polyphonic *verification* (not transcription) | Biggest pedagogical win; hardest. Verification (does this match the expected chord?) stays tractable where transcription (what chord is this?) doesn't. |
 | Section looper / adaptive difficulty / tab fade-out | Builds on the existing loop + a new accuracy-tracking subsystem. Master-Mode-style. Independent of audio generation. |
-| MusicXML import in `twanga-tabs` | Open-standard interop. Unlocks the "I have a Guitar Pro library" workflow (most engravers export to MusicXML). |
 | Pattern trainer — accuracy verification | A first cut of the pattern trainer (bundled rhythm + picking drills, GUI screen with grouped tree-of-difficulty browser, loop-by-default) has shipped. The remaining ROI here is **verification** — currently the user plays along to the loop and the app doesn't check whether the rhythm landed right. Rhythm-only verification (the existing wait-mode pitch match, plus an onset-timing tolerance) is the next bite. Independent of audio generation. |
 
 ## v2 (longer horizon)

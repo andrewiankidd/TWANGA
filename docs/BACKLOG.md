@@ -32,10 +32,6 @@ The Patterns screen ships with ten bundled drills across four groups (clawhammer
 - **Pattern descriptions in the row.** The manifest already supports `description` per group; per-pattern descriptions would let us explain "where this fits" without the user having to know the tradition.
 - **Tempo presets per pattern.** Default tempos right now are baked into the alphaTex `\tempo` line. Surfacing 3-4 tempo presets per pattern ("slow / target / fast") in the GUI would lower the activation energy of practice without forcing the user to type a BPM.
 
-## Playback — open questions
-
-- **Transpose mode: drop vs octave-shift (maybe).** Today `transpose_to_with_report` silently drops notes that don't fit on the target tuning — the "Skipped: N notes" preamble shows what's missing. Standard practice in cross-instrument transposition (TuxGuitar, MuseScore, etc.) is to **octave-shift** out-of-range notes instead: notes below the target's lowest playable pitch jump up by 12 semitones (and equivalently for too-high notes), preserving melodic contour at the cost of register. The banjo→uke case where it actually matters is clawhammer drone work like Cripple Creek — A3/B3/G3 bass drones drop entirely on uke today, whereas an octave-shifted A4/B4/G4 would sit on the body. Right shape is probably a per-load toggle ("drop unreachable" / "shift to nearest octave"), defaulting to drop. Cheap in `twanga-tabs`: a single new branch in the existing transpose pass that retries with ±12 semitones before giving up. Maybe, not committed.
-
 ## Tab editor — what's next
 
 The editor screen is shipped (cell-level fret editing on the same Tab renderer Playback uses, column insert / delete / clear, save back in place or as a new copy). Future polish:
@@ -50,7 +46,6 @@ The Tauri shell hosts the same `frontend/web/` bundle in a native window. Filesy
 
 - **Native CPAL backend exposed as a Tauri command.** Web Audio's AudioWorklet runs at 50-150ms latency depending on backend; CPAL gives sub-20ms on desktop. Expose `start_capture` / `stop_capture` Tauri commands that stream samples from `twanga-audio` to the JS frontend over Tauri events. Only worth doing once the latency actually matters in practice (likely once chord/polyphonic verification lands).
 - **Hand-crafted icon set.** `cargo tauri icon` auto-converted the workspace logo. Production builds want a hand-tuned `icon.icns` / `icon.ico` with proper rounded-rect / dark-mode variants per platform's conventions.
-- **`cargo tauri build` smoke run + installer asset upload.** The release workflow currently ships only `twanga-cli`. Once a known-good `cargo tauri build` exists, add it to the release matrix so each tag also publishes desktop installers (`.msi`, `.dmg`, `.deb`, `.AppImage`).
 - **Filesystem-watch-driven cross-process sync.** Today the GUI bootstraps user tunings from `tunings.toml` on startup and write-throughs on every save, but doesn't notice if the CLI mutates the file while the GUI is running. A `notify`-crate watcher + a Tauri event would close that gap. Same idea for the recordings dir (Playback library refresh on external file add). Not high-priority — desktop users tend to be in one app at a time and a manual refresh works.
 - **Browser-storage warning banner under Tauri.** Already CSS-hidden via the `body.is-tauri` class (because the filesystem doesn't evict). Verify it stays hidden as the GUI evolves.
 
@@ -121,7 +116,6 @@ Explicit user-selectable practice intent that changes what the app verifies and 
 ## Audience-specific (folk/amateur, non-guitar)
 
 - **Strum/pick rhythm-only mode.** Detect *that* you're playing on the beat, not *what*. Lets uke beginners feel like they're playing along before precise verification is possible.
-- **Visual tab rendering relative to capo.** Backend is shipped (the `Capo` type + `--capo` flag + alphaTex subtitle round-trip); a future GUI tab renderer should display fret numbers relative to the capo position rather than absolute frets, including a visual indicator of the capo bar across the fretboard.
 - **Strumming pattern trainer.** "D D-U U-D-U" visualisation + rhythm-only verification.
 - **Roll trainer for banjo.** Forward roll, backward roll, alternating thumb. Right-hand finger visualisation. Banjo learners need this more than they need songs.
 - **Clawhammer rhythm trainer.** Specifically the "bum-di-tee" forearm motion — entirely a right-hand motor skill.
@@ -173,9 +167,8 @@ Runtime stays deterministic. AI is import-time only, like OCR.
 
 ## Tab ingestion (the import pipeline)
 
-Multiple sources funnel into one internal arrangement format with per-note confidence scores. Proprietary formats (Guitar Pro `.gp5`/`.gpx`) are explicit non-goals — see [SCOPE.md](SCOPE.md). Phase 1 (alphaTex parser + writer in `twanga-tabs::alphatex`) is shipped; Phase 2 (MusicXML) is on the [ROADMAP](ROADMAP.md). The rest:
+Multiple sources funnel into one internal arrangement format with per-note confidence scores. Proprietary formats (Guitar Pro `.gp5`/`.gpx`) are explicit non-goals — see [SCOPE.md](SCOPE.md). Phases 1–3 have shipped: alphaTex (Phase 1, in `twanga-tabs::alphatex`); MusicXML / MXL (Phase 2, in `twanga-tabs::musicxml`); MIDI, ABC notation, and ASCII tab round out the open-format coverage at Phase 3 (`twanga-tabs::midi`, `::abc`, `::ascii_tab`). All are exposed by both `twanga import` on the CLI and the Importer screen in the GUI. The rest:
 
-- **Phase 3:** ASCII tab parser — paste from Ultimate Guitar etc., or text file. Lossier than MusicXML (have to guess timing) but covers the "I have a text file" workflow.
 - **Phase 4:** OCR for image tabs — Tesseract via Rust bindings, feed images of ASCII tabs or printed tablature.
 - **Phase 5 (stretch):** Audiveris-backed staff-to-tab — sheet music PDFs → MusicXML → fingering algorithm → tab on target instrument.
 - **Phase 6 (probably never):** audio-to-tab — Klang.io-style polyphonic transcription. Open-source quality not there yet.
@@ -183,6 +176,10 @@ Multiple sources funnel into one internal arrangement format with per-note confi
 - **Source badges in library.** Icon per arrangement showing where it came from (alphaTex, MusicXML, ASCII, OCR, audio).
 - **Confidence rendering.** Low-confidence notes shown with subtle visual cue (dotted underline, paler). Naturally caught while playing.
 - **Diff and merge.** Multiple imports of the same song → offer to merge, keep user edits across versions.
+- **Importer tuning picker.** When a source has no declared tuning (every MIDI, every ABC, ASCII tabs with non-standard labels) the parser surfaces an `InferredTuning` warning naming the fallback choice. Today that's informational only — the user commits the import and re-tunes at playback. Surface a tuning picker on the preview card before commit so the guess is one click to correct; pre-select the parser's match.
+- **Fuzz the heuristic parsers.** `cargo fuzz` against `ascii_tab::parse` and `abc::parse` — both are content-shape heuristics on untrusted text. Cheap to set up, almost guaranteed to find panics in the first run. Backlog'd because the import is already gated by user action (drop a file you trust) and a panic surfaces as a clean error toast — but worth doing before any code path that auto-imports unattended.
+- **Real-world MIDI / ABC / ASCII tab fixture corpus.** The Phase 3 parsers (`twanga-tabs::midi`, `::abc`, `::ascii_tab`) are tested against fixtures built by their own writers (or hand-authored). External fixtures from independent third-party sources — same posture as the lilypond MusicXML regression suite under `crates/twanga-tabs/tests/fixtures/external/` — would catch real-world interop bugs the self-written fixtures miss. PD sources: Sessions ABC archive for ABC; MuseScore's MIDI-export corpus for MIDI; Ultimate Guitar's CC-licensed tab sets for ASCII.
+- **Articulation data model.** TWANGA's `TabColumn` carries an `articulation: Option<u8>` field today, populated by the ASCII tab parser and round-tripped through alphaTex (h/p/s only in v1). The article (b'h' hammer-on, b'p' pull-off, b's' slide) is preserved as data but the playback / renderer don't consume it yet. Wiring it through requires extending the renderer (visual cue), playback (different envelope on hammered/pulled notes), and the wait-mode detector (recognise a hammer-on by attack profile rather than fresh pluck). Distinct from the broader articulation entry above — that one introduces a richer per-note metadata layer; this is the minimum work to USE the data we already preserve.
 
 ## Self-recorded sample bank ("your own soundfont")
 

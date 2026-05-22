@@ -1,0 +1,23 @@
+% Twinkle Twinkle Little Star — ABC notation test fixture.
+%
+% Public-domain melody: traditional, popularised via Mozart's K. 265
+% variations and the English lyric by Jane Taylor (1806). All
+% comfortably out of copyright everywhere TWANGA ships.
+%
+% Encoded as ABC because ABC is the dominant text-based notation
+% format in folk / traditional music circles (banjo, mandolin,
+% fiddle, ukulele — exactly TWANGA's niche), so having a real ABC
+% fixture next to the .musicxml / .alphatex equivalents lets the
+% importer integration tests assert the same melody parses
+% consistently across every supported text format.
+%
+% Fixture under MIT OR Apache-2.0, matching the rest of the TWANGA
+% repo.
+
+X:1
+T:Twinkle Twinkle Little Star
+M:4/4
+L:1/4
+Q:1/4=100
+K:C
+C C G G | A A G2 |

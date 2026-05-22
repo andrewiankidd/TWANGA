@@ -1132,6 +1132,81 @@
         /* Drop zone for `.alphatex` imports. Same visual language as the
            Tunings "Add new tuning" form so the library screen reads as
            "list above, import below." */
+        /* Importer screen — preview card showing the parsed
+           metadata before the user commits to landing the import.
+           Same visual language as `.rec-setting` (card with border
+           + label / value), tuned for one entry per row rather than
+           the recorder's horizontal flex pack. */
+        .importer-preview-card {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 0.8rem 1rem;
+            margin: 1rem 0;
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+        .importer-preview-row {
+            display: flex;
+            align-items: center;
+            gap: 0.8rem;
+        }
+        .importer-label {
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: var(--muted);
+            font-weight: 700;
+            min-width: 5rem;
+        }
+        .importer-value {
+            color: var(--text);
+            font-family: monospace;
+            font-size: 0.9rem;
+        }
+        .importer-input {
+            background: var(--background);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            color: var(--text);
+            padding: 0.3rem 0.5rem;
+            font-family: inherit;
+            font-size: 0.95rem;
+            flex: 1;
+            min-width: 0;
+        }
+        .importer-input:focus {
+            outline: none;
+            border-color: var(--highlight);
+        }
+        /* Warning preflight — list of non-fatal parse observations
+           shown before commit. Amber border + tint so it reads as
+           "pay attention" without being alarming (errors would be
+           red + larger). */
+        .importer-warnings {
+            background: rgba(212, 154, 74, 0.06);
+            border: 1px solid rgba(212, 154, 74, 0.4);
+            border-radius: var(--radius);
+            padding: 0.6rem 0.9rem;
+            margin: 0 0 1rem;
+            color: var(--text);
+            font-size: 0.85rem;
+        }
+        .importer-warnings .importer-warning-header {
+            color: var(--highlight);
+            font-weight: 700;
+            margin-bottom: 0.3rem;
+        }
+        .importer-warnings ul {
+            margin: 0;
+            padding-left: 1.2rem;
+        }
+        .importer-warnings li {
+            margin: 0.15rem 0;
+            color: var(--muted);
+        }
+
         .drop-zone {
             border: 2px dashed var(--border);
             border-radius: var(--radius);
@@ -1632,6 +1707,10 @@
                     <span class="title">Editor</span>
                     <span class="desc">Tweak recordings cell-by-cell, save back to your library</span>
                 </button>
+                <button class="menu-btn" data-screen="importer">
+                    <span class="title">Importer</span>
+                    <span class="desc">Add `.alphatex` / `.musicxml` / `.mxl` / `.mid` / `.abc` / `.tab` files to your library</span>
+                </button>
                 <button class="menu-btn" data-screen="tunings">
                     <span class="title">Tunings</span>
                     <span class="desc">Built-in presets + your own custom tunings</span>
@@ -1868,15 +1947,11 @@
                     </div>
                 </div>
                 <div class="tab-library" id="playback-library-list"></div>
-                <div class="drop-zone" id="playback-drop-zone">
-                    Drop a <code>.alphatex</code> file here, or
-                    <label class="action secondary">
-                        <input type="file" accept=".alphatex,.txt" id="playback-file-input" hidden>
-                        Choose file
-                    </label>
-                </div>
                 <p class="tuner-hint" id="playback-library-hint">
-                    Recordings made on this screen's sibling Recorder appear here automatically.
+                    Recordings made on this screen's sibling Recorder
+                    appear here automatically. To add a tab from an
+                    external file (alphaTex / MusicXML), use the
+                    <a href="#importer">Importer</a>.
                 </p>
             </div>
 
@@ -2085,6 +2160,99 @@
             <div id="patterns-library"></div>
         </section>
 
+        <!-- Importer screen — drop or pick a tab file (alphaTex /
+             MusicXML / MXL), preview the metadata + preflight
+             warnings, then commit it to the library. Mirrors what
+             `twanga import` does on the CLI; the underlying
+             `convert_to_alphatex` path is shared via WASM. -->
+        <section id="screen-importer" class="screen">
+            <div class="back-row">
+                <button class="back-btn" data-back>← Menu</button>
+            </div>
+            <h2>Importer</h2>
+            <p class="subtitle">
+                Add a tab to your library. Accepts <code>.alphatex</code>
+                (TWANGA native), <code>.musicxml</code> /
+                <code>.xml</code> (open standard from MuseScore / Sibelius
+                / Guitar Pro), <code>.mxl</code> (zipped MusicXML),
+                <code>.mid</code> / <code>.midi</code> (Standard MIDI File),
+                <code>.abc</code> (ABC notation — common in folk /
+                traditional music), and <code>.tab</code> (ASCII tab,
+                the plain-text format on most tab-sharing sites). All
+                sources land as alphaTex in
+                <code>&lt;data-root&gt;/library/</code> after conversion.
+            </p>
+
+            <div class="browser-storage-banner">
+                <strong>Browser storage warning.</strong>
+                In the browser build, imported tabs live in
+                IndexedDB and can be evicted under storage pressure.
+                The desktop app writes to <code>~/twanga/library/</code>
+                on disk and doesn't need this warning.
+            </div>
+
+            <div class="drop-zone" id="importer-drop-zone">
+                Drop an <code>.alphatex</code> / <code>.musicxml</code> /
+                <code>.mxl</code> / <code>.mid</code> / <code>.abc</code> /
+                <code>.tab</code> file here, or
+                <label class="action secondary">
+                    <input type="file"
+                           accept=".alphatex,.musicxml,.xml,.mxl,.txt,.mid,.midi,.abc,.tab"
+                           id="importer-file-input" hidden>
+                    Choose file
+                </label>
+            </div>
+
+            <!-- Preview panel — populated after a successful parse,
+                 before the user commits. Hidden until something to
+                 show. -->
+            <div id="importer-preview" hidden>
+                <div class="importer-preview-card">
+                    <div class="importer-preview-row">
+                        <span class="importer-label">Title</span>
+                        <input type="text" id="importer-title" class="importer-input">
+                    </div>
+                    <div class="importer-preview-row">
+                        <span class="importer-label">Source</span>
+                        <span id="importer-source-format" class="importer-value">—</span>
+                    </div>
+                    <div class="importer-preview-row">
+                        <span class="importer-label">Tempo</span>
+                        <span id="importer-tempo" class="importer-value">—</span>
+                    </div>
+                    <div class="importer-preview-row">
+                        <span class="importer-label">Tuning</span>
+                        <span id="importer-tuning" class="importer-value">—</span>
+                    </div>
+                    <div class="importer-preview-row">
+                        <span class="importer-label">Columns</span>
+                        <span id="importer-columns" class="importer-value">—</span>
+                    </div>
+                </div>
+
+                <!-- Warnings preflight. Populated when the parser
+                     surfaces non-fatal observations (mostly
+                     MusicXML's irregular-duration / unreachable-note
+                     ones). User can still commit; the warnings just
+                     tell them what to expect. -->
+                <div id="importer-warnings" class="importer-warnings" hidden></div>
+
+                <div class="row">
+                    <button class="action primary" type="button" id="importer-commit-btn">
+                        Add to library
+                    </button>
+                    <button class="action secondary" type="button" id="importer-discard-btn">
+                        Discard
+                    </button>
+                </div>
+            </div>
+
+            <p class="tuner-hint" id="importer-hint">
+                Pick a tab file to import — its metadata will preview
+                here before it goes into your library.
+            </p>
+        </section>
+
         <section id="screen-editor" class="screen">
             <div class="back-row">
                 <button class="back-btn" data-back>← Menu</button>
@@ -2214,6 +2382,12 @@
             serialize_recording,
             builtin_preset_entry,
             parse_alphatex,
+            parse_musicxml,
+            parse_mxl,
+            parse_midi,
+            parse_abc,
+            parse_ascii_tab,
+            parsed_tab_to_alphatex,
             WebTuner,
             WebParsedTab,
         } from './pkg/twanga_web.js';
@@ -2457,6 +2631,12 @@
             // strumming drills. Loads on demand; clicking Practice
             // hands off to the Playback engine with loop=full preset.
             initPatterns();
+
+            // Importer screen — drop-zone for alphaTex / MusicXML /
+            // MXL files. Format detection + parsing happen in WASM
+            // (parse_musicxml / parse_mxl); saved files land in the
+            // shared library so Playback and Editor pick them up.
+            initImporter();
 
             // Docs screen — fetches per-feature markdown from
             // `assets/docs/<slug>.md` and renders inline. The
@@ -4560,7 +4740,6 @@
 
             renderPlaybackLibrary();
             renderPlaybackResumeBanner();
-            wirePlaybackDropZone();
             wirePlaybackTransport();
             wirePlaybackSettings();
             wirePlaybackResumeBanner();
@@ -5019,65 +5198,9 @@
             renderPlaybackLibrary();
         }
 
-        function wirePlaybackDropZone() {
-            const zone = el('playback-drop-zone');
-            const input = el('playback-file-input');
-
-            const importFile = (file) => {
-                if (!file) return;
-                const reader = new FileReader();
-                reader.onload = async (e) => {
-                    const content = String(e.target?.result ?? '');
-                    let parsedTitle = null;
-                    try {
-                        // Validate by parsing first — saves a half-broken
-                        // file ending up in the library. The parsed handle
-                        // is freed immediately; we just want the title.
-                        const parsed = parse_alphatex(content);
-                        parsedTitle = parsed.title();
-                        parsed.free?.();
-                    } catch (err) {
-                        console.error('import parse failed', err);
-                        showToast({ message: `Import failed: ${err?.message ?? err}`, actions: [] });
-                        return;
-                    }
-                    const title = parsedTitle || file.name.replace(/\.[^.]+$/, '');
-                    try {
-                        await library.save({ title, alphatex: content, source: 'imported' });
-                    } catch (err) {
-                        console.error('library.save (import) failed', err);
-                        showToast({ message: `Library save failed: ${err?.message ?? err}`, actions: [] });
-                        return;
-                    }
-                    renderPlaybackLibrary();
-                    showToast({ message: `Imported "${title}" into the library.`, actions: [] });
-                };
-                reader.onerror = () => {
-                    showToast({ message: 'Failed to read file', actions: [] });
-                };
-                reader.readAsText(file);
-            };
-
-            input.addEventListener('change', () => {
-                const file = input.files?.[0];
-                if (file) importFile(file);
-                input.value = '';
-            });
-
-            zone.addEventListener('dragover', (e) => {
-                e.preventDefault();
-                zone.classList.add('is-dragover');
-            });
-            zone.addEventListener('dragleave', () => {
-                zone.classList.remove('is-dragover');
-            });
-            zone.addEventListener('drop', (e) => {
-                e.preventDefault();
-                zone.classList.remove('is-dragover');
-                const file = e.dataTransfer?.files?.[0];
-                if (file) importFile(file);
-            });
-        }
+        // (Playback drop-zone removed — all imports now flow through
+        //  the dedicated Importer screen at `#importer`, which handles
+        //  alphaTex + MusicXML + MXL uniformly.)
 
         // Re-render the library list whenever the user returns to it —
         // a new recording made on the Recorder screen since their last
@@ -5782,6 +5905,7 @@
             { slug: 'playback', name: 'Playback', blurb: 'Play a tab with metronome, wait, loop, transpose.' },
             { slug: 'patterns', name: 'Patterns', blurb: 'Bundled rhythm + picking drills.' },
             { slug: 'editor', name: 'Tab editor', blurb: 'Post-capture cell-level edits to recordings.' },
+            { slug: 'importer', name: 'Importer', blurb: 'Add alphaTex / MusicXML / MXL files to your library.' },
             { slug: 'tunings', name: 'Tunings', blurb: 'Built-in + user-defined tuning registry.' },
             { slug: 'hardware', name: 'Hardware', blurb: 'Audio-input setup — mics, instrument cables, interfaces.' },
             { slug: 'user-guide', name: 'User guide', blurb: 'Paths + portable mode, audio architecture, privacy, credits.' },
@@ -6011,6 +6135,232 @@
                 .replace(/&/g, '&amp;')
                 .replace(/</g, '&lt;')
                 .replace(/>/g, '&gt;');
+        }
+
+        // ────────────────────────────── Importer ──────────────────────────────
+        //
+        // Drop-zone → detect format → parse via the matching WASM
+        // function (parse_alphatex / parse_musicxml / parse_mxl) →
+        // populate a preview card with title + tempo + tuning +
+        // warnings → user reviews + clicks "Add to library". Commit
+        // serialises the parsed tab back to alphaTex via
+        // `parsed_tab_to_alphatex` so the library always holds canonical
+        // alphaTex bytes regardless of where they came from.
+
+        const importerState = {
+            /// Held during the preview-pending window — null when no
+            /// file is staged. Owns the `WebParsedTab` handle so the
+            /// commit step can call back into it for serialisation;
+            /// `.free()` is called on discard / commit / overwrite.
+            stagedTab: null,
+            stagedFormat: null,
+            stagedFilename: '',
+        };
+
+        /// Detect the source format from a filename extension. Mirrors
+        /// the CLI's `SourceFormat::from_extension`. Returns one of
+        /// `'alphatex'` / `'musicxml'` / `'mxl'` / `'midi'` / `'abc'`
+        /// / `'ascii'` / `null`.
+        function importerDetectFormat(filename) {
+            const lower = (filename || '').toLowerCase();
+            if (lower.endsWith('.alphatex') || lower.endsWith('.txt')) return 'alphatex';
+            if (lower.endsWith('.musicxml') || lower.endsWith('.xml')) return 'musicxml';
+            if (lower.endsWith('.mxl')) return 'mxl';
+            if (lower.endsWith('.mid') || lower.endsWith('.midi')) return 'midi';
+            if (lower.endsWith('.abc')) return 'abc';
+            if (lower.endsWith('.tab')) return 'ascii';
+            return null;
+        }
+
+        /// Parse a file via the right WASM function for its format.
+        /// Returns the parsed `WebParsedTab` handle. Caller is
+        /// responsible for `.free()`ing it eventually.
+        async function importerParseFile(file, format) {
+            if (format === 'alphatex') {
+                const text = await file.text();
+                return parse_alphatex(text);
+            }
+            if (format === 'musicxml') {
+                const text = await file.text();
+                return parse_musicxml(text);
+            }
+            if (format === 'mxl') {
+                const buf = await file.arrayBuffer();
+                return parse_mxl(new Uint8Array(buf));
+            }
+            if (format === 'midi') {
+                const buf = await file.arrayBuffer();
+                return parse_midi(new Uint8Array(buf));
+            }
+            if (format === 'abc') {
+                const text = await file.text();
+                return parse_abc(text);
+            }
+            if (format === 'ascii') {
+                const text = await file.text();
+                return parse_ascii_tab(text);
+            }
+            throw new Error(`unsupported format: ${format}`);
+        }
+
+        /// Render the per-warning text on the preview card. Discriminates
+        /// on the `kind` field set by the Rust side's
+        /// `ParseWarningJs`.
+        function importerRenderWarnings(warnings) {
+            const host = el('importer-warnings');
+            if (!warnings || warnings.length === 0) {
+                host.hidden = true;
+                host.replaceChildren();
+                return;
+            }
+            host.hidden = false;
+            const header = document.createElement('div');
+            header.className = 'importer-warning-header';
+            header.textContent = `${warnings.length} parse warning${warnings.length === 1 ? '' : 's'}:`;
+            const list = document.createElement('ul');
+            for (const w of warnings) {
+                const li = document.createElement('li');
+                if (w.kind === 'irregular_duration') {
+                    li.textContent = `Column ${w.column_index}: irregular duration "${w.raw_duration}" rounded to nearest power of 2`;
+                } else if (w.kind === 'unreachable_note') {
+                    li.textContent = `Column ${w.column_index}: note ${w.note} unreachable on the source's staff tuning — dropped`;
+                } else if (w.kind === 'missing_string_tuning') {
+                    li.textContent = `String ${w.referenced_string} referenced but the source had no <staff-tuning> — string mapping may be off`;
+                } else if (w.kind === 'skipped_track') {
+                    li.textContent = `Track ${w.index} ("${w.name}") skipped — only the first note-bearing track is imported`;
+                } else if (w.kind === 'inferred_tuning') {
+                    li.textContent = `No tuning declared in the source — placed notes on "${w.matched_name}"; retune at playback if needed`;
+                } else {
+                    li.textContent = JSON.stringify(w);
+                }
+                list.appendChild(li);
+            }
+            host.replaceChildren(header, list);
+        }
+
+        function importerPopulatePreview(tab, format, filename) {
+            // Title default: tab's `\title` / `<work-title>`, else
+            // filename minus extension.
+            const stem = (filename || '').replace(/\.[^.]+$/, '');
+            const title = tab.title() || stem || 'Imported tab';
+
+            el('importer-title').value = title;
+            el('importer-source-format').textContent = ({
+                alphatex: 'alphaTex',
+                musicxml: 'MusicXML',
+                mxl: 'MusicXML (.mxl)',
+                midi: 'MIDI',
+                abc: 'ABC notation',
+                ascii: 'ASCII tab',
+            })[format] || format;
+            el('importer-tempo').textContent = `${tab.tempo()} BPM`;
+            const tuning = tab.tuning_names();
+            el('importer-tuning').textContent = tuning.length > 0
+                ? tuning.join(' ')
+                : '(none — pick one before playback)';
+            el('importer-columns').textContent = String(tab.columns_count());
+
+            const warnings = tab.parse_warnings?.() ?? [];
+            importerRenderWarnings(warnings);
+
+            el('importer-preview').hidden = false;
+            el('importer-hint').hidden = true;
+        }
+
+        function importerClearStaged() {
+            if (importerState.stagedTab) {
+                try { importerState.stagedTab.free?.(); }
+                catch (e) { console.warn('staged-tab free failed', e); }
+            }
+            importerState.stagedTab = null;
+            importerState.stagedFormat = null;
+            importerState.stagedFilename = '';
+            el('importer-preview').hidden = true;
+            el('importer-warnings').hidden = true;
+            el('importer-warnings').replaceChildren();
+            el('importer-hint').hidden = false;
+        }
+
+        async function importerStageFile(file) {
+            if (!file) return;
+            const format = importerDetectFormat(file.name);
+            if (!format) {
+                showToast({
+                    message: `Unsupported file type: ${file.name}. Pick a .alphatex, .musicxml, .mxl, .mid, .abc, or .tab file.`,
+                    actions: [],
+                });
+                return;
+            }
+            importerClearStaged();
+            let tab;
+            try {
+                tab = await importerParseFile(file, format);
+            } catch (err) {
+                console.error('importer parse failed', err);
+                showToast({ message: `Parse failed: ${err?.message ?? err}`, actions: [] });
+                return;
+            }
+            importerState.stagedTab = tab;
+            importerState.stagedFormat = format;
+            importerState.stagedFilename = file.name;
+            importerPopulatePreview(tab, format, file.name);
+        }
+
+        async function importerCommit() {
+            const tab = importerState.stagedTab;
+            if (!tab) return;
+            const title = el('importer-title').value.trim()
+                || importerState.stagedFilename.replace(/\.[^.]+$/, '')
+                || 'Imported tab';
+            let alphatex;
+            try {
+                alphatex = parsed_tab_to_alphatex(tab);
+            } catch (err) {
+                console.error('importer serialise failed', err);
+                showToast({
+                    message: `Couldn't serialise — ${err?.message ?? err}. The source may need a target tuning picked first.`,
+                    actions: [],
+                });
+                return;
+            }
+            try {
+                await library.save({ title, alphatex, source: 'imported' });
+            } catch (err) {
+                console.error('library.save (import) failed', err);
+                showToast({ message: `Library save failed: ${err?.message ?? err}`, actions: [] });
+                return;
+            }
+            importerClearStaged();
+            showToast({ message: `Imported "${title}" into the library.`, actions: [] });
+        }
+
+        function initImporter() {
+            const zone = el('importer-drop-zone');
+            const input = el('importer-file-input');
+            input.addEventListener('change', () => {
+                const file = input.files?.[0];
+                if (file) importerStageFile(file);
+                input.value = '';
+            });
+            zone.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                zone.classList.add('is-dragover');
+            });
+            zone.addEventListener('dragleave', () => {
+                zone.classList.remove('is-dragover');
+            });
+            zone.addEventListener('drop', (e) => {
+                e.preventDefault();
+                zone.classList.remove('is-dragover');
+                const file = e.dataTransfer?.files?.[0];
+                if (file) importerStageFile(file);
+            });
+            el('importer-commit-btn').addEventListener('click', () => {
+                importerCommit().catch((e) => console.error('importer commit', e));
+            });
+            el('importer-discard-btn').addEventListener('click', () => {
+                importerClearStaged();
+            });
         }
 
         function initEditor() {

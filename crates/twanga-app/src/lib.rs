@@ -43,6 +43,11 @@ pub fn run() {
             commands::save_recording,
             commands::update_recording,
             commands::delete_recording,
+            commands::list_library_tabs,
+            commands::load_library_tab,
+            commands::save_library_tab,
+            commands::update_library_tab,
+            commands::delete_library_tab,
             commands::read_tunings_toml,
             commands::write_tunings_toml,
         ])

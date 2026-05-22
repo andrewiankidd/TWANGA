@@ -89,7 +89,24 @@ See [docs/SCOPE.md](docs/SCOPE.md) for the explicit list. The shorthand:
   user-owned files. Sync happens via the user's chosen filesystem
   mechanism (Dropbox, Syncthing) — never a TWANGA server.
 
-### 5. Tests pin behaviour, not implementation
+### 5. Naming — no commercial-product references in repo
+
+Repo content (code, comments, docs, error messages, commit messages,
+splash strings) MUST NOT name commercial products in this niche —
+proprietary music-practice apps, proprietary tab / score editors,
+proprietary instrument cables, music games. Open-source projects in
+the same niche are fine to name as peers (TuxGuitar, alphaTab,
+slopsmith). One-off historical exemption for *Realtone* in the
+hardware-personal-setup doc where the user documented their own gear.
+
+"X-style" descriptive analogies count as naming, even when they're
+just framing UX in a familiar shape — use a category descriptor
+instead ("falling-notes view", "count-in tick", "instrument-to-USB
+cable"). If you find yourself reaching for the obvious commercial
+reference to describe a feature, the descriptive phrase always
+works.
+
+### 6. Tests pin behaviour, not implementation
 
 The recent capo + tuning-registry work added tests for: round-tripping
 through TOML, capo composition preserving reentrant labels at zero offset,
@@ -101,7 +118,7 @@ Tests are valuable specifically when they pin invariants you'd otherwise
 have to re-discover from the code on a future change. They're a tax when
 they pin implementation details that have no observable effect.
 
-### 6. TDD when it pays off
+### 7. TDD when it pays off
 
 `twanga-core`'s `Capo`, the tuning registry's TOML round-trip, the alphaTex
 parser/writer, and the `MidiNote::from_name` parser were all written

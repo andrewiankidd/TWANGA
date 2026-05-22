@@ -201,6 +201,13 @@ pub fn serialize_recording(
 #[wasm_bindgen]
 pub struct WebParsedTab {
     inner: twanga_tabs::alphatex::ParsedTab,
+    /// Format-agnostic parse warnings, captured on import. Empty for
+    /// `parse_alphatex` results — alphaTex parsing is strict (errors
+    /// out on bad input rather than producing warnings). The Importer
+    /// screen reads these via [`parse_warnings`] after a successful
+    /// parse so it can show a preflight summary before the user
+    /// commits to adding the tab to their library.
+    parse_warnings: Vec<twanga_tabs::ParseWarning>,
 }
 
 #[derive(serde::Serialize)]
@@ -208,6 +215,12 @@ struct ColumnJs {
     duration_denom: u32,
     /// `[string_number_1_based, fret]` pairs. Empty = rest.
     hits: Vec<(u8, u8)>,
+    /// Articulation marker (single character: `"h"` hammer-on, `"p"`
+    /// pull-off, `"s"` slide) for the technique used to reach this
+    /// note from the previous one. Omitted when not set so JS-side
+    /// consumers can treat presence as truthy.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    articulation: Option<String>,
 }
 
 #[derive(serde::Serialize)]
@@ -216,13 +229,168 @@ struct DroppedNoteJs {
     note: String,
 }
 
+/// Discriminated shape for format-agnostic parse warnings surfaced
+/// to the Importer UI. Tagged via `#[serde(tag = "kind")]` so JS
+/// gets `{ kind: "irregular_duration", column_index, raw_duration }`
+/// etc. — single property to switch on at the JS side. Variants
+/// mirror [`twanga_tabs::ParseWarning`].
+#[derive(serde::Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+enum ParseWarningJs {
+    IrregularDuration {
+        column_index: usize,
+        raw_duration: String,
+    },
+    UnreachableNote {
+        column_index: usize,
+        note: String,
+    },
+    MissingStringTuning {
+        referenced_string: u8,
+    },
+    SkippedTrack {
+        index: usize,
+        name: String,
+    },
+    InferredTuning {
+        source_tuning: Vec<String>,
+        matched_name: String,
+    },
+}
+
 /// Parse `.alphatex` text into a `WebParsedTab`. Returns the parse error
 /// as a string on failure — matches the shape `serialize_recording` uses.
 #[wasm_bindgen]
 pub fn parse_alphatex(text: &str) -> Result<WebParsedTab, String> {
     twanga_tabs::alphatex::parse(text)
-        .map(|inner| WebParsedTab { inner })
+        .map(|inner| WebParsedTab {
+            inner,
+            parse_warnings: Vec::new(),
+        })
         .map_err(|e| e.to_string())
+}
+
+/// Parse MusicXML text into a `WebParsedTab`. Returns the parse
+/// error as a string on failure. The Importer screen calls this on
+/// dropped `.musicxml` / `.xml` files; alphaTex files go through
+/// `parse_alphatex` instead. Non-fatal parse warnings (irregular
+/// durations, unreachable notes, missing string tuning) are
+/// surfaced via [`parse_warnings`] called immediately after — kept
+/// separate from the parsed handle because warnings are transient
+/// diagnostic data, not part of the tab.
+#[wasm_bindgen]
+pub fn parse_musicxml(xml: &str) -> Result<WebParsedTab, String> {
+    let out = twanga_tabs::musicxml::parse(xml).map_err(|e| e.to_string())?;
+    // Stash warnings on the handle so the Importer can fetch them
+    // without re-parsing. JS calls `tab.parse_warnings()` after a
+    // successful parse.
+    Ok(WebParsedTab {
+        inner: out.tab,
+        parse_warnings: out.warnings,
+    })
+}
+
+/// Parse a `.mxl` (zipped MusicXML) archive. The JS side passes the
+/// `File`'s `ArrayBuffer` as a `Uint8Array`; wasm-bindgen converts it
+/// to `&[u8]` here. Same warning surface as [`parse_musicxml`].
+#[wasm_bindgen]
+pub fn parse_mxl(bytes: &[u8]) -> Result<WebParsedTab, String> {
+    let out = twanga_tabs::musicxml::parse_mxl(bytes).map_err(|e| e.to_string())?;
+    Ok(WebParsedTab {
+        inner: out.tab,
+        parse_warnings: out.warnings,
+    })
+}
+
+/// Parse a Standard MIDI File (`.mid` / `.midi`) into a
+/// `WebParsedTab`. MIDI carries no string/fret data, so every pitch
+/// is placed on the default tuning (standard guitar EADGBE) — the
+/// returned tab surfaces an [`ParseWarning::InferredTuning`] so the
+/// Importer UI can flag that the target tuning was guessed.
+#[wasm_bindgen]
+pub fn parse_midi(bytes: &[u8]) -> Result<WebParsedTab, String> {
+    let out = twanga_tabs::midi::parse(bytes).map_err(|e| e.to_string())?;
+    Ok(WebParsedTab {
+        inner: out.tab,
+        parse_warnings: out.warnings,
+    })
+}
+
+/// Parse ABC notation (`.abc`) text into a `WebParsedTab`. Same
+/// pitch-only tuning posture as MIDI — notes land on the default
+/// standard-guitar tuning with an `InferredTuning` warning.
+#[wasm_bindgen]
+pub fn parse_abc(text: &str) -> Result<WebParsedTab, String> {
+    let out = twanga_tabs::abc::parse(text).map_err(|e| e.to_string())?;
+    Ok(WebParsedTab {
+        inner: out.tab,
+        parse_warnings: out.warnings,
+    })
+}
+
+/// Parse ASCII tab (`.tab`) text into a `WebParsedTab`. The parser
+/// infers the tuning from string-line labels and surfaces an
+/// `InferredTuning` warning when the labels don't match a built-in
+/// tuning exactly (so the user can confirm the fallback choice
+/// before committing the import).
+#[wasm_bindgen]
+pub fn parse_ascii_tab(text: &str) -> Result<WebParsedTab, String> {
+    let out = twanga_tabs::ascii_tab::parse(text).map_err(|e| e.to_string())?;
+    Ok(WebParsedTab {
+        inner: out.tab,
+        parse_warnings: out.warnings,
+    })
+}
+
+/// Serialise a `WebParsedTab` back to alphaTex via the canonical
+/// `AlphaTexWriter`. The Importer calls this after a successful
+/// MusicXML / `.mxl` parse to land bytes in the library that are
+/// bit-for-bit identical to what `twanga record` would have produced
+/// for the same notes — one format on disk, no fork.
+#[wasm_bindgen]
+pub fn parsed_tab_to_alphatex(tab: &WebParsedTab) -> Result<String, String> {
+    use twanga_tabs::alphatex::AlphaTexWriter;
+    let tuning = tab
+        .inner
+        .tuning()
+        .ok_or_else(|| "source has no parseable tuning".to_string())?;
+    let capo = tab
+        .inner
+        .capo()
+        .unwrap_or_else(|| twanga_core::Capo::none(tuning.strings.len()));
+    let denom = tab
+        .inner
+        .columns
+        .first()
+        .map(|c| c.duration_denom.max(1))
+        .unwrap_or(8);
+    let mut buf: Vec<u8> = Vec::new();
+    {
+        let mut writer = AlphaTexWriter::new(
+            &mut buf,
+            &tuning,
+            &capo,
+            tab.inner.tempo,
+            denom,
+            tab.inner.title.as_deref(),
+        )
+        .map_err(|e| e.to_string())?;
+        let string_count = tuning.strings.len();
+        for col in &tab.inner.columns {
+            let mut marks: Vec<Option<u8>> = vec![None; string_count];
+            for (string, fret) in &col.hits {
+                let idx = (*string as usize).saturating_sub(1);
+                if idx < marks.len() {
+                    marks[idx] = Some(*fret);
+                }
+            }
+            writer
+                .write_column_with_articulation(&marks, col.articulation)
+                .map_err(|e| e.to_string())?;
+        }
+        writer.finalize().map_err(|e| e.to_string())?;
+    }
+    String::from_utf8(buf).map_err(|e| e.to_string())
 }
 
 #[wasm_bindgen]
@@ -257,21 +425,75 @@ impl WebParsedTab {
         self.inner.capo().map(|c| c.serialize()).unwrap_or_default()
     }
 
+    /// Format-agnostic parse warnings collected during the most
+    /// recent `parse_musicxml` / `parse_mxl` / `parse_midi` call
+    /// that produced this handle. Returns an empty array for
+    /// alphaTex-sourced tabs and for transposed tabs (transposition
+    /// doesn't introduce new warnings). Each entry is one of five
+    /// discriminated shapes (matched on `kind`) — the Importer UI
+    /// surfaces them as preflight badges before the user commits
+    /// the import.
+    pub fn parse_warnings(&self) -> JsValue {
+        use twanga_tabs::ParseWarning;
+        let mapped: Vec<ParseWarningJs> = self
+            .parse_warnings
+            .iter()
+            .map(|w| match w {
+                ParseWarning::IrregularDuration {
+                    column_index,
+                    raw_duration,
+                } => ParseWarningJs::IrregularDuration {
+                    column_index: *column_index,
+                    raw_duration: raw_duration.clone(),
+                },
+                ParseWarning::UnreachableNote { column_index, note } => {
+                    ParseWarningJs::UnreachableNote {
+                        column_index: *column_index,
+                        note: note.clone(),
+                    }
+                }
+                ParseWarning::MissingStringTuning { referenced_string } => {
+                    ParseWarningJs::MissingStringTuning {
+                        referenced_string: *referenced_string,
+                    }
+                }
+                ParseWarning::SkippedTrack { index, name } => ParseWarningJs::SkippedTrack {
+                    index: *index,
+                    name: name.clone(),
+                },
+                ParseWarning::InferredTuning {
+                    source_tuning,
+                    matched_name,
+                } => ParseWarningJs::InferredTuning {
+                    source_tuning: source_tuning.clone(),
+                    matched_name: matched_name.clone(),
+                },
+            })
+            .collect();
+        serde_wasm_bindgen::to_value(&mapped).unwrap_or(JsValue::NULL)
+    }
+
     /// Number of columns in the parsed tab. The Playback engine walks
     /// `0..columns_count()` calling `column_at(i)` for each.
     pub fn columns_count(&self) -> usize {
         self.inner.columns.len()
     }
 
-    /// One column by index. Returns `{ duration_denom, hits }` where
-    /// `hits` is `[[string_1_based, fret], ...]`. Empty hits = rest.
-    /// Returns `null` if `idx >= columns_count()` rather than panicking,
-    /// so the JS loop can defensively detect end-of-tab.
+    /// One column by index. Returns `{ duration_denom, hits,
+    /// articulation? }` where `hits` is `[[string_1_based, fret],
+    /// ...]` (empty = rest) and `articulation` is the optional
+    /// technique tag (`"h"`/`"p"`/`"s"`). Returns `null` if `idx >=
+    /// columns_count()` rather than panicking, so the JS loop can
+    /// defensively detect end-of-tab.
     pub fn column_at(&self, idx: usize) -> JsValue {
         match self.inner.columns.get(idx) {
             Some(col) => serde_wasm_bindgen::to_value(&ColumnJs {
                 duration_denom: col.duration_denom,
                 hits: col.hits.clone(),
+                articulation: col
+                    .articulation
+                    .filter(|b| matches!(b, b'h' | b'p' | b's'))
+                    .map(|b| (b as char).to_string()),
             })
             .unwrap(),
             None => JsValue::NULL,
@@ -304,7 +526,13 @@ impl WebParsedTab {
             max_fret,
             parse_transpose_mode(mode.as_deref()),
         );
-        Ok(WebParsedTab { inner: transposed })
+        Ok(WebParsedTab {
+            inner: transposed,
+            // Transposition is a pure operation on an already-parsed
+            // tab — no new warnings to surface from the transpose
+            // itself (dropped notes are reported via a separate API).
+            parse_warnings: Vec::new(),
+        })
     }
 
     /// Same as `transpose_to` but also returns the list of dropped notes.

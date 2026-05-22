@@ -26,28 +26,44 @@ chance of the cursor "running ahead" because detection arrived late.
 
 ## What the author uses
 
-For grounding, my own setup splits by instrument:
+For grounding, my own setup splits across two axes — *what's on the
+instrument* (the pickup, which lives there permanently) and *what's
+between the instrument and the host* (the cable / interface, which
+swaps depending on which computer I'm playing into).
+
+**On the instrument:**
 
 - **Banjo** — [KNA BP-1](https://www.knapickups.com/en/folk-instruments/bp-1-kna):
   a passive, wooden-cased piezo sensor that clamps to the side
   of the bridge. Designed as a removable, non-invasive pickup,
-  so I just cable-tie the output jack assembly to one of the pot
-  brackets and leave it there → Realtone cable (the 1/4" to USB
-  instrument cable originally shipped with Rocksmith) handles
-  the A/D conversion at the USB end. Roughly Option 3 territory
-  below.
-- **Ukulele** — cheap adhesive piezo disc, stuck to the
-  underside of the uke head with the jack dangling out of the
-  back of the body → cheap USB DAC with a 3.5mm input. The DAC
-  gives the OS a USB audio device; the piezo gives a usable
-  pickup signal for under a fiver. Crude, but it beats trying
-  to mic a uke's quiet acoustic body.
+  but I've left it affixed — cable-tied the output jack
+  assembly to one of the pot brackets so it's always ready
+  to plug into.
+- **Banjolele** — a cheap adhesive piezo disc, stuck to the
+  underside of the head with the jack dangling out of the back of
+  the body. Permanently mounted, same reasoning as the banjo:
+  removable in principle, never actually removed. Crude pickup,
+  but it beats trying to mic the banjolele's quiet acoustic
+  body and costs under a fiver.
 
-Both paths cost well under £50 total. Neither is the "best" option
-in raw signal-quality terms (a real interface — Option 4 — wins on
-preamp headroom and noise floor), but both clear the latency budget
-for [wait mode](playback.md) comfortably and require zero room
-treatment.
+**Between instrument and host** (pick whichever the current host
+machine needs):
+
+- **Desktop (Windows PC)** — Realtone cable, a 1/4" to USB
+  instrument cable. Standard Option 3 territory below; the A/D
+  conversion happens at the USB end.
+- **MacBook + phones (USB-C hosts)** — a short cheap USB-C to
+  1/4" cable, currently a
+  [CIXUN USB-C to 6.35mm](https://www.amazon.co.uk/dp/B0F1Y7KRJC)
+  off Amazon UK. Sub-£15, works on iOS / Android / macOS without
+  drivers (USB audio class-compliant). Same Option 3 trade-offs
+  as the Realtone cable; the difference is just the host-side
+  connector.
+
+Neither cable is the "best" option in raw signal-quality terms (a
+real interface — Option 4 — wins on preamp headroom and noise floor),
+but both clear the latency budget for [wait mode](playback.md)
+comfortably and require zero room treatment.
 
 ## Option 1 — Built-in laptop / phone microphone
 

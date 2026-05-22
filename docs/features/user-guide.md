@@ -25,11 +25,19 @@ be findable.
 ~/twanga/
     tunings.toml        ← user-defined tunings (CLI + Tauri share this)
     play-resume.toml    ← per-file resume bookmarks
-    recordings/
+    recordings/         ← `twanga record` output + GUI Recorder
         my-take-1779133041.alphatex
-    library/
-        imported-song.alphatex
+    library/            ← imported tabs (GUI Importer + `twanga import`)
+        imported-song-1779200000.alphatex
 ```
+
+The two tab dirs are deliberately separate so the filesystem mirrors
+the data model. `recordings/` holds live captures from this machine
+(via `twanga record` or the GUI Recorder); `library/` holds tabs that
+arrived from outside (alphaTex files, MusicXML imports, anything the
+Importer / `twanga import` produces). The Playback screen merges
+both into a single list with a per-row source tag, so you don't have
+to know which one a tab came from to play it.
 
 Per-OS examples (substitute your username):
 

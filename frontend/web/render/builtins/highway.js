@@ -1,4 +1,4 @@
-// Highway renderer — Rocksmith-style "notes coming toward you" view.
+// Highway renderer — falling-notes view, "notes coming toward you".
 // One vertical lane per string, notes drop from the top toward a horizontal
 // "now" line near the bottom. Notes past the now line scroll off below.
 //
@@ -378,7 +378,7 @@ function parseCapoForLabels(spec, stringCount) {
 export default {
     id: 'twanga.highway',
     name: 'Highway',
-    description: 'Rocksmith-style highway. Notes drop down lanes toward a "now" line at the bottom.',
+    description: 'Falling-notes highway. Notes drop down lanes toward a "now" line at the bottom.',
     version: '1.0.0',
     author: 'TWANGA',
     create(container, options) {

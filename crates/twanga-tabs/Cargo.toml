@@ -10,3 +10,21 @@ publish = false
 
 [dependencies]
 twanga-core = { path = "../twanga-core" }
+# MusicXML parsing — quick-xml is a streaming pull-parser (no DOM tree
+# allocation), MIT, no_std-compatible. Picked over `roxmltree` because
+# the parser sees big files (multi-page scores) and we don't need
+# random access — pull-parsing scales linearly.
+quick-xml = "0.36"
+# `.mxl` is a zip archive containing the inner MusicXML. We only
+# need DEFLATE decompression — the MusicXML container spec mandates
+# deflate, and every exporter in the wild (MuseScore / Sibelius /
+# Finale / Dorico) follows it. Disabling bzip2 + zstd + AES drops
+# C-dependency transitives that don't build for wasm32 without a
+# host clang, and keeps the WASM bundle smaller too. `deflate` (the
+# pure-Rust default) is the only compression backend we enable.
+zip = { version = "2", default-features = false, features = ["deflate"] }
+# Standard MIDI File (.mid / .midi) decoder. `midly` is `no_std`-
+# friendly, MIT-licensed, pure-Rust, and wasm32-compatible without
+# any C transitives. We only need the parse path (TWANGA imports
+# MIDI; doesn't emit it).
+midly = { version = "0.5", default-features = false, features = ["std"] }

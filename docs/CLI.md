@@ -42,14 +42,17 @@ counterpart in one place.
 | Playback | `twanga play [path]` | [features/playback.md](features/playback.md) |
 | Patterns | `twanga patterns <list\|play\|path>` | [features/patterns.md](features/patterns.md) |
 | Tab editor | `twanga edit <path> <set\|clear\|clear-col\|insert-col\|delete-col\|title\|bpm>` | [features/editor.md](features/editor.md) |
+| Importer | `twanga import <path>` (+ `twanga convert <in> --out <out>`) | [features/importer.md](features/importer.md) |
 | Tunings | `twanga tunings <list\|path\|add\|remove>` | [features/tunings.md](features/tunings.md) |
 | Hardware | (setup guide — `twanga docs hardware`) | [features/hardware.md](features/hardware.md) |
+| User guide | `twanga docs user-guide` | [features/user-guide.md](features/user-guide.md) — paths + portable mode + audio architecture + privacy + credits |
 | Docs | `twanga docs [feature]` | The per-feature pages above, printed to stdout for `glow` / `mdcat` / `bat -l md`. |
 
 Bare `twanga` with no subcommand prints the splash banner + the standard
 clap long-help so you can discover what's available. Bare `twanga play`
-opens an interactive picker over bundled examples + patterns + your
-`./recordings/`, mirroring the GUI's Playback library.
+opens an interactive picker over bundled examples, bundled patterns,
+imported tabs (`<data-root>/library/`), and recordings
+(`<data-root>/recordings/`) — mirroring the GUI's Playback library.
 
 ## Shared mic-input controls
 
@@ -71,9 +74,17 @@ two flags + two runtime keys:
 - **`twanga devices`** — list audio input devices CPAL can see.
   Useful for sanity-checking before `tune` / `record` / `play --wait`,
   or for picking the exact name to pass to `--device`. No arguments.
-- **`twanga convert <input> <output>`** — *stub*. Will eventually
-  round-trip alphaTex ↔ MusicXML once the MusicXML parser lands.
-  Proprietary formats (`.gp5`/`.gpx`) are explicit non-goals.
+- **`twanga import <path>`** — add a tab file to the user library
+  (`<data-root>/library/`). Accepts `.alphatex`, `.musicxml` /
+  `.xml`, and `.mxl` (zipped MusicXML); converts to alphaTex via the
+  canonical writer. `--from` overrides format detection; `--title`
+  overrides the source's embedded title. Mirrors the GUI Importer
+  screen — see [Importer](features/importer.md).
+- **`twanga convert <input> --out <output>`** — sibling of
+  `import` for stateless file-in / file-out conversion (no library
+  involvement). Same format detection + `--from` flag. Output is
+  always alphaTex today. Proprietary formats (`.gp5`/`.gpx`) are
+  explicit non-goals — see [SCOPE.md](SCOPE.md).
 
 ## Bundled examples
 

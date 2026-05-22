@@ -9,28 +9,33 @@
 //!
 //!   ~/twanga/
 //!       tunings.toml          ← user-defined tunings (CLI + Tauri share this)
-//!       recordings/
+//!       recordings/           ← `twanga record` output + GUI recorder
+//!           <slug>-<ts>.alphatex
+//!       library/              ← imported tabs (GUI Importer + `twanga import`)
 //!           <slug>-<ts>.alphatex
 //!
 //! Portable mode (sentinel `twanga.portable` next to the binary)
 //! swaps the prefix for `<binary-dir>/twanga-data/` but the rest of
 //! the layout is identical.
 //!
-//! Recording ids are filenames (e.g. `my-take-1779133041.alphatex`).
-//! Stable across runs, unique-by-construction (the recorder adds a
-//! unix-seconds suffix), and don't collide with the GUI's auto-increment
-//! IDB ids because those are integers, not strings.
+//! Tab ids on the Tauri side are filenames (e.g.
+//! `my-take-1779133041.alphatex`). The JS shim prefixes them with
+//! `recording:` or `library:` before exposing them to the rest of
+//! the frontend so subsequent load / update / delete calls know
+//! which dir to look in — see `library-tauri.js`.
 
 use anyhow::{Context, Result, anyhow};
 use serde::Serialize;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
-/// One library row, mirror of the GUI's IDB row shape so the JS
-/// dispatcher can swap backends without touching the consumer code.
+/// One row in the library list — filesystem-backed mirror of the
+/// browser IDB row shape. Used by `list_recordings` and
+/// `list_library_tabs`; the `source` field is what tells the
+/// frontend whether this came from `recordings/` or `library/`.
 #[derive(Debug, Clone, Serialize)]
-pub struct RecordingRow {
+pub struct LocalTabRow {
     pub id: String,
     pub title: String,
     pub source: String,
@@ -39,10 +44,11 @@ pub struct RecordingRow {
     pub last_backed_up_at: Option<u64>,
 }
 
-/// Full content for a single recording. Matches `library.load()`'s
-/// return shape in `library.js`.
+/// Full content + metadata for a single tab. Returned by
+/// `load_recording` and `load_library_tab`. Same shape as
+/// `library.load()`'s return in `library.js`.
 #[derive(Debug, Clone, Serialize)]
-pub struct RecordingFull {
+pub struct LocalTabFull {
     pub id: String,
     pub title: String,
     pub source: String,
@@ -68,6 +74,16 @@ fn recordings_dir() -> Result<PathBuf> {
     Ok(dir)
 }
 
+/// `<data-root>/library/`. Created on demand. Distinct from
+/// `recordings_dir` so the file-system mirrors the data model:
+/// recordings are live captures from this machine, library entries
+/// are tabs imported from external files.
+fn library_dir() -> Result<PathBuf> {
+    let dir = data_root()?.library_dir();
+    fs::create_dir_all(&dir).with_context(|| format!("failed to create {}", dir.display()))?;
+    Ok(dir)
+}
+
 /// `<data-root>/tunings.toml` — same file twanga-cli reads + writes
 /// via the `tunings::user_tunings_path()` helper.
 fn tunings_path() -> Result<PathBuf> {
@@ -86,7 +102,7 @@ fn mtime_millis(path: &std::path::Path) -> Option<u64> {
 /// Cheap title extraction. Read the first ~20 lines looking for a
 /// `\title "..."` directive; fall back to the filename stem.
 /// Avoids a full alphaTex parse for the common case of listing
-/// every file in the recordings dir.
+/// every file in the dir.
 fn title_or_stem(path: &std::path::Path) -> String {
     if let Ok(text) = fs::read_to_string(path) {
         for line in text.lines().take(20) {
@@ -105,22 +121,18 @@ fn title_or_stem(path: &std::path::Path) -> String {
     }
     path.file_stem()
         .and_then(|s| s.to_str())
-        .unwrap_or("recording")
+        .unwrap_or("tab")
         .to_string()
 }
 
-/// `list_recordings` — return every `.alphatex` file in
-/// `$CONFIG/twanga/recordings/`. Newest first (mirrors the GUI's
-/// `createdAt DESC` IDB ordering).
-#[tauri::command]
-pub fn list_recordings() -> std::result::Result<Vec<RecordingRow>, String> {
-    list_recordings_impl().map_err(|e| e.to_string())
-}
+// ──────────────────────────── Generic per-dir engine ────────────────────────
 
-fn list_recordings_impl() -> Result<Vec<RecordingRow>> {
-    let dir = recordings_dir()?;
-    let mut rows: Vec<(RecordingRow, SystemTime)> = Vec::new();
-    for entry in fs::read_dir(&dir).with_context(|| format!("failed to read {}", dir.display()))? {
+/// List every `.alphatex` file in `dir`, newest first (mtime DESC,
+/// matching the GUI's IDB ordering). `source` is the tag attached to
+/// each row — `"user"` for recordings, `"imported"` for library tabs.
+fn list_in_dir(dir: &Path, source: &str) -> Result<Vec<LocalTabRow>> {
+    let mut rows: Vec<(LocalTabRow, SystemTime)> = Vec::new();
+    for entry in fs::read_dir(dir).with_context(|| format!("failed to read {}", dir.display()))? {
         let entry = entry?;
         let path = entry.path();
         if path.extension().and_then(|s| s.to_str()) != Some("alphatex") {
@@ -141,10 +153,10 @@ fn list_recordings_impl() -> Result<Vec<RecordingRow>> {
             .and_then(|m| m.modified())
             .unwrap_or(SystemTime::UNIX_EPOCH);
         rows.push((
-            RecordingRow {
+            LocalTabRow {
                 id,
                 title,
-                source: "user".to_string(),
+                source: source.to_string(),
                 created_at,
                 last_backed_up_at: None,
             },
@@ -155,47 +167,33 @@ fn list_recordings_impl() -> Result<Vec<RecordingRow>> {
     Ok(rows.into_iter().map(|(r, _)| r).collect())
 }
 
-/// `load_recording(id)` — id is the filename, e.g. `my-take-...alphatex`.
-/// Refuses path traversal (no `..`, no path separators) so a hostile
-/// frontend can't read arbitrary files outside the recordings dir.
-#[tauri::command]
-pub fn load_recording(id: String) -> std::result::Result<RecordingFull, String> {
-    load_recording_impl(&id).map_err(|e| e.to_string())
-}
-
-fn load_recording_impl(id: &str) -> Result<RecordingFull> {
-    let path = resolve_recording_path(id)?;
+/// Read a single tab file from `dir`. `id` is a bare filename; path-
+/// traversal protection runs first via [`resolve_in_dir`].
+fn load_from_dir(dir: &Path, source: &str, id: &str) -> Result<LocalTabFull> {
+    let path = resolve_in_dir(dir, id)?;
     if !path.exists() {
-        return Err(anyhow!("no recording with id '{id}'"));
+        return Err(anyhow!("no tab with id '{id}' in {}", dir.display()));
     }
     let alphatex =
         fs::read_to_string(&path).with_context(|| format!("failed to read {}", path.display()))?;
     let title = title_or_stem(&path);
     let created_at = mtime_millis(&path);
-    Ok(RecordingFull {
+    Ok(LocalTabFull {
         id: id.to_string(),
         title,
-        source: "user".to_string(),
+        source: source.to_string(),
         alphatex,
         created_at,
         last_backed_up_at: None,
     })
 }
 
-/// `save_recording(title, alphatex, source?)` → returns the id (filename)
-/// the file was written to. Mirrors `library.save({ title, alphatex,
-/// source })` in `library.js`. The filename is derived from `title` if
-/// provided, otherwise `recording-<unix-secs>.alphatex`.
-#[tauri::command]
-pub fn save_recording(
-    title: String,
-    alphatex: String,
-    _source: Option<String>,
-) -> std::result::Result<String, String> {
-    save_recording_impl(&title, &alphatex).map_err(|e| e.to_string())
-}
-
-fn save_recording_impl(title: &str, alphatex: &str) -> Result<String> {
+/// Write a new `.alphatex` file into `dir`. Filename is derived
+/// from `title` (slugified) with a unix-seconds suffix; when the
+/// title is blank or slugifies to an empty string we fall back to
+/// `<default_stem>-<ts>.alphatex` (e.g. `recording-` / `imported-`).
+/// Returns the bare filename.
+fn save_to_dir(dir: &Path, default_stem: &str, title: &str, alphatex: &str) -> Result<String> {
     if alphatex.is_empty() {
         return Err(anyhow!("alphatex is empty"));
     }
@@ -205,47 +203,32 @@ fn save_recording_impl(title: &str, alphatex: &str) -> Result<String> {
         .unwrap_or(0);
     let slug = slugify(title);
     let filename = if slug.is_empty() {
-        format!("recording-{ts}.alphatex")
+        format!("{default_stem}-{ts}.alphatex")
     } else {
         format!("{slug}-{ts}.alphatex")
     };
-    let path = recordings_dir()?.join(&filename);
+    let path = dir.join(&filename);
     fs::write(&path, alphatex).with_context(|| format!("failed to write {}", path.display()))?;
     Ok(filename)
 }
 
-/// `update_recording(id, title?, alphatex)` — in-place overwrite. The
-/// frontend Editor calls this for "Save" on a user recording.
-#[tauri::command]
-pub fn update_recording(
-    id: String,
-    _title: Option<String>,
-    alphatex: String,
-) -> std::result::Result<(), String> {
-    update_recording_impl(&id, &alphatex).map_err(|e| e.to_string())
-}
-
-fn update_recording_impl(id: &str, alphatex: &str) -> Result<()> {
+/// In-place overwrite of an existing file at `dir/<id>`.
+fn update_in_dir(dir: &Path, id: &str, alphatex: &str) -> Result<()> {
     if alphatex.is_empty() {
         return Err(anyhow!("alphatex is empty"));
     }
-    let path = resolve_recording_path(id)?;
+    let path = resolve_in_dir(dir, id)?;
     if !path.exists() {
-        return Err(anyhow!("no recording with id '{id}'"));
+        return Err(anyhow!("no tab with id '{id}' in {}", dir.display()));
     }
     fs::write(&path, alphatex).with_context(|| format!("failed to write {}", path.display()))?;
     Ok(())
 }
 
-/// `delete_recording(id)` — removes the file. No-op (not error) if the
-/// file doesn't exist (matches the IDB backend's behaviour).
-#[tauri::command]
-pub fn delete_recording(id: String) -> std::result::Result<(), String> {
-    delete_recording_impl(&id).map_err(|e| e.to_string())
-}
-
-fn delete_recording_impl(id: &str) -> Result<()> {
-    let path = resolve_recording_path(id)?;
+/// Delete the file at `dir/<id>`. No-op (not error) when the file
+/// doesn't exist — matches the IDB backend's behaviour.
+fn delete_in_dir(dir: &Path, id: &str) -> Result<()> {
+    let path = resolve_in_dir(dir, id)?;
     if !path.exists() {
         return Ok(());
     }
@@ -253,7 +236,129 @@ fn delete_recording_impl(id: &str) -> Result<()> {
     Ok(())
 }
 
-/// `read_tunings_toml` — return the contents of `$CONFIG/twanga/tunings.toml`
+/// Resolve `id` (a bare filename) to an absolute path under `dir`.
+/// Refuses path traversal — the frontend should only ever pass
+/// filenames that came out of a `list_*` call, but a hostile or
+/// buggy caller shouldn't be able to escape the dir.
+fn resolve_in_dir(dir: &Path, id: &str) -> Result<PathBuf> {
+    if id.contains('/') || id.contains('\\') || id.contains("..") || id.is_empty() {
+        return Err(anyhow!(
+            "invalid tab id '{id}' (must be a bare filename, no path separators)"
+        ));
+    }
+    Ok(dir.join(id))
+}
+
+// ──────────────────────────── Recordings commands ───────────────────────────
+//
+// Thin wrappers around the generic engine, fixed to the recordings
+// dir + `"user"` source + `"recording"` fallback slug.
+
+/// `list_recordings` — return every `.alphatex` file in
+/// `<data-root>/recordings/`. Newest first.
+#[tauri::command]
+pub fn list_recordings() -> std::result::Result<Vec<LocalTabRow>, String> {
+    let dir = recordings_dir().map_err(|e| e.to_string())?;
+    list_in_dir(&dir, "user").map_err(|e| e.to_string())
+}
+
+/// `load_recording(id)` — id is the bare filename, e.g.
+/// `my-take-1779133041.alphatex`. Refuses path traversal.
+#[tauri::command]
+pub fn load_recording(id: String) -> std::result::Result<LocalTabFull, String> {
+    let dir = recordings_dir().map_err(|e| e.to_string())?;
+    load_from_dir(&dir, "user", &id).map_err(|e| e.to_string())
+}
+
+/// `save_recording(title, alphatex, source?)` → returns the new
+/// filename. `source` is accepted for API parity but unused — every
+/// file written here is by definition a recording.
+#[tauri::command]
+pub fn save_recording(
+    title: String,
+    alphatex: String,
+    _source: Option<String>,
+) -> std::result::Result<String, String> {
+    let dir = recordings_dir().map_err(|e| e.to_string())?;
+    save_to_dir(&dir, "recording", &title, &alphatex).map_err(|e| e.to_string())
+}
+
+/// `update_recording(id, title?, alphatex)` — overwrites the file
+/// at `recordings/<id>`. `title` is accepted but unused on the
+/// Rust side (alphaTex's `\title` IS the title; the Editor inlines
+/// it into the body before calling update).
+#[tauri::command]
+pub fn update_recording(
+    id: String,
+    _title: Option<String>,
+    alphatex: String,
+) -> std::result::Result<(), String> {
+    let dir = recordings_dir().map_err(|e| e.to_string())?;
+    update_in_dir(&dir, &id, &alphatex).map_err(|e| e.to_string())
+}
+
+/// `delete_recording(id)` — removes the file. No-op if it doesn't
+/// exist.
+#[tauri::command]
+pub fn delete_recording(id: String) -> std::result::Result<(), String> {
+    let dir = recordings_dir().map_err(|e| e.to_string())?;
+    delete_in_dir(&dir, &id).map_err(|e| e.to_string())
+}
+
+// ──────────────────────────── Library commands ──────────────────────────────
+//
+// Same surface as the recordings commands, against `<data-root>/library/`
+// with `"imported"` source + `"imported"` fallback slug. The JS shim
+// (library-tauri.js) routes by id prefix: `library:` → these
+// commands, `recording:` → the ones above.
+
+/// `list_library_tabs` — every `.alphatex` file in
+/// `<data-root>/library/`, newest first.
+#[tauri::command]
+pub fn list_library_tabs() -> std::result::Result<Vec<LocalTabRow>, String> {
+    let dir = library_dir().map_err(|e| e.to_string())?;
+    list_in_dir(&dir, "imported").map_err(|e| e.to_string())
+}
+
+/// `load_library_tab(id)` — id is the bare filename. Refuses path
+/// traversal.
+#[tauri::command]
+pub fn load_library_tab(id: String) -> std::result::Result<LocalTabFull, String> {
+    let dir = library_dir().map_err(|e| e.to_string())?;
+    load_from_dir(&dir, "imported", &id).map_err(|e| e.to_string())
+}
+
+/// `save_library_tab(title, alphatex)` → returns the new filename.
+/// Used by the Importer (GUI screen + `twanga import` parity layer).
+#[tauri::command]
+pub fn save_library_tab(title: String, alphatex: String) -> std::result::Result<String, String> {
+    let dir = library_dir().map_err(|e| e.to_string())?;
+    save_to_dir(&dir, "imported", &title, &alphatex).map_err(|e| e.to_string())
+}
+
+/// `update_library_tab(id, title?, alphatex)` — overwrites
+/// `library/<id>`. Imported tabs are user-owned, so the Editor's
+/// "Save" lands here just like it does for recordings.
+#[tauri::command]
+pub fn update_library_tab(
+    id: String,
+    _title: Option<String>,
+    alphatex: String,
+) -> std::result::Result<(), String> {
+    let dir = library_dir().map_err(|e| e.to_string())?;
+    update_in_dir(&dir, &id, &alphatex).map_err(|e| e.to_string())
+}
+
+/// `delete_library_tab(id)` — removes the file. No-op if absent.
+#[tauri::command]
+pub fn delete_library_tab(id: String) -> std::result::Result<(), String> {
+    let dir = library_dir().map_err(|e| e.to_string())?;
+    delete_in_dir(&dir, &id).map_err(|e| e.to_string())
+}
+
+// ──────────────────────────── Tunings commands ──────────────────────────────
+
+/// `read_tunings_toml` — return the contents of `<data-root>/tunings.toml`
 /// (or an empty string if the file doesn't exist yet). The frontend's
 /// tunings-tauri.js shim parses this into the same `PresetEntry` shape
 /// localStorage uses.
@@ -270,7 +375,7 @@ fn read_tunings_toml_impl() -> Result<String> {
     fs::read_to_string(&path).with_context(|| format!("failed to read {}", path.display()))
 }
 
-/// `write_tunings_toml(contents)` — overwrite `$CONFIG/twanga/tunings.toml`
+/// `write_tunings_toml(contents)` — overwrite `<data-root>/tunings.toml`
 /// with `contents`. The frontend serialises its localStorage map back
 /// into the CLI's TOML schema before calling this.
 #[tauri::command]
@@ -286,20 +391,6 @@ fn write_tunings_toml_impl(contents: &str) -> Result<()> {
     }
     fs::write(&path, contents).with_context(|| format!("failed to write {}", path.display()))?;
     Ok(())
-}
-
-/// Resolve a recording id (filename) to an absolute path under
-/// `recordings/`. Refuses path traversal — the frontend should only
-/// ever pass filenames that came out of `list_recordings`, but a
-/// hostile or buggy caller shouldn't be able to escape the
-/// recordings dir.
-fn resolve_recording_path(id: &str) -> Result<PathBuf> {
-    if id.contains('/') || id.contains('\\') || id.contains("..") || id.is_empty() {
-        return Err(anyhow!(
-            "invalid recording id '{id}' (must be a bare filename, no path separators)"
-        ));
-    }
-    Ok(recordings_dir()?.join(id))
 }
 
 /// Slugify a title for use in a filename. Matches twanga-cli's
@@ -346,13 +437,76 @@ mod tests {
     }
 
     #[test]
-    fn resolve_recording_path_rejects_traversal() {
-        assert!(resolve_recording_path("../etc/passwd").is_err());
-        assert!(resolve_recording_path("foo/bar.alphatex").is_err());
-        assert!(resolve_recording_path("foo\\bar.alphatex").is_err());
-        assert!(resolve_recording_path("..").is_err());
-        assert!(resolve_recording_path("").is_err());
+    fn resolve_in_dir_rejects_traversal() {
+        let dir = PathBuf::from("/tmp/twanga-test");
+        assert!(resolve_in_dir(&dir, "../etc/passwd").is_err());
+        assert!(resolve_in_dir(&dir, "foo/bar.alphatex").is_err());
+        assert!(resolve_in_dir(&dir, "foo\\bar.alphatex").is_err());
+        assert!(resolve_in_dir(&dir, "..").is_err());
+        assert!(resolve_in_dir(&dir, "").is_err());
         // Bare filenames are fine.
-        assert!(resolve_recording_path("my-tab.alphatex").is_ok());
+        assert!(resolve_in_dir(&dir, "my-tab.alphatex").is_ok());
+    }
+
+    #[test]
+    fn save_and_list_round_trip_in_temp_dir() {
+        // Generic helpers should work against any dir, so we test
+        // them against a scratch path rather than the real data-root
+        // (which would touch the user's home dir during `cargo test`).
+        let tmp = std::env::temp_dir().join(format!(
+            "twanga-cmds-test-{}",
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        fs::create_dir_all(&tmp).expect("create scratch");
+
+        let filename = save_to_dir(&tmp, "imported", "My Import", "\\title \"My Import\"\n")
+            .expect("save_to_dir");
+        assert!(filename.starts_with("my-import-"));
+        assert!(filename.ends_with(".alphatex"));
+
+        let rows = list_in_dir(&tmp, "imported").expect("list_in_dir");
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].source, "imported");
+        assert_eq!(rows[0].title, "My Import");
+
+        let full = load_from_dir(&tmp, "imported", &filename).expect("load_from_dir");
+        assert_eq!(full.source, "imported");
+        assert_eq!(full.alphatex, "\\title \"My Import\"\n");
+
+        update_in_dir(&tmp, &filename, "\\title \"Updated\"\n").expect("update_in_dir");
+        let after = load_from_dir(&tmp, "imported", &filename).expect("load after update");
+        assert_eq!(after.alphatex, "\\title \"Updated\"\n");
+
+        delete_in_dir(&tmp, &filename).expect("delete_in_dir");
+        let rows_after = list_in_dir(&tmp, "imported").expect("list after delete");
+        assert!(rows_after.is_empty());
+
+        // Cleanup
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn save_falls_back_to_default_stem_on_empty_title() {
+        let tmp = std::env::temp_dir().join(format!(
+            "twanga-cmds-test-empty-{}",
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        fs::create_dir_all(&tmp).expect("create scratch");
+
+        let recording_name =
+            save_to_dir(&tmp, "recording", "", "\\title \"\"\n").expect("save with blank title");
+        assert!(recording_name.starts_with("recording-"));
+
+        let imported_name =
+            save_to_dir(&tmp, "imported", "   ", "\\title \"\"\n").expect("save with blank title");
+        assert!(imported_name.starts_with("imported-"));
+
+        let _ = fs::remove_dir_all(&tmp);
     }
 }

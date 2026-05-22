@@ -1,0 +1,24 @@
+# Twinkle Twinkle Little Star — ASCII tab test fixture.
+#
+# Public-domain melody: traditional, popularised via Mozart's K. 265
+# variations and Jane Taylor's 1806 lyric. Comfortably out of
+# copyright everywhere TWANGA ships.
+#
+# Encoded as ASCII tab (the plain-text dashes-and-frets format on
+# every tab-sharing site) for the ASCII parser fixture set. Standard
+# 6-string guitar tuning — the parser should identify the labels
+# against the built-in registry exactly and NOT emit an
+# InferredTuning warning.
+#
+# Arrangement plays the melody on the first two strings only;
+# the lower strings stay open / un-fretted, which is normal for
+# how ASCII tabs notate single-string melodies.
+#
+# Fixture under MIT OR Apache-2.0.
+
+e|--0--0--7--7--9--9--7-----|
+B|--------------------------|
+G|--------------------------|
+D|--------------------------|
+A|--------------------------|
+E|--------------------------|

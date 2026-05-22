@@ -36,8 +36,8 @@ bundled rows (newest first).
 
 ### Per-tab playback view
 
-Two renderer choices — Tab (column-grid notation) and Highway (Rocksmith-
-style falling notes) — pair with two label modes (Frets / Notes) so you can
+Two renderer choices — Tab (column-grid notation) and Highway (falling-
+notes view) — pair with two label modes (Frets / Notes) so you can
 focus on either the *position* you need to play or the *note* it produces.
 The same loaded tab in each combination:
 

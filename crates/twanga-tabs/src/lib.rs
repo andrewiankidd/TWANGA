@@ -3,16 +3,144 @@
 //! - [`TabRecorder`] turns a stream of `(string_idx, fret, time)` events into
 //!   horizontal ASCII tab notation, emitting one [`TabEvent`] per column tick.
 //! - [`alphatex`] is the format TWANGA ships against today (W3C-style open
-//!   text format from the alphaTab project). [`musicxml`] is a placeholder
-//!   for future open-standard interop with MuseScore / Sibelius / Guitar Pro
-//!   exports. Proprietary binary formats (Guitar Pro `.gp5`/`.gpx`) are an
-//!   explicit non-goal — see `docs/SCOPE.md`.
+//!   text format from the alphaTab project) — defines + implements the
+//!   parser + writer.
+//! - [`musicxml`] parses MuseScore / Sibelius / Guitar Pro exports of the
+//!   open-standard MusicXML format into the same [`ParsedTab`] shape, so
+//!   downstream renderers + playback code consume both formats uniformly.
+//!   Proprietary binary formats (Guitar Pro `.gp5`/`.gpx`) are an explicit
+//!   non-goal — see `docs/SCOPE.md`.
+//!
+//! [`ParsedTab`] / [`TabColumn`] / [`DroppedNote`] / [`TransposeMode`] are
+//! format-agnostic — re-exported at the crate root from where they're
+//! actually defined (inside [`alphatex`] for historical reasons; both
+//! parsers produce the same type).
 
 use twanga_core::{MidiNote, Tuning};
 
-pub mod musicxml {
-    // MusicXML parser — placeholder. Open W3C-style XML schema; the natural
-    // open-standard interop point with sheet-music editors.
+/// Re-export the format-agnostic parsed-tab types at the crate root.
+/// Both the alphaTex parser and the MusicXML parser produce these, so
+/// downstream consumers should reach for `twanga_tabs::ParsedTab` (not
+/// the format-specific submodule path).
+pub use alphatex::{DroppedNote, ParseError, ParsedTab, TabColumn, TransposeMode};
+
+/// Non-fatal observations a format parser makes during a successful
+/// parse. Returned alongside the [`ParsedTab`] inside [`ParseOutput`]
+/// so the importer UI can show a preflight summary ("N notes had
+/// non-standard durations, M notes were unreachable on the staff
+/// tuning, …") before the user commits the import.
+///
+/// Format-agnostic by design — MusicXML, MIDI, ASCII tab, and ABC
+/// all surface the same shape of observation. Variants are additive;
+/// adding a new one is non-breaking.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ParseWarning {
+    /// A note's duration wasn't a clean power-of-2 division — we
+    /// rounded it to the next-highest standard denominator. Surfaced
+    /// as `column_index` (0-based in the resulting [`ParsedTab`]) +
+    /// the original raw duration token from the source.
+    IrregularDuration {
+        column_index: usize,
+        raw_duration: String,
+    },
+    /// A pitch couldn't be reached on the file's staff tuning within
+    /// the standard 20-fret window — the note was dropped. Same
+    /// shape as the alphaTex transposer's [`DroppedNote`].
+    UnreachableNote { column_index: usize, note: String },
+    /// The source declared an explicit string number but didn't
+    /// include matching tuning info. The string mapping is best-
+    /// effort; user should review the imported file before relying
+    /// on the fingering.
+    MissingStringTuning { referenced_string: u8 },
+    /// The source carried multiple tracks / parts / voices and only
+    /// the first note-bearing one was used. `name` is the track name
+    /// if the source provided one (e.g. MIDI `Sequence/Track Name`
+    /// meta event, MusicXML `<part-name>`), otherwise the index.
+    /// Surfaced so users importing a multi-instrument file aren't
+    /// surprised when only one part lands in TWANGA.
+    SkippedTrack { index: usize, name: String },
+    /// The source's declared tuning didn't match any tuning in the
+    /// registry exactly, but a close match was found and used. Carries
+    /// the matched tuning's display name so the user can confirm the
+    /// guess in the Importer UI before committing.
+    InferredTuning {
+        source_tuning: Vec<String>,
+        matched_name: String,
+    },
+}
+
+/// Successful parse result returned by every format parser. The
+/// `warnings` list is empty for a clean import; the importer should
+/// surface non-empty warnings before committing.
+#[derive(Debug, Clone)]
+pub struct ParseOutput {
+    pub tab: ParsedTab,
+    pub warnings: Vec<ParseWarning>,
+}
+
+pub mod abc;
+pub mod ascii_tab;
+pub mod midi;
+pub mod musicxml;
+
+/// Map a raw MIDI pitch to a `(string_1_based, fret)` placement on
+/// the given tuning. Picks the lowest fret across all valid string
+/// candidates (same tie-break rule [`Tuning::match_to_fret`] uses).
+/// Returns `None` if no string can reach the pitch within `max_fret`.
+///
+/// Shared across the pitch-only format parsers — MIDI and ABC both
+/// land here when they need to place a raw MIDI number on a tuning.
+/// (The MusicXML parser has its own `infer_placement` that works on
+/// an incomplete tuning being built incrementally, so it doesn't
+/// share this code path; the algorithm is the same modulo input
+/// shape.)
+pub(crate) fn place_pitch(
+    tuning: &twanga_core::Tuning,
+    pitch: u8,
+    max_fret: u8,
+) -> Option<(u8, u8)> {
+    let mut best: Option<(u8, u8)> = None;
+    for (idx, s) in tuning.strings.iter().enumerate() {
+        let delta = pitch as i32 - s.open.0 as i32 - s.fret_offset as i32;
+        if (0..=max_fret as i32).contains(&delta) {
+            let fret = delta as u8;
+            let twanga_string = (idx + 1) as u8;
+            best = match best {
+                None => Some((twanga_string, fret)),
+                Some((_, prev)) if fret < prev => Some((twanga_string, fret)),
+                Some(prev) => Some(prev),
+            };
+        }
+    }
+    best
+}
+
+/// Snap a denominator (4 = quarter, 8 = eighth, …) to the closest
+/// standard power of 2 in `{1, 2, 4, 8, 16, 32}`. Returns
+/// `(snapped, did_round)`; `did_round` is true when the input
+/// wasn't itself a clean power of 2 (dotted, triplet, or noise).
+///
+/// Shared across format parsers — MusicXML's `<duration>` / divisions
+/// math, MIDI's tick → quarter math, and ABC's `L:`/`/n` math all
+/// land here. Ties prefer the LARGER denominator (shorter note
+/// duration) so quantisation biases toward "play more notes" rather
+/// than "hold one longer" — the safer mistake for practice playback.
+pub(crate) fn snap_to_power_of_two(raw: f64) -> (u32, bool) {
+    const CANDIDATES: [u32; 6] = [1, 2, 4, 8, 16, 32];
+    if raw.is_nan() || raw <= 0.0 {
+        return (4, true);
+    }
+    let mut best = CANDIDATES[0];
+    let mut best_dist = (CANDIDATES[0] as f64 - raw).abs();
+    for &c in &CANDIDATES[1..] {
+        let d = (c as f64 - raw).abs();
+        if d < best_dist || (d == best_dist && c > best) {
+            best = c;
+            best_dist = d;
+        }
+    }
+    let rounded = (best as f64 - raw).abs() > 1e-6;
+    (best, rounded)
 }
 
 pub mod alphatex {
@@ -46,12 +174,22 @@ pub mod alphatex {
     }
 
     /// One column from a parsed tab.
-    #[derive(Debug, Clone)]
+    #[derive(Debug, Clone, Default)]
     pub struct TabColumn {
         /// Duration denominator (`4` = quarter, `8` = eighth, …).
         pub duration_denom: u32,
         /// `(string_number_1_based, fret)` for each hit. Empty = rest.
         pub hits: Vec<(u8, u8)>,
+        /// Articulation marker carried over from the source (the
+        /// technique used to *reach* this note from the previous
+        /// one). Stored as the raw alphaTex prefix byte: `b'h'`
+        /// hammer-on, `b'p'` pull-off, `b's'` slide. `None` for a
+        /// plain pluck. TWANGA's playback / renderer don't consume
+        /// these yet (articulation is a [`BACKLOG`](../../../docs/BACKLOG.md)
+        /// entry), but the importers + writer preserve them so an
+        /// ASCII tab with `--3h5--` round-trips through alphaTex
+        /// without losing the hammer-on annotation.
+        pub articulation: Option<u8>,
     }
 
     impl ParsedTab {
@@ -188,6 +326,7 @@ pub mod alphatex {
                     TabColumn {
                         duration_denom: col.duration_denom,
                         hits: new_hits,
+                        articulation: col.articulation,
                     }
                 })
                 .collect();
@@ -405,11 +544,17 @@ pub mod alphatex {
             columns.push(TabColumn {
                 duration_denom: *current_duration,
                 hits: vec![],
+                articulation: None,
             });
             return Ok(());
         }
-        if token.starts_with('(') {
-            let inner = token.trim_start_matches('(').trim_end_matches(')');
+        // Pull off a leading articulation prefix (`h`, `p`, `s`)
+        // BEFORE the rest of the token-shape detection — alphaTex
+        // notates "hammer to 5 on string 6" as `h5.6`, which is
+        // otherwise indistinguishable from a malformed note.
+        let (articulation, body) = split_articulation_prefix(token);
+        if body.starts_with('(') {
+            let inner = body.trim_start_matches('(').trim_end_matches(')');
             let mut hits = Vec::new();
             for note_str in inner.split_whitespace() {
                 hits.push(parse_note(note_str)?);
@@ -417,18 +562,45 @@ pub mod alphatex {
             columns.push(TabColumn {
                 duration_denom: *current_duration,
                 hits,
+                articulation,
             });
             return Ok(());
         }
-        if let Ok(note) = parse_note(token) {
+        if let Ok(note) = parse_note(body) {
             columns.push(TabColumn {
                 duration_denom: *current_duration,
                 hits: vec![note],
+                articulation,
             });
             return Ok(());
         }
         // Unknown token — silently skip.
         Ok(())
+    }
+
+    /// Recognise a leading articulation prefix and return
+    /// `(Some(byte), rest)` or `(None, original)` when there isn't
+    /// one. Recognised prefixes: `h` (hammer-on), `p` (pull-off),
+    /// `s` (slide). Defined as a small set rather than "any alpha"
+    /// so misparses on tokens like `r` (rest, handled earlier) or
+    /// `(` (chord, handled earlier) can't reach this path.
+    fn split_articulation_prefix(token: &str) -> (Option<u8>, &str) {
+        let first = token.as_bytes().first().copied();
+        match first {
+            Some(b @ (b'h' | b'p' | b's')) => {
+                // Only consume the prefix when what follows looks like
+                // a note (starts with a digit) — guards against a
+                // pathological `s` token that should be parsed as
+                // something else.
+                let rest = &token[1..];
+                if rest.starts_with(|c: char| c.is_ascii_digit() || c == '(') {
+                    (Some(b), rest)
+                } else {
+                    (None, token)
+                }
+            }
+            _ => (None, token),
+        }
     }
 
     fn parse_note(s: &str) -> Result<(u8, u8), ParseError> {
@@ -511,6 +683,20 @@ pub mod alphatex {
         /// Write one column. `marks[i] = Some(fret)` means string `i+1` was hit
         /// at that fret; `None` means the string was not played.
         pub fn write_column(&mut self, marks: &[Option<u8>]) -> io::Result<()> {
+            self.write_column_with_articulation(marks, None)
+        }
+
+        /// Emit one column, optionally tagged with an articulation
+        /// prefix (`b'h'` / `b'p'` / `b's'`) preceding the fret
+        /// token(s). Importers that capture articulation (currently
+        /// the ASCII tab parser) route through this variant; the
+        /// recorder + other zero-articulation callers go through
+        /// [`Self::write_column`].
+        pub fn write_column_with_articulation(
+            &mut self,
+            marks: &[Option<u8>],
+            articulation: Option<u8>,
+        ) -> io::Result<()> {
             // Emit the duration prefix once per bar. AlphaTex carries duration
             // forward until changed, so we don't need to repeat it per note —
             // just once after each bar boundary.
@@ -525,10 +711,27 @@ pub mod alphatex {
                 .filter_map(|(i, m)| m.map(|f| (i + 1, f)))
                 .collect();
 
+            // Recognise only the prefixes the alphaTex parser will
+            // round-trip — anything else (None, or a stale byte from
+            // an external caller) is dropped silently rather than
+            // emitting a token the parser would reject.
+            let art: Option<u8> = match articulation {
+                Some(b @ (b'h' | b'p' | b's')) if !hits.is_empty() => Some(b),
+                _ => None,
+            };
+
             match hits.len() {
                 0 => write!(self.writer, "r ")?,
-                1 => write!(self.writer, "{}.{} ", hits[0].1, hits[0].0)?,
+                1 => {
+                    if let Some(b) = art {
+                        self.writer.write_all(&[b])?;
+                    }
+                    write!(self.writer, "{}.{} ", hits[0].1, hits[0].0)?;
+                }
                 _ => {
+                    if let Some(b) = art {
+                        self.writer.write_all(&[b])?;
+                    }
                     write!(self.writer, "(")?;
                     for (i, (string, fret)) in hits.iter().enumerate() {
                         if i > 0 {
@@ -1154,6 +1357,59 @@ pub mod alphatex {
             assert_eq!(parsed.columns[1].hits, vec![(3, 3)]);
             assert!(parsed.columns[2].hits.is_empty());
             assert_eq!(parsed.columns[3].hits, vec![(1, 2), (2, 0), (3, 0), (4, 0)]);
+        }
+
+        #[test]
+        fn articulation_round_trips_through_writer_and_parser() {
+            // Pluck (no art), hammer-on, pull-off, slide — the four
+            // articulation states the writer + parser support. Round-
+            // tripping is the contract: any data set by an importer
+            // on a TabColumn must survive serialise + re-parse so the
+            // user library doesn't silently lose technique annotations.
+            let mut buf = Vec::new();
+            let uke = uke();
+            {
+                let mut w = AlphaTexWriter::new(
+                    &mut buf,
+                    &uke,
+                    &Capo::none(uke.strings.len()),
+                    100,
+                    8,
+                    None,
+                )
+                .unwrap();
+                w.write_column_with_articulation(&[Some(3), None, None, None], None)
+                    .unwrap();
+                w.write_column_with_articulation(&[Some(5), None, None, None], Some(b'h'))
+                    .unwrap();
+                w.write_column_with_articulation(&[Some(3), None, None, None], Some(b'p'))
+                    .unwrap();
+                w.write_column_with_articulation(&[Some(7), None, None, None], Some(b's'))
+                    .unwrap();
+                w.finalize().unwrap();
+            }
+            let text = String::from_utf8(buf).unwrap();
+            // The serialised form should contain the prefix tokens
+            // so a human reading the file sees the technique.
+            assert!(
+                text.contains("h5."),
+                "expected 'h5.' in output, got: {text}"
+            );
+            assert!(
+                text.contains("p3."),
+                "expected 'p3.' in output, got: {text}"
+            );
+            assert!(
+                text.contains("s7."),
+                "expected 's7.' in output, got: {text}"
+            );
+            // Re-parse and check articulations survived per-column.
+            let parsed = parse(&text).unwrap();
+            assert_eq!(parsed.columns.len(), 4);
+            assert_eq!(parsed.columns[0].articulation, None);
+            assert_eq!(parsed.columns[1].articulation, Some(b'h'));
+            assert_eq!(parsed.columns[2].articulation, Some(b'p'));
+            assert_eq!(parsed.columns[3].articulation, Some(b's'));
         }
     }
 }
