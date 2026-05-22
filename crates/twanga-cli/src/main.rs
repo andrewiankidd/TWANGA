@@ -2969,9 +2969,9 @@ fn wait_for_expected_note(
     // happening to YIN-match the expected pitch exits the wait
     // immediately. Symptom: "the first note always continues anyway
     // even if I don't play." Drain feeds the tuner so calibration
-    // state advances, but then drops the resulting readings so we
-    // only ever accept readings produced by audio that arrived AFTER
-    // this wait started.
+    // state advances, then `clear_for_wait` discards the YIN buffer,
+    // queued readings, and any `onset_pending` flag — so only audio
+    // that arrives AFTER this point can satisfy the match.
     loop {
         let n = stream.read(buf);
         if n == 0 {
@@ -2979,7 +2979,7 @@ fn wait_for_expected_note(
         }
         tuner.feed(&buf[..n]);
     }
-    let _ = tuner.take_readings();
+    tuner.clear_for_wait();
 
     loop {
         if twanga_tui::is_shutdown_requested() {
@@ -2999,6 +2999,17 @@ fn wait_for_expected_note(
         if n > 0 {
             tuner.feed(&buf[..n]);
             for r in tuner.take_readings() {
+                // Onset-gated matching: only accept a pitch match
+                // from a YIN window that started at a fresh attack.
+                // Without this, the sustained tail of the previous
+                // note can keep producing matching readings as the
+                // YIN window slides — the cursor would advance on
+                // "still hearing the last note" instead of "user
+                // actually played the next one." See
+                // `twanga-dsp::onset` + docs/plans/onset-detection.md.
+                if !r.from_onset_window {
+                    continue;
+                }
                 if matches_any_expected(r.detected, expected, tuning) {
                     return Ok(());
                 }

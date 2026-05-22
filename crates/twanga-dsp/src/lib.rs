@@ -7,6 +7,8 @@
 
 use twanga_core::{Frequency, MidiNote, Tuning};
 
+pub mod onset;
+
 pub trait PitchDetector {
     fn detect(&mut self, samples: &[f32], sample_rate: u32) -> Option<Frequency>;
 }
@@ -133,6 +135,16 @@ pub struct TunerReading {
     pub target: Frequency,
     /// Signed cents difference (positive = detected is sharp of target).
     pub cents: f32,
+    /// True iff this reading came from a YIN window that started at
+    /// a fresh onset — i.e., this is the first window's reading
+    /// since the most recent note attack. Wait-mode uses this to
+    /// distinguish "user just played a new note" from "previous
+    /// note is sustaining and YIN keeps reading the same pitch."
+    /// False on the default detection path (chromatic / strings
+    /// without an onset reset). Subsequent readings from the same
+    /// onset session also come through as false — each onset
+    /// produces exactly one fresh-window reading.
+    pub from_onset_window: bool,
 }
 
 /// Streaming tuner. Accumulates mono samples, runs YIN on each completed
@@ -160,6 +172,18 @@ pub struct Tuner {
     /// Cleared by a fresh [`Self::start_noise_calibration`] call so the
     /// "result" surface only ever shows the latest run's numbers.
     last_calibration: Option<CalibrationResult>,
+    /// Energy-derivative onset detector running alongside YIN.
+    /// When it fires, [`Self::feed`] clears the sample buffer so the
+    /// next YIN window starts at fresh post-attack samples — and
+    /// the first reading produced after the onset is tagged
+    /// [`TunerReading::from_onset_window`] so wait-mode consumers
+    /// can distinguish "the user just played" from "the previous
+    /// note is still sustaining."
+    onset_detector: onset::OnsetDetector,
+    /// True after an onset fires, cleared when the next reading is
+    /// produced. Implements the "each onset = one fresh-window
+    /// reading" semantic that wait-mode relies on.
+    onset_pending: bool,
 }
 
 /// Internal state for an in-progress noise-floor calibration. The Tuner
@@ -269,6 +293,8 @@ impl Tuner {
             silence_rms: Self::DEFAULT_SILENCE_RMS,
             calibration: None,
             last_calibration: None,
+            onset_detector: onset::OnsetDetector::new(sample_rate),
+            onset_pending: false,
         }
     }
 
@@ -369,6 +395,19 @@ impl Tuner {
         if self.calibration.is_some() {
             self.advance_calibration(samples);
         }
+
+        // Run onset detection on the new samples BEFORE they enter
+        // the YIN buffer. If an attack fires, clear the buffer so
+        // the next YIN window starts at fresh post-attack audio —
+        // this prevents the "previous note's sustain bleeds into
+        // the next column's analysis window" failure mode that
+        // afflicts fast passages today. See `crates/twanga-dsp/src/onset.rs`
+        // and docs/plans/onset-detection.md for the why.
+        if self.onset_detector.feed(samples) {
+            self.buffer.clear();
+            self.onset_pending = true;
+        }
+
         self.buffer.extend_from_slice(samples);
         while self.buffer.len() >= self.window_size {
             let window = &self.buffer[..self.window_size];
@@ -384,11 +423,21 @@ impl Tuner {
                     let too_far_from_any_string = matches!(self.mode, TunerMode::Strings(_))
                         && cents.abs() > Self::MAX_STRING_DISTANCE_CENTS;
                     if !too_far_from_any_string {
+                        // Tag the first reading after an onset; the
+                        // pending flag clears so subsequent readings
+                        // from the same onset session (overlapping
+                        // YIN windows on the same sustain) come
+                        // through as plain detections. Wait-mode
+                        // matches only the tagged one, giving "each
+                        // onset = one match opportunity."
+                        let from_onset = self.onset_pending;
+                        self.onset_pending = false;
                         self.readings.push(TunerReading {
                             detected: freq,
                             label,
                             target,
                             cents,
+                            from_onset_window: from_onset,
                         });
                     }
                 }
@@ -399,6 +448,20 @@ impl Tuner {
 
     pub fn take_readings(&mut self) -> std::vec::Drain<'_, TunerReading> {
         self.readings.drain(..)
+    }
+
+    /// Reset transient pitch-detection state so the next [`Self::feed`]
+    /// call starts from a clean slate. Specifically drops the YIN
+    /// sample buffer, drains any queued readings, and clears
+    /// `onset_pending` — so no stale pre-wait audio can satisfy the
+    /// first column's wait-mode match. Calibration state, the silence
+    /// threshold, and the onset detector's baseline are intentionally
+    /// preserved (those are slow-adapting and shouldn't be discarded
+    /// just because the consumer paused for a moment).
+    pub fn clear_for_wait(&mut self) {
+        self.buffer.clear();
+        self.readings.clear();
+        self.onset_pending = false;
     }
 
     /// Consume new samples into the in-progress calibration's chunk
@@ -457,11 +520,26 @@ fn window_rms(samples: &[f32]) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::f32::consts::PI;
     use twanga_core::MidiNote;
     use twanga_synth::{harmonic_stack, mix_into, sine, white_noise};
 
     fn cents(detected: Frequency, expected: Frequency) -> f32 {
         1200.0 * (detected.hz() / expected.hz()).log2()
+    }
+
+    /// Generate a plucked-string-shaped signal: sharp attack followed by
+    /// exponential decay. Used by the onset-integration tests below to
+    /// produce realistic input for the Tuner's onset-detection +
+    /// fresh-window-pitch-detection pipeline.
+    fn pluck_signal(sr: u32, n: usize, hz: f32, peak: f32, decay_secs: f32) -> Vec<f32> {
+        let decay_samples = decay_secs * sr as f32;
+        (0..n)
+            .map(|i| {
+                let env = peak * (-(i as f32) / decay_samples).exp();
+                env * (2.0 * PI * hz * i as f32 / sr as f32).sin()
+            })
+            .collect()
     }
 
     // ---- YIN tests ----
@@ -646,6 +724,36 @@ mod tests {
             tuner.feed(chunk);
         }
         assert_eq!(tuner.take_readings().count(), 1);
+    }
+
+    #[test]
+    fn tuner_tags_first_post_onset_reading_then_clears_flag() {
+        // Feed a pluck-shaped signal: sharp attack + decay. The
+        // attack fires an onset → the FIRST reading is tagged
+        // `from_onset_window = true`. Subsequent readings produced
+        // from later windows of the same sustain are tagged false
+        // — each onset gives exactly one fresh-window reading,
+        // which is the wait-mode "one match per pluck" contract.
+        const SR: u32 = 48_000;
+        let mut tuner = Tuner::new(TunerMode::Chromatic, SR);
+        // Long enough signal to produce multiple YIN windows.
+        // DEFAULT_WINDOW + 2 * DEFAULT_SLIDE_BY = 16384 samples ⇒
+        // 3 windows.
+        let n = Tuner::DEFAULT_WINDOW + 2 * Tuner::DEFAULT_SLIDE_BY;
+        let signal = pluck_signal(SR, n, 440.0, 0.5, 0.5);
+        tuner.feed(&signal);
+        let readings: Vec<TunerReading> = tuner.take_readings().collect();
+        assert!(!readings.is_empty(), "expected at least one reading");
+        assert!(
+            readings[0].from_onset_window,
+            "first reading after pluck onset should be from_onset_window=true"
+        );
+        for (i, r) in readings.iter().enumerate().skip(1) {
+            assert!(
+                !r.from_onset_window,
+                "reading {i} should be from_onset_window=false (no fresh onset)"
+            );
+        }
     }
 
     #[test]

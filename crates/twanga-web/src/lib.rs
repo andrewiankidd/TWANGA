@@ -687,6 +687,11 @@ struct ReadingJs {
     detected_hz: f32,
     target_hz: f32,
     cents: f32,
+    /// True iff this reading came from a YIN window freshly anchored
+    /// at a note attack — see [`twanga_dsp::TunerReading::from_onset_window`].
+    /// JS wait-mode consumers gate matches on this so a sustained
+    /// previous note can't "play" the next column.
+    from_onset_window: bool,
 }
 
 #[derive(serde::Serialize)]
@@ -865,6 +870,17 @@ impl WebTuner {
         self.inner.feed(samples);
     }
 
+    /// Wrapper around [`twanga_dsp::Tuner::clear_for_wait`] —
+    /// resets the YIN buffer, drains queued readings, and clears any
+    /// `onset_pending` flag so the next reading can only come from
+    /// audio that arrives AFTER this call. The web playback engine
+    /// calls this at the moment wait-mode engages for a new column,
+    /// so a sustained note from the previous column can't satisfy
+    /// the next match.
+    pub fn clear_for_wait(&mut self) {
+        self.inner.clear_for_wait();
+    }
+
     /// Read the current silence threshold (linear amplitude RMS over
     /// an 8192-sample window). Default 0.005 ≈ -46 dB.
     pub fn silence_rms(&self) -> f32 {
@@ -943,6 +959,7 @@ impl WebTuner {
                 detected_hz: r.detected.hz(),
                 target_hz: r.target.hz(),
                 cents: r.cents,
+                from_onset_window: r.from_onset_window,
             })
             .collect();
         serde_wasm_bindgen::to_value(&readings).unwrap()
