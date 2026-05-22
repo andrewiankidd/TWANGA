@@ -65,6 +65,11 @@ allow = [
     "0BSD",
     "MPL-2.0",
     "CC0-1.0",
+    # Public-domain-equivalent, OSI-approved + FSF-Free/Libre. More
+    # permissive than MIT (no attribution requirement). Used by `midly`
+    # (the SMF parser); compatible with TWANGA's MIT-OR-Apache-2.0
+    # posture.
+    "Unlicense",
 ]
 confidence-threshold = 0.93
 
