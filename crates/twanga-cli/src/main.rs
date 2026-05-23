@@ -1,7 +1,9 @@
+mod audio_source;
 mod bundled;
 mod import;
 mod play_resume;
 mod tunings;
+mod wav;
 
 use anyhow::{Context, Result, anyhow};
 use clap::{CommandFactory, Parser, Subcommand};
@@ -112,6 +114,15 @@ enum Command {
         /// summary at the end of the run.
         #[arg(long, value_parser = ["wait", "tight", "casual", "free"])]
         policy: Option<String>,
+        /// Replay a mono PCM WAV file in place of the live mic. The
+        /// file is paced to wall-clock at its own sample rate so the
+        /// playback loop ticks against it identically to a real
+        /// input stream. Used for deterministic end-to-end testing
+        /// (integration suite under `tests/play_from_file.rs`) and
+        /// for repeatable demos on a headless box. No-op when the
+        /// policy doesn't need audio (`--policy free`).
+        #[arg(long, value_name = "PATH")]
+        from_file: Option<PathBuf>,
         /// Loop playback. Pass with no value to loop the entire file, or with
         /// `START:END` (0-indexed column range, end exclusive) to loop a
         /// section, e.g. `--loop 0:20` or `--loop 20:30`.
@@ -1711,6 +1722,7 @@ fn main() -> Result<()> {
             no_metronome,
             wait,
             policy,
+            from_file,
             loop_spec,
             capo,
             pre_roll,
@@ -1782,6 +1794,7 @@ fn main() -> Result<()> {
                 pre_roll,
                 resume_col,
                 silence_rms,
+                from_file,
             )?;
         }
         Command::Devices => {
@@ -2212,6 +2225,7 @@ fn run_patterns_play(
         /* pre_roll */ 4,
         /* resume_col */ None,
         /* silence_rms */ None,
+        /* from_file */ None,
     )
 }
 
@@ -2410,6 +2424,11 @@ const PLAYBACK_WINDOW_COLS: usize = 24;
 /// Tolerance for wait-mode note matching, in cents.
 const WAIT_MATCH_CENTS: f32 = 50.0;
 
+/// The mic-or-file source plus its `Tuner`, paired so the playback
+/// loop can feed samples through pitch detection in lockstep. `None`
+/// when the chosen policy doesn't need audio (FreePlay).
+type InputState = Option<(Box<dyn audio_source::SampleSource>, Tuner)>;
+
 // 8 args is one over clippy's default ceiling. The arguments are
 // independent user-CLI-flag values aggregated for the playback flow;
 // bundling them into a struct just to satisfy the lint is more
@@ -2428,6 +2447,7 @@ fn run_playback(
     pre_roll: u32,
     resume_col: Option<u64>,
     silence_rms: Option<f32>,
+    from_file: Option<PathBuf>,
 ) -> Result<()> {
     // Local boolean derived from the policy for spots that still read
     // "is this wait mode?" in the obvious way — the previous code
@@ -2535,21 +2555,29 @@ fn run_playback(
     };
     let click = output.as_ref().map(|o| metronome_click(o.sample_rate));
 
-    let (mut input_state, mut input_buf) = if needs_audio {
-        let s = InputStream::open()?;
-        let sr = s.sample_rate;
+    let (mut input_state, mut input_buf): (InputState, Vec<f32>) = if needs_audio {
+        // Either a live mic or a paced WAV-file replay, depending on
+        // `--from-file`. Both implement the narrow `SampleSource`
+        // trait — the playback loop doesn't care which it has.
+        let source: Box<dyn audio_source::SampleSource> = match from_file.as_deref() {
+            Some(path) => Box::new(audio_source::WavSampleSource::from_file(path)?),
+            None => Box::new(InputStream::open()?),
+        };
+        let sr = source.sample_rate();
         let mut tuner = Tuner::new(TunerMode::Chromatic, sr);
         // Both wait-mode and proximity-score depend on the silence
         // threshold being correct — a too-high default suppresses
         // legitimately quiet plucks; a too-low one fires YIN on
         // cable hum. Auto-calibrate at session start unless the
-        // user pinned a value with `--silence-rms`.
+        // user pinned a value with `--silence-rms`. The WAV-file
+        // path also calibrates so synth fixtures with realistic
+        // noise floors behave the same as a live take.
         if let Some(rms) = silence_rms {
             tuner.set_silence_rms(rms);
         } else {
             tuner.start_noise_calibration(NOISE_CALIBRATION_SECONDS);
         }
-        (Some((s, tuner)), vec![0.0_f32; READ_CHUNK])
+        (Some((source, tuner)), vec![0.0_f32; READ_CHUNK])
     } else {
         (None, Vec::new())
     };
@@ -2873,7 +2901,7 @@ fn run_playback(
 /// defensive) the call degrades to a plain sleep so the tempo still
 /// holds.
 fn capture_onsets_for_duration(
-    input_state: &mut Option<(InputStream, Tuner)>,
+    input_state: &mut InputState,
     buf: &mut [f32],
     duration_ms: u32,
     clock_origin: std::time::Instant,
@@ -3146,7 +3174,7 @@ fn run_pre_roll(
 /// the expected `(string, fret)` hits within [`WAIT_MATCH_CENTS`] of the
 /// target. Polls Ctrl-C / `q` so the user can still abort.
 fn wait_for_expected_note(
-    input_state: &mut Option<(InputStream, Tuner)>,
+    input_state: &mut InputState,
     buf: &mut [f32],
     expected: &[(u8, u8)],
     tuning: &Tuning,

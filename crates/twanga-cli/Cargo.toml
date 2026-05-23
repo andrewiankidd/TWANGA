@@ -12,6 +12,15 @@ publish = false
 name = "twanga"
 path = "src/main.rs"
 
+# A tiny lib alongside the bin so integration tests in `tests/` can
+# pull in the WAV synthesizer + sample-source trait without
+# duplicating ~80 lines of WAV writer code. The lib re-exports only
+# the modules the test harness genuinely needs; everything else
+# stays bin-local in `main.rs`.
+[lib]
+name = "twanga_cli"
+path = "src/lib.rs"
+
 [dependencies]
 twanga-core = { path = "../twanga-core" }
 twanga-audio = { path = "../twanga-audio" }

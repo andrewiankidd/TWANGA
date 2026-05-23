@@ -10,6 +10,30 @@ dated section.
 
 ### Added
 
+- **`twanga play --from-file <wav>` + 23-scenario integration suite.**
+  Playback now swaps the live mic for a paced WAV-file replay when
+  `--from-file` is set, making the whole pipeline (sample read →
+  tuner → onset detector → wait-mode match / proximity scoring →
+  summary print) deterministically testable. A new in-house mono
+  PCM WAV reader/writer (`twanga-cli/src/wav.rs`, ~80 LOC, zero new
+  deps, supports PCM int-16 + IEEE float-32) backs a
+  `WavSampleSource` that paces sample delivery to wall-clock so the
+  loop behaves the same as it would against a live stream. The bin
+  picked up a small lib target alongside it so
+  `tests/play_from_file.rs` can pull the WAV synthesizer in
+  without duplicating it. The 23 scenarios cover: perfect takes
+  (wait + tight + casual); consistent +70 ms lateness under both
+  tight and casual (documenting that tight's effective window is
+  unreachable once YIN's ~170 ms detection latency stacks); 2-second
+  late = Missed; wrong pitch on time; silent input; chord input
+  (pinned as "completes without crashing" — chord scoring is a
+  known limitation); fast-passage long-tail regression (Ship 1
+  fix); 60 / 200 / 300 BPM tempo edges; ring-out and back-to-back
+  plucks; jittery + accelerating + decelerating pacing; mixed
+  right/wrong pitches; dropped middle note; extra in-between
+  strums; 8-note mixed-timings long passage; and a free-play
+  sanity check. A module-level mutex serialises the scenarios so
+  default `cargo test` runs reliably without `--test-threads=1`.
 - **Tab importer — MIDI / ABC notation / ASCII tab.** Three new
   open-format parsers extend the importer beyond alphaTex /
   MusicXML / MXL. CLI (`twanga import` / `twanga convert`), WASM
