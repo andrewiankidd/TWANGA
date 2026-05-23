@@ -215,6 +215,7 @@ Tuner-driven passive sample collection. The chore (tuning) becomes the data sour
 - **Foot pedal support.** Bluetooth page-turner pedals. Page turn, pause, restart loop. Stupid simple (arrow keys), transformative for practice flow.
 - **Multiple simultaneous inputs.** Two players one session, or one player with two instruments mic'd.
 - **Specific guidance on USB audio interfaces.** Short README section demystifying the Realtone cable vs cheap clones vs proper interfaces. Honest, useful, links to nothing specific because the open-source-cable scene isn't mature enough to recommend.
+- **Output device management + its impact on latency calibration.** TWANGA picks the OS-default audio output today (no user-facing picker) — fine for v1, but round-trip latency depends on the output side too (headphones → in-ear mic round-trips differently than desktop speakers → laptop mic). When the system default output changes mid-session or between sessions, the stored latency calibration silently goes stale. Two parts: (a) output-device picker mirroring the existing input picker, with the same `CURRENT_DEVICE` lifecycle (changing it invalidates calibration); (b) detect system-default-output changes between sessions and prompt for recalibration, or at minimum surface a "Recalibrate?" badge when the cached output device no longer matches the live one. Until this lands, the manual "Recalibrate" link in the mic component is the workaround.
 
 ## Utility / export
 
