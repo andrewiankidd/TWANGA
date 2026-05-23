@@ -2911,22 +2911,25 @@ fn capture_onsets_for_duration(
         std::thread::sleep(std::time::Duration::from_millis(duration_ms as u64));
         return;
     };
+    // YIN can't return a reading until the analysis window is full,
+    // so a `from_onset_window` reading arrives ~window_latency_ms
+    // AFTER the pluck actually started. Subtracting the latency from
+    // the wall-clock timestamp recovers "when did the user pluck"
+    // rather than "when did we confirm the pitch" — without this
+    // correction, an on-time pluck under tight policy always scores
+    // as Late because the reported timestamp is +170 ms past the
+    // expected column time.
+    let latency_ms = tuner.window_latency_ms();
     let until = std::time::Instant::now() + std::time::Duration::from_millis(duration_ms as u64);
     while std::time::Instant::now() < until {
         let n = stream.read(buf);
         if n > 0 {
             tuner.feed(&buf[..n]);
-            // Timestamp once per drain — all readings produced by
-            // this `feed` call share the same "now" within the
-            // resolution we care about (the onset detector chunk is
-            // ~5 ms; YIN window is ~170 ms; tagging them all with
-            // the post-feed `elapsed` is well within the scoring
-            // tolerance window).
             let now_ms = clock_origin.elapsed().as_millis() as u32;
             for r in tuner.take_readings() {
                 if r.from_onset_window {
                     events.push(twanga_tabs::playback::OnsetEvent {
-                        timestamp_ms: now_ms,
+                        timestamp_ms: now_ms.saturating_sub(latency_ms),
                         detected_hz: r.detected.hz(),
                     });
                 }

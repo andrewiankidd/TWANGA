@@ -386,6 +386,22 @@ impl Tuner {
         self.sample_rate
     }
 
+    /// Approximate delay between when audio for a pluck begins
+    /// entering the buffer and when YIN can produce a pitch reading
+    /// for that pluck. Equals `window_size / sample_rate` — the
+    /// reading isn't available until the analysis window is full.
+    ///
+    /// The onset-detector chunk granularity adds a separate ~5 ms
+    /// of attack-to-buffer jitter on top, which is below the
+    /// resolution of the scoring tolerance window and not folded in
+    /// here. Callers that timestamp `from_onset_window` readings
+    /// against an external clock should subtract this value to get
+    /// the moment the pluck *started*, not when its pitch was
+    /// confirmed.
+    pub fn window_latency_ms(&self) -> u32 {
+        (self.window_size as u64 * 1000 / self.sample_rate as u64) as u32
+    }
+
     /// Push mono samples. Runs YIN on every completed window (subject to a
     /// silence gate) and queues a `TunerReading` per accepted detection.
     /// If a noise-floor calibration is in progress, also taps the samples

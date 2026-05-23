@@ -8,6 +8,23 @@ dated section.
 
 ## [Unreleased]
 
+### Fixed
+
+- **YIN-window latency compensation in proximity scoring.** The
+  playback loop was timestamping `from_onset_window` readings at
+  the moment YIN finalised the pitch — which is ~170 ms after the
+  actual attack at the default 8192-sample window. The integration
+  suite surfaced the consequence: an on-time pluck under tight
+  policy (±50 ms) always classified as Late instead of Hit, and
+  a +70 ms late pluck blew past tight's 4 × 50 = 200 ms extended
+  pairing window and classified as Missed. The fix exposes a new
+  `Tuner::window_latency_ms()` API and subtracts it from the
+  captured onset timestamp in `capture_onsets_for_duration`, so
+  the score reflects when the user actually plucked (not when YIN
+  confirmed the pitch). Test assertions that were loosened during
+  initial scenario-suite authoring tightened back to assert Hit
+  rather than "paired."
+
 ### Added
 
 - **10 more `--from-file` scenarios: reentrant banjo, pitch-range

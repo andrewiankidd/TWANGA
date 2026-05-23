@@ -359,18 +359,14 @@ fn perfect_take_wait_mode_completes_cleanly() {
 // ───────────────────── Perfect takes: proximity score ─────────────────────
 
 #[test]
-fn perfect_take_tight_score_pairs_all_columns() {
+fn perfect_take_tight_score_classifies_as_hit() {
     let _guard = serial_lock();
     // Same shape — perfect timing, scored under the tight policy
-    // (±50 ms). Every column should pair with its pluck (no Missed,
-    // no WrongPitch). They'll skew toward Late rather than Hit:
-    // YIN's ~170 ms window means the tagged-reading timestamp is
-    // ~170 ms after the actual attack, which is outside tight's
-    // ±50 ms Hit cutoff but inside the 4 × 50 = 200 ms extended
-    // pairing window. This test pins that pairing happens; a
-    // separate concern (latency compensation) would shift these
-    // back into Hit later — that change should make this test
-    // fail noisily so the constants get re-tuned.
+    // (±50 ms). With `Tuner::window_latency_ms()` subtracted from
+    // the captured onset timestamp, an on-time pluck reports at
+    // its actual attack time (not when YIN finalised the pitch
+    // ~170 ms later), so each column should classify as Hit, not
+    // Late.
     let dir = scratch("perfect-tight");
     let tab = dir.join("tab.alphatex");
     let wav = dir.join("perf.wav");
@@ -395,8 +391,8 @@ fn perfect_take_tight_score_pairs_all_columns() {
     let (hit, late, missed, wrong, total) = parse_summary(&out);
     assert_eq!(total, 4, "summary total for 4-note tab: {out}");
     assert!(
-        hit + late >= 3,
-        "expected ≥3 of 4 pairings (hit+late) on a perfect tight take, got hit={hit} late={late} missed={missed} wrong={wrong}"
+        hit >= 3,
+        "expected ≥3 of 4 Hits on a perfect tight take, got hit={hit} late={late} missed={missed} wrong={wrong}"
     );
     assert_eq!(
         wrong, 0,
@@ -406,12 +402,11 @@ fn perfect_take_tight_score_pairs_all_columns() {
 }
 
 #[test]
-fn perfect_take_casual_score_pairs_all_columns() {
+fn perfect_take_casual_score_classifies_as_hit() {
     let _guard = serial_lock();
-    // Same scenario, casual policy (±150 ms). The ~170 ms YIN
-    // latency lands right on the casual Hit boundary, so results
-    // are a mix of Hit and Late — pin "all paired" rather than
-    // any particular split.
+    // Same scenario, casual policy (±150 ms). With latency
+    // compensation, on-time plucks land at offset ~0 and classify
+    // cleanly as Hit.
     let dir = scratch("perfect-casual");
     let tab = dir.join("tab.alphatex");
     let wav = dir.join("perf.wav");
@@ -434,8 +429,8 @@ fn perfect_take_casual_score_pairs_all_columns() {
     let (hit, late, _, wrong, total) = parse_summary(&out);
     assert_eq!(total, 4);
     assert!(
-        hit + late >= 3,
-        "expected ≥3 of 4 pairings (hit+late) on a perfect casual take, got hit={hit} late={late}"
+        hit >= 3,
+        "expected ≥3 of 4 Hits on a perfect casual take, got hit={hit} late={late}"
     );
     assert_eq!(wrong, 0, "perfect take should never be WrongPitch");
     let _ = fs::remove_dir_all(&dir);
@@ -444,17 +439,17 @@ fn perfect_take_casual_score_pairs_all_columns() {
 // ───────────────────── Timing variants ─────────────────────
 
 #[test]
-fn consistently_late_take_under_tight_blows_past_extended_window() {
+fn consistently_late_take_under_tight_classifies_as_late() {
     let _guard = serial_lock();
     // Every pluck is 70 ms late. Tight policy's hit window is
-    // ±50 ms with a 4×50 = 200 ms extended pairing window. Add
-    // YIN's ~170 ms detection latency (timestamp is taken after
-    // the pitch window resolves) and the effective offset becomes
-    // ~240 ms — past 200 ms, so the scorer can't pair them. They
-    // all classify as Missed. This pins the *real* failure mode
-    // of tight mode under non-zero late offsets, which is a known
-    // sharp edge worth surfacing if anyone widens the window or
-    // adds latency compensation.
+    // ±50 ms, so each is past the Hit cutoff but inside the
+    // 4 × 50 = 200 ms extended pairing window — should classify
+    // as Late, NOT Missed. (This used to fail because the
+    // playback loop reported onset timestamps at the moment YIN
+    // finalised its reading rather than at the actual attack —
+    // adding ~170 ms of latency and pushing every pluck past
+    // tight's extended window. The fix subtracts
+    // `Tuner::window_latency_ms()` from the captured timestamp.)
     let dir = scratch("late-tight");
     let tab = dir.join("tab.alphatex");
     let wav = dir.join("perf.wav");
@@ -478,21 +473,24 @@ fn consistently_late_take_under_tight_blows_past_extended_window() {
     let (hit, late, missed, _, total) = parse_summary(&out);
     assert_eq!(total, 4);
     assert!(
-        missed >= 3,
-        "tight + 70 ms late + YIN latency should mostly miss the pairing window, got hit={hit} late={late} missed={missed}"
+        hit + late >= 3,
+        "expected ≥3 paired plays (hit+late), got hit={hit} late={late} missed={missed}"
+    );
+    assert!(
+        late >= 3,
+        "+70 ms past tight's ±50 ms Hit cutoff should classify mostly as Late, got hit={hit} late={late}"
     );
 }
 
 #[test]
-fn consistently_late_take_under_casual_classifies_as_late() {
+fn consistently_late_take_under_casual_classifies_as_hit() {
     let _guard = serial_lock();
-    // Same 70 ms late take under casual policy (±150 ms). Add
-    // YIN's ~170 ms latency → effective offset ~240 ms, which
-    // is past casual's ±150 ms Hit cutoff but well inside its
-    // 4 × 150 = 600 ms extended pairing window. All 4 columns
-    // pair (mostly as Late). The complementary tight version
-    // misses entirely — this test proves casual is the right
-    // policy for users with non-trivial reaction lag.
+    // Same 70 ms late take under casual policy (±150 ms). +70 ms
+    // is well inside casual's Hit window, so once latency
+    // compensation removes YIN's window delay these all score
+    // as Hit. Pair with the tight variant above, which keeps the
+    // same plucks but classifies them as Late because tight's
+    // ±50 ms Hit cutoff is narrower than the offset.
     let dir = scratch("late-casual");
     let tab = dir.join("tab.alphatex");
     let wav = dir.join("perf.wav");
@@ -515,8 +513,8 @@ fn consistently_late_take_under_casual_classifies_as_late() {
     let (hit, late, missed, _, total) = parse_summary(&out);
     assert_eq!(total, 4);
     assert!(
-        hit + late >= 3,
-        "casual should pair almost everything at +70ms, got hit={hit} late={late} missed={missed}"
+        hit >= 3,
+        "casual should classify +70 ms plucks as Hit (well inside ±150 ms), got hit={hit} late={late} missed={missed}"
     );
 }
 
