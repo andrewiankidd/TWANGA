@@ -82,6 +82,7 @@ pub mod abc;
 pub mod ascii_tab;
 pub mod midi;
 pub mod musicxml;
+pub mod playback;
 
 /// Map a raw MIDI pitch to a `(string_1_based, fret)` placement on
 /// the given tuning. Picks the lowest fret across all valid string
