@@ -42,11 +42,16 @@ Two setup questions decide which measurement method runs:
 
 ```
 Q1. Where does TWANGA listen for your playing?
-    a) Microphone (acoustic mic, USB mic, mic'd amp)
-    b) Line-in (electric instrument via cable + audio interface)
+    a) Microphone — captures sound acoustically (USB mic, condenser,
+       dynamic mic in front of an amp)
+    b) Direct cable from instrument — USB instrument cable, or
+       instrument cable into an audio interface (no acoustic capture)
     c) Nothing connected yet (set manually for now)
 
 Q2. How do you hear TWANGA's audio (metronome, count-in)?
+    Only asked when Q1 = Microphone. Direct-cable and no-input setups
+    skip Q2 since round-trip can't work for them regardless.
+
     a) Speakers in the same room as the mic
     b) Headphones (or speakers far from the mic)
     c) No audible playback (visual cues only)
@@ -56,11 +61,10 @@ Method dispatch:
 
 | Q1 | Q2 | Method | Why |
 |---|---|---|---|
-| Mic | Speakers | **Round-trip** (play clicks, capture via mic, median offset) | The acoustic loop works |
+| Mic | Speakers | **Round-trip** (play clicks, capture via mic, median offset) | TWANGA can physically capture its own click through the air |
 | Mic | Headphones / silent | **Manual entry** | No speakers → mic path available |
-| Line-in | Speakers | **Round-trip** | Works if you have a hardware loopback cable, or if speakers spill into the line-in (rare) |
-| Line-in | Headphones / silent | **Manual entry** | No acoustic loop possible |
-| Nothing | * | **Manual entry** | Nothing to measure |
+| Direct cable | — | **Manual entry** | No acoustic capture, so the round-trip loop is broken regardless of how you hear playback |
+| Nothing | — | **Manual entry** | Nothing to measure |
 
 In the manual flow, both surfaces show typical values to pick from:
 

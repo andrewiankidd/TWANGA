@@ -2301,8 +2301,8 @@
             <form class="calibrate-wizard" id="calibrate-wizard">
                 <fieldset class="wizard-q">
                     <legend>Q1. Where does TWANGA listen for your playing?</legend>
-                    <label><input type="radio" name="calibrate-input" value="mic" checked> Microphone (acoustic mic, USB mic, mic'd amp)</label>
-                    <label><input type="radio" name="calibrate-input" value="line-in"> Line-in (electric instrument via cable + audio interface)</label>
+                    <label><input type="radio" name="calibrate-input" value="mic" checked> Microphone — captures sound acoustically (USB mic, condenser, dynamic mic in front of an amp)</label>
+                    <label><input type="radio" name="calibrate-input" value="line-in"> Direct cable from instrument — USB instrument cable, or instrument cable into an audio interface (no acoustic capture)</label>
                     <label><input type="radio" name="calibrate-input" value="none"> Nothing connected yet (I'll set manually)</label>
                 </fieldset>
 
@@ -6692,31 +6692,31 @@
 
         /// Decide which calibration method the current wizard answers
         /// correspond to. Mirrors the CLI's match in `calibrate_wizard`:
-        /// Q1 = mic OR line-in + Q2 = speakers → round-trip works.
-        /// Anything else → manual entry.
+        /// only Q1=mic + Q2=speakers supports round-trip (the only
+        /// case where TWANGA can physically capture its own click).
+        /// Line-in has no acoustic capture path; "nothing connected"
+        /// has no input at all. Both go straight to manual entry.
         function pickCalibrationMethod() {
             const input = document.querySelector('input[name="calibrate-input"]:checked')?.value || 'mic';
+            if (input !== 'mic') return 'manual';
             const output = document.querySelector('input[name="calibrate-output"]:checked')?.value || 'speakers';
-            if (input === 'none') return 'manual';
-            if (output === 'speakers') return 'round-trip';
-            return 'manual';
+            return output === 'speakers' ? 'round-trip' : 'manual';
         }
 
         /// Toggle the wizard UI to reflect which method the current
         /// radio selection picks: round-trip hides the manual input
         /// and shows the round-trip help text; manual reveals the
         /// number input and updates the button label + help text to
-        /// match.
+        /// match. Q2 is hidden when Q1 isn't "Microphone" since
+        /// there's nothing for it to influence in those branches.
         function refreshWizardMode() {
             const method = pickCalibrationMethod();
             const manualRow = el('calibrate-manual-row');
             const q2 = el('calibrate-q2');
             const help = el('calibrate-help');
             const btn = el('calibrate-run-btn');
-            // Q2 only matters when input is mic/line-in; if input is
-            // "none", short-circuit straight to manual.
             const input = document.querySelector('input[name="calibrate-input"]:checked')?.value || 'mic';
-            q2.style.display = input === 'none' ? 'none' : '';
+            q2.style.display = input === 'mic' ? '' : 'none';
             if (method === 'round-trip') {
                 manualRow.hidden = true;
                 btn.textContent = loadLatencyCalibration() ? 'Recalibrate' : 'Calibrate';

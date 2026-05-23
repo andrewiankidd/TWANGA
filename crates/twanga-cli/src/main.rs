@@ -1983,18 +1983,23 @@ fn calibrate_wizard(path: &Path) -> Result<()> {
     let input = prompt_choice(
         "Q1. Where does TWANGA listen for your playing?",
         &[
-            ("a", "Microphone (acoustic mic, USB mic, mic'd amp)"),
+            (
+                "a",
+                "Microphone — captures sound acoustically (USB mic, condenser, dynamic mic in front of an amp)",
+            ),
             (
                 "b",
-                "Line-in (electric instrument via cable + audio interface)",
+                "Direct cable from instrument — USB instrument cable, or instrument cable into an audio interface (no acoustic capture)",
             ),
             ("c", "Nothing connected yet (set manually for now)"),
         ],
     )?;
 
-    let output = if input == "c" {
-        "skip".to_string()
-    } else {
+    // Q2 only matters when the input is a microphone — that's the
+    // only branch where round-trip is physically possible. Line-in
+    // (no acoustic capture) and "nothing connected" (no input) both
+    // skip Q2 and route straight to manual entry.
+    let output = if input == "a" {
         prompt_choice(
             "Q2. How do you hear TWANGA's audio (metronome, count-in)?",
             &[
@@ -2003,12 +2008,16 @@ fn calibrate_wizard(path: &Path) -> Result<()> {
                 ("c", "No audible playback (visual cues only)"),
             ],
         )?
+    } else {
+        "skip".to_string()
     };
 
     match (input.as_str(), output.as_str()) {
-        // Mic + speakers OR line-in + speakers (with hardware
-        // loopback) → physical round-trip works.
-        ("a" | "b", "a") => {
+        // Only mic + speakers supports round-trip — that's the one
+        // case where TWANGA can physically capture its own click
+        // through the air. Line-in users can't be captured back even
+        // if their speakers work; they need manual entry.
+        ("a", "a") => {
             eprintln!();
             // Output verification before the real measurement.
             // Catches "speakers muted / wrong output device" before
