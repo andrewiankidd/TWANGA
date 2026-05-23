@@ -42,8 +42,9 @@ counterpart in one place.
 | Playback | `twanga play [path]` | [features/playback.md](features/playback.md) |
 | Patterns | `twanga patterns <list\|play\|path>` | [features/patterns.md](features/patterns.md) |
 | Tab editor | `twanga edit <path> <set\|clear\|clear-col\|insert-col\|delete-col\|title\|bpm>` | [features/editor.md](features/editor.md) |
-| Importer | `twanga import <path>` (+ `twanga convert <in> --out <out>`) | [features/importer.md](features/importer.md) |
+| Importer | `twanga import <path>` (+ `twanga convert <in> --out <out>`) — alphaTex / MusicXML / MXL / MIDI / ABC / ASCII tab | [features/importer.md](features/importer.md) |
 | Tunings | `twanga tunings <list\|path\|add\|remove>` | [features/tunings.md](features/tunings.md) |
+| Calibrate | `twanga calibrate [--pluck-along\|--round-trip\|--manual <ms>\|--show]` | [features/calibrate.md](features/calibrate.md) |
 | Hardware | (setup guide — `twanga docs hardware`) | [features/hardware.md](features/hardware.md) |
 | User guide | `twanga docs user-guide` | [features/user-guide.md](features/user-guide.md) — paths + portable mode + audio architecture + privacy + credits |
 | Docs | `twanga docs [feature]` | The per-feature pages above, printed to stdout for `glow` / `mdcat` / `bat -l md`. |
@@ -76,10 +77,12 @@ two flags + two runtime keys:
   or for picking the exact name to pass to `--device`. No arguments.
 - **`twanga import <path>`** — add a tab file to the user library
   (`<data-root>/library/`). Accepts `.alphatex`, `.musicxml` /
-  `.xml`, and `.mxl` (zipped MusicXML); converts to alphaTex via the
-  canonical writer. `--from` overrides format detection; `--title`
-  overrides the source's embedded title. Mirrors the GUI Importer
-  screen — see [Importer](features/importer.md).
+  `.xml`, `.mxl` (zipped MusicXML), `.mid` / `.midi`, `.abc`, and
+  `.tab` (ASCII tab; `.txt` content-sniffs to alphaTex vs ASCII
+  tab); converts to alphaTex via the canonical writer. `--from`
+  overrides format detection; `--title` overrides the source's
+  embedded title. Mirrors the GUI Importer screen — see
+  [Importer](features/importer.md).
 - **`twanga convert <input> --out <output>`** — sibling of
   `import` for stateless file-in / file-out conversion (no library
   involvement). Same format detection + `--from` flag. Output is

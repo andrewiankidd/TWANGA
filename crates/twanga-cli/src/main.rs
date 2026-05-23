@@ -2377,7 +2377,7 @@ const DOCS_PAGES: &[(&str, &str, &str)] = &[
     ),
     (
         "importer",
-        "Add alphaTex / MusicXML / MXL files to your library.",
+        "Add alphaTex / MusicXML / MXL / MIDI / ABC / ASCII tab files to your library.",
         DOC_IMPORTER,
     ),
     (

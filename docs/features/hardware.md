@@ -286,6 +286,9 @@ blown.
 - [Tuner](tuner.md) · [Recorder](recorder.md) · [Playback](playback.md)
   — the three features that actually consume audio input.
 - [CLI overview](../CLI.md) · [GUI overview](../GUI.md).
-- [ROADMAP](../ROADMAP.md) — latency calibration wizard, native CPAL
-  backend in Tauri.
+- [Calibrate](calibrate.md) — measure your audio chain's input
+  latency so the tight/casual scoring modes credit on-time plucks
+  correctly.
+- [ROADMAP](../ROADMAP.md) — tab audio generation, slow-down
+  practice, native CPAL backend in Tauri.
 - [SCOPE](../SCOPE.md) — why ASIO redistribution is unresolved.

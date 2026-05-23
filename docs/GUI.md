@@ -36,6 +36,7 @@ in one place.
 | Tab editor | `#editor` | [features/editor.md](features/editor.md) |
 | Importer | `#importer` | [features/importer.md](features/importer.md) |
 | Tunings | `#tunings` | [features/tunings.md](features/tunings.md) |
+| Calibrate | `#calibrate` | [features/calibrate.md](features/calibrate.md) |
 | Hardware | (setup guide — `#docs/hardware`) | [features/hardware.md](features/hardware.md) |
 | User guide | `#docs/user-guide` | [features/user-guide.md](features/user-guide.md) |
 | Docs | `#docs` | (the per-feature pages above, rendered inline) |
@@ -78,10 +79,10 @@ swaps for `$CONFIG/twanga/recordings/`, localStorage tunings swap for
 `tunings.toml`. See the shell README for the full Tauri command
 list.
 
-## Shared mic-input controls
+## Shared input controls
 
-Tuner, Recorder, and Playback (wait mode) share two affordances over the
-mic-level meter:
+Tuner, Recorder, and Playback (wait + score modes) share two
+affordances over the input-level meter:
 
 - **Input device picker** — dropdown above the meter, populated via
   `navigator.mediaDevices.enumerateDevices()`. Browsers gate device
@@ -91,11 +92,17 @@ mic-level meter:
   the `devicechange` event. Selection persists per-screen in
   `localStorage` (`twanga-{tuner,recorder,playback}-device-v1`).
 - **Silence-threshold slider** — a thin vertical-line thumb overlaid
-  on the mic-meter bar. Drag to set the silence gate on the same dB
+  on the input-meter bar. Drag to set the silence gate on the same dB
   axis as the bar fill. Fill crosses the thumb → detection fires;
   stays below → it doesn't. Persists per-screen
   (`twanga-{tuner,recorder,playback}-silence-rms-v1`). CLI equivalents
   are the `--silence-rms` flag and the `[` / `]` runtime keys.
+
+The `Mic` / `mic` terminology in user-facing labels has been replaced
+with `Input` / `input` so direct-cable / line-in / USB-instrument-cable
+users aren't told they need a microphone they don't have. The browser
+permission dialog still says "microphone" — that's the browser's wording
+and out of our control.
 
 ## Storage notes
 

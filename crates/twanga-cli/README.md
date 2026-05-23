@@ -1,6 +1,6 @@
 # twanga-cli
 
-The `twanga` command-line binary. Mostly UX glue — the analysis logic lives in `twanga-dsp` (`Tuner`), `twanga-tabs` (`TabRecorder`, alphaTex serialiser/parser), and `twanga-audio` (`InputStream`, `OutputStream`); this crate opens streams, feeds samples through the right pipeline, renders via `twanga-tui`, and merges the built-in tuning registry with `$CONFIG/twanga/tunings.toml` for the menus.
+The `twanga` command-line binary. Mostly UX glue — the analysis logic lives in `twanga-dsp` (`Tuner`, onset detection, calibration peak-finder), `twanga-tabs` (`TabRecorder`, alphaTex / MusicXML / MIDI / ABC / ASCII-tab parsers, proximity-score scoring engine), and `twanga-audio` (`InputStream`, `OutputStream`); this crate opens streams, feeds samples through the right pipeline, renders via `twanga-tui`, and merges the built-in tuning registry with `$CONFIG/twanga/tunings.toml` for the menus.
 
 **Flag convention.** Every value-bearing flag takes one of three forms, consistently:
 
@@ -54,7 +54,11 @@ Omit `path` to open an interactive picker that scans bundled examples (`assets/e
 | `--capo <spec>` | Capo applied to the tab's tuning for wait-mode pitch comparison. Precedence: `--capo` wins; otherwise falls back to whatever the file embedded in its `\subtitle` field. |
 | `--bpm <N>` | Override the tempo from the file. |
 | `--no-metronome` | Silence the click (default is on). |
-| `--wait` | Practice mode — cursor pauses at each note until you play it (within ±50 cents on any expected string/fret). Rests still advance with time so the metronome stays musical. |
+| `--wait` | Shorthand for `--policy wait`. Cursor pauses at each note until you play it (within ±50 cents on any expected string/fret). Rests still advance with time so the metronome stays musical. |
+| `--policy <wait\|tight\|casual\|free>` | Playback behaviour. `wait` pauses on each note; `tight` / `casual` run at tempo and score each column by proximity to expected onsets (±50 ms / ±150 ms hit windows, ColumnOutcome = Hit / Late / Missed / WrongPitch, summary printed at session end); `free` just scrolls with no scoring. Score modes consume the `twanga calibrate` value if one is stored — uncalibrated systems will see on-time plucks score Late under tight. |
+| `--from-file <path>` | Replay a mono PCM WAV in place of the live mic — wall-clock-paced so the playback loop treats it like a live stream. Used by the integration test harness against deterministic synth fixtures; handy for scoring an externally-captured recording (phone voice memo, DAW export) against a tab without re-performing it. |
+| `--device "<name>"` | Substring-match against the audio input device list (see `twanga devices`). Defaults to the OS default input. |
+| `--silence-rms <RMS>` | Override the silence-gate threshold (linear-amplitude window RMS, 0..1). Default 0.005 (≈ -46 dB). Auto-calibrated per session start unless this flag is set. Runtime `[` / `]` keys adjust by ±6 dB. |
 | `--loop` | Loop the entire file continuously. |
 | `--loop <START:END>` | Loop a specific column range (0-indexed, end exclusive). E.g. `--loop 0:20` plays columns 0–19 on repeat; `--loop 20:30` loops columns 20–29. |
 | `--pre-roll <N>` | Audible count-in ticks before playback starts (0–16). Prompted if omitted; default 4. Always audible, even when `--no-metronome` is set. |
@@ -135,11 +139,33 @@ Subtitle (human tuning name + capo annotation) round-trips correctly. Output goe
 
 ### `devices` — list audio input devices
 
-No arguments. Useful for sanity-checking before `tune` / `record` / `play --wait`.
+No arguments. Useful for sanity-checking before `tune` / `record` / `play --wait` / `play --policy tight|casual`.
 
-### `convert <input> <output>` — tab format conversion (stub)
+### `import <path>` — add a tab to the user library
 
-Placeholder. Will eventually round-trip alphaTex ↔ MusicXML once the MusicXML parser lands in `twanga-tabs`. Proprietary formats (`.gp5`/`.gpx`) are explicit non-goals.
+One-shot "add this file to my library" verb. Saves the converted alphaTex to `<data-root>/library/`. Accepts `.alphatex`, `.musicxml` / `.xml`, `.mxl` (zipped MusicXML), `.mid` / `.midi`, `.abc`, and `.tab` (`.txt` content-sniffs to alphaTex vs ASCII tab). `--from <fmt>` overrides format detection; `--title` overrides the source's embedded title. Mirrors the GUI Importer screen.
+
+### `convert <input> --out <output>` — stateless tab conversion
+
+Sibling of `import` for file-in / file-out conversion without library involvement. Same format detection + `--from` flag. Output is always alphaTex today; MusicXML export is on the backlog. Proprietary formats (`.gp5`/`.gpx`) are explicit non-goals.
+
+### `calibrate` — input-latency calibration
+
+Measure your audio chain's input pipeline latency so the proximity-score modes (`play --policy tight|casual`) credit on-time plucks as Hit rather than skewing them Late. Bare invocation runs an interactive wizard (two setup questions → compatibility matrix → method confirmation). Flags skip the wizard for scripts.
+
+| Flag | Description |
+|------|-------------|
+| `(none)` | Run the interactive wizard. |
+| `--pluck-along` | Recommended for any input. TWANGA plays a metronome (4 pre-roll + 8 measurement clicks at 80 BPM); pluck a single note on each measurement click; median signed offset becomes the latency. Captures hardware delay + reaction time, which is the right value for scoring. |
+| `--round-trip` | Speaker→mic round-trip. TWANGA plays 5 clicks via the default output, captures via the mic, takes the median click-to-peak offset. Measures system delay only (no reaction time). Requires mic + speakers in the same room. |
+| `--manual <MS>` | Skip measurement, save a hand-entered value (0–1000 ms). Use when you know your interface's spec, or when neither measurement method is practical. |
+| `--show` | Print the stored value without measuring. |
+
+Saved to `$DATA_ROOT/latency.toml` keyed by input-device name (changing devices invalidates the value). `twanga play` reads it back on startup and prints a status line showing what's applied.
+
+### `docs [feature]` — embedded per-feature documentation
+
+Bare `twanga docs` lists the available pages (`tuner`, `recorder`, `playback`, `patterns`, `editor`, `importer`, `tunings`, `calibrate`, `hardware`, `user-guide`). Pass a slug to print that page's markdown to stdout — pipe through `glow`, `mdcat`, or `bat -l md` for rendering.
 
 ## Local development
 

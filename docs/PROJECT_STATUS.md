@@ -15,10 +15,12 @@ For the full shipped-feature inventory + when each landed, see
 |---------|-----|-----|------|
 | **Tuner** — live pitch detection, per-string + chromatic, capo-aware | ✅ | ✅ | [features/tuner.md](features/tuner.md) |
 | **Recorder** — capture played notes as alphaTex, metronome, pre-roll, pause/resume, undo-column | ✅ (`u + Enter` undo) | ✅ (button) | [features/recorder.md](features/recorder.md) |
-| **Playback** — scroll cursor + metronome + wait mode + loop + transpose (drop or octave-shift) + capo + resume bookmarks | ✅ | ✅ | [features/playback.md](features/playback.md) |
+| **Playback** — scroll cursor + metronome + proximity-score (tight/casual) or wait mode + loop + transpose (drop or octave-shift) + capo + resume bookmarks | ✅ (`--policy`) | ✅ (policy dropdown) | [features/playback.md](features/playback.md) |
 | **Patterns** — bundled rhythm + picking drills (10 across 4 groups), tree-of-difficulty | ✅ | ✅ | [features/patterns.md](features/patterns.md) |
 | **Tab editor** — cell-level edits, column insert / delete / clear, title + BPM | ✅ (`twanga edit`, scriptable) | ✅ (interactive grid) | [features/editor.md](features/editor.md) |
+| **Importer** — alphaTex / MusicXML / MXL / MIDI / ABC / ASCII tab → library | ✅ (`twanga import`) | ✅ (drop zone with preview) | [features/importer.md](features/importer.md) |
 | **Tunings** — built-in + user-defined registry, add/remove/list | ✅ | ✅ | [features/tunings.md](features/tunings.md) |
+| **Calibrate** — input-latency wizard (pluck-along / round-trip / manual) consumed by tight/casual scoring | ✅ (`twanga calibrate`) | ✅ (dedicated screen with diagnostics) | [features/calibrate.md](features/calibrate.md) |
 | **Docs** — per-feature pages embedded in the binary / bundled with the web app | ✅ (`twanga docs`) | ✅ (`#docs`) | [features/](features/) |
 
 Backed by:

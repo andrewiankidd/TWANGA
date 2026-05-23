@@ -48,17 +48,18 @@ TWANGA CLI
 Usage: twanga [COMMAND]
 
 Commands:
-  tune      Live tuner — capture audio and show detected pitch vs the nearest target
-  play      Play back a `.alphatex` recording (omit the path for an interactive picker)
-  record    Live tab recorder — capture played notes as horizontal ASCII tab notation
-  edit      Edit a tab in place — set / clear cells, insert / delete columns, title, BPM
-  devices   List available audio input devices
-  import    Import a tab file (alphaTex / MusicXML / MXL) into the user library
-  convert   Convert a tab file between formats (stateless — no library involvement)
-  tunings   Manage user-defined tunings stored at the platform config dir
-  patterns  Browse + play bundled rhythm + picking drills
-  docs      Print the per-feature documentation embedded in the binary
-  help      Print this message or the help of the given subcommand(s)
+  tune       Live tuner — capture audio and show detected pitch vs the nearest target
+  play       Play back a `.alphatex` recording (omit the path for an interactive picker)
+  record     Live tab recorder — capture played notes as horizontal ASCII tab notation
+  edit       Edit a tab in place — set / clear cells, insert / delete columns, title, BPM
+  devices    List available audio input devices
+  import     Import a tab file (alphaTex / MusicXML / MXL / MIDI / ABC / ASCII tab) into the user library
+  convert    Convert a tab file between formats (stateless — no library involvement)
+  tunings    Manage user-defined tunings stored at the platform config dir
+  patterns   Browse + play bundled rhythm + picking drills
+  calibrate  Measure or set your audio chain's input latency for tight/casual scoring
+  docs       Print the per-feature documentation embedded in the binary
+  help       Print this message or the help of the given subcommand(s)
 
 Options:
   -h, --help     Print help
@@ -80,10 +81,10 @@ Multi-crate Cargo workspace. Each crate has a narrow responsibility:
 | **[twanga-dsp](crates/twanga-dsp/)** | Pure pitch detection (`Yin`) + the streaming `Tuner` that wraps it. No allocations after first call. Pinned to `opt-level = 3` in dev so `cargo run` is usable without `--release`. |
 | **[twanga-synth](crates/twanga-synth/)** | Deterministic audio synthesis (sines, harmonic stacks, envelopes, noise) used as a `dev-dependency` by `twanga-dsp` tests and at runtime for the metronome click. |
 | **[twanga-audio](crates/twanga-audio/)** | Realtime audio capture (`InputStream`) and playback (`OutputStream`), wrapping CPAL. ASIO behind the `asio` cargo feature on Windows. |
-| **[twanga-tabs](crates/twanga-tabs/)** | Tab data: live `TabRecorder`, alphaTex serialiser + parser, MusicXML parser (partwise + `.mxl`). Proprietary formats (`.gp5`/`.gpx`) are explicit non-goals. |
+| **[twanga-tabs](crates/twanga-tabs/)** | Tab data: live `TabRecorder`, alphaTex serialiser + parser, MusicXML parser (partwise + `.mxl`), Standard MIDI File parser, ABC notation parser, ASCII tab parser, proximity-score scoring engine. Proprietary formats (`.gp5`/`.gpx`) are explicit non-goals. |
 | **[twanga-tui](crates/twanga-tui/)** | Terminal UX primitives shared across TWANGA's CLIs — selection menus, refreshing displays, Ctrl-C handling, ANSI colours. |
 | **[twanga-paths](crates/twanga-paths/)** | User-data path resolution — `~/twanga/` default + portable mode via a `twanga.portable` sentinel next to the binary. Shared by `twanga-cli` and `twanga-app`. |
-| **[twanga-cli](crates/twanga-cli/)** | CLI binary `twanga` — `tune`, `record`, `play`, `edit`, `import`, `convert`, `patterns`, `tunings`, `docs`, `devices` subcommands. |
+| **[twanga-cli](crates/twanga-cli/)** | CLI binary `twanga` — `tune`, `record`, `play`, `edit`, `import`, `convert`, `patterns`, `tunings`, `calibrate`, `docs`, `devices` subcommands. |
 | **[twanga-bench](crates/twanga-bench/)** | Latency + pitch-detection accuracy benchmarks (placeholder). |
 | **[twanga-app](crates/twanga-app/)** | Tauri 2 desktop shell hosting the shared [frontend/web/](frontend/web/) bundle (HTML + WASM bindings) in a native window. |
 | **[twanga-web](crates/twanga-web/)** | `wasm-bindgen` bridge that exposes `twanga-core` / `twanga-dsp` / `twanga-tabs` to the browser frontend. |
