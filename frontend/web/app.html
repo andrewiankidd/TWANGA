@@ -2039,10 +2039,15 @@
                             Metronome
                         </label>
                     </div>
-                    <div class="rec-setting" title="Pause playhead until you play the next note">
+                    <div class="rec-setting" title="What the playhead does at each note">
                         <label class="rec-toggle-label">
-                            <input type="checkbox" id="playback-wait-toggle">
-                            Wait
+                            Mode
+                            <select id="playback-policy-select" title="Playhead behaviour">
+                                <option value="free">Free (just scroll)</option>
+                                <option value="wait">Wait (pause on each note)</option>
+                                <option value="casual">Score: casual (±150 ms)</option>
+                                <option value="tight">Score: tight (±50 ms)</option>
+                            </select>
                         </label>
                     </div>
                 </div>
@@ -2388,6 +2393,7 @@
             parse_abc,
             parse_ascii_tab,
             parsed_tab_to_alphatex,
+            score_playback_session,
             WebTuner,
             WebParsedTab,
         } from './pkg/twanga_web.js';
@@ -4605,7 +4611,13 @@
             // Persisted UI settings
             metronome: true,
             preRoll: 4,
-            wait: false,
+            // Playhead policy: 'free' (just scroll, no audio),
+            // 'wait' (pause on each note for matching pitch),
+            // 'casual' (run at tempo, ±150 ms scoring tolerance),
+            // 'tight' (±50 ms). Default 'free' matches pre-Ship-2
+            // behaviour. Migrated from the old boolean `wait`
+            // setting in `playbackHydrate`.
+            policy: 'free',
             transposeMode: 'drop',  // 'drop' | 'octave-shift' — matches the WASM enum string
             bpmOverride: null,      // null = use loaded tab's tempo
 
@@ -4627,6 +4639,7 @@
             chromaticTuner: null,   // WebTuner for wait-mode pitch detection
             waitingForCol: -1,      // column index whose note we're waiting for (-1 = not waiting)
             waitStartedAt: 0,       // performance.now() when the current wait segment began (0 = not waiting). Used to add the wait duration to `totalPausedMs` when the mic detects a match, so the column-tick math doesn't "skip ahead" by however long the user took to play the note.
+            onsetEvents: [],        // proximity-score onset capture buffer — each entry is `{ timestamp_ms, detected_hz }`, timestamped from playStartTime. Cleared at the start of each session, scored at the end.
             micMeter: null,         // shared mic-meter controller (see ./controllers/mic-meter.js)
             devicePicker: null,     // shared input-device picker (see ./controllers/device-picker.js)
             silenceThreshold: null, // shared silence-threshold slider (see ./controllers/silence-threshold.js)
@@ -4820,7 +4833,21 @@
             playbackState.metronome = saved.metronome !== false;
             playbackState.preRoll = Number.isInteger(saved.preRoll) && saved.preRoll >= 0 && saved.preRoll <= 16
                 ? saved.preRoll : 4;
-            playbackState.wait = saved.wait === true;
+            // Policy migration. Old persisted state stored `wait:
+            // boolean`; new state stores `policy: 'free' | 'wait' |
+            // 'casual' | 'tight'`. If the user already had
+            // `wait=true`, preserve that as the wait-mode policy;
+            // otherwise default to 'free' (matches the pre-Ship-2
+            // behaviour). A new `policy` field on saved state takes
+            // precedence over the legacy `wait` field.
+            const validPolicies = ['free', 'wait', 'casual', 'tight'];
+            if (validPolicies.includes(saved.policy)) {
+                playbackState.policy = saved.policy;
+            } else if (saved.wait === true) {
+                playbackState.policy = 'wait';
+            } else {
+                playbackState.policy = 'free';
+            }
             playbackState.transposeMode = saved.transposeMode === 'octave-shift'
                 ? 'octave-shift'
                 : 'drop';
@@ -4831,7 +4858,12 @@
                 localStorage.setItem(PLAYBACK_STORAGE_KEY, JSON.stringify({
                     metronome: playbackState.metronome,
                     preRoll: playbackState.preRoll,
-                    wait: playbackState.wait,
+                    // Persist the new policy field. `wait` is kept
+                    // alongside for backwards-readability — old
+                    // builds reading this storage will still see
+                    // the wait flag and behave correctly.
+                    policy: playbackState.policy,
+                    wait: playbackState.policy === 'wait',
                     transposeMode: playbackState.transposeMode,
                 }));
             } catch (e) {
@@ -5282,7 +5314,7 @@
             const loopSep = el('playback-loop-sep');
             const metToggle = el('playback-metronome-toggle');
             const prInput = el('playback-preroll-input');
-            const waitToggle = el('playback-wait-toggle');
+            const policySelect = el('playback-policy-select');
             const transposeMode = el('playback-transpose-mode');
 
             metToggle.checked = playbackState.metronome;
@@ -5301,7 +5333,7 @@
                 // rescued notes.
                 playbackRecomputeTransposition();
             });
-            waitToggle.checked = playbackState.wait;
+            policySelect.value = playbackState.policy;
 
             const clampInt = (raw, min, max, fallback) => {
                 const n = Number.parseInt(raw, 10);
@@ -5422,12 +5454,13 @@
             el('playback-preroll-up').addEventListener('click', () =>
                 prCommit(playbackState.preRoll + 1));
 
-            waitToggle.addEventListener('change', () => {
+            policySelect.addEventListener('change', () => {
                 if (playbackState.isPlaying) {
-                    waitToggle.checked = playbackState.wait;
+                    // Restore — policy is locked during a session.
+                    policySelect.value = playbackState.policy;
                     return;
                 }
-                playbackState.wait = waitToggle.checked;
+                playbackState.policy = policySelect.value;
                 playbackSaveToStorage();
             });
         }
@@ -5538,6 +5571,10 @@
             playbackState.pausedAtMs = 0;
             playbackState.waitingForCol = -1;
             playbackState.waitStartedAt = 0;
+            // Reset the onset-capture buffer at the start of every
+            // session — proximity-score outcomes only consider events
+            // collected during the current playback run.
+            playbackState.onsetEvents = [];
 
             // Lock settings + tuning controls.
             playbackState.tuning?.setEnabled(false);
@@ -5546,9 +5583,15 @@
             el('playback-pause-btn').textContent = 'Pause';
             el('playback-stop-btn').disabled = false;
 
-            // Wait mode prep — open mic + chromatic tuner before pre-roll
-            // so the buffer is primed by the time the user needs to play.
-            if (playbackState.wait) {
+            // Audio prep — open mic + chromatic tuner before pre-roll
+            // so the buffer is primed by the time the user needs to
+            // play. Required for wait-mode (pitch matching) AND
+            // proximity-score modes (onset collection); the FreePlay
+            // policy needs no audio at all.
+            const needsAudio = playbackState.policy === 'wait'
+                || playbackState.policy === 'tight'
+                || playbackState.policy === 'casual';
+            if (needsAudio) {
                 const sr = micSession.sampleRate();
                 playbackState.chromaticTuner = WebTuner.new_chromatic(sr);
                 // Re-apply the persisted silence threshold to the new
@@ -5587,31 +5630,57 @@
                                     readings[readings.length - 1].label
                                 );
                             }
-                            if (playbackState.waitingForCol < 0) return;
-                            // Onset-gated matching encapsulated in
-                            // `findFirstAdvancingReading` (pure helper
-                            // in lib/wait-match.js, mirroring the CLI's
-                            // `wait_reading_advances` Rust function).
-                            // Sustained-tail readings never advance —
-                            // see `twanga-dsp::onset` and
-                            // docs/plans/onset-detection.md.
-                            const hit = findFirstAdvancingReading(
-                                readings,
-                                (hz) => playbackWaitMatches(hz, playbackState.waitingForCol),
-                            );
-                            if (hit) {
-                                // Close out the wait segment: roll the
-                                // time we spent waiting into the
-                                // cumulative pause budget so the next
-                                // `playbackTick` doesn't see "elapsed"
-                                // jump multiple columns ahead of where
-                                // the user actually is.
-                                if (playbackState.waitStartedAt > 0) {
-                                    playbackState.totalPausedMs +=
-                                        performance.now() - playbackState.waitStartedAt;
-                                    playbackState.waitStartedAt = 0;
+                            // Wait-mode branch: gate on onset-tagged
+                            // pitch match, advance the cursor.
+                            if (playbackState.policy === 'wait') {
+                                if (playbackState.waitingForCol < 0) return;
+                                // `findFirstAdvancingReading` (pure
+                                // helper in lib/wait-match.js, mirroring
+                                // the CLI's `wait_reading_advances`)
+                                // skips sustained-tail readings — see
+                                // `twanga-dsp::onset` and
+                                // docs/plans/onset-detection.md.
+                                const hit = findFirstAdvancingReading(
+                                    readings,
+                                    (hz) => playbackWaitMatches(hz, playbackState.waitingForCol),
+                                );
+                                if (hit) {
+                                    // Close out the wait segment: roll
+                                    // the time we spent waiting into
+                                    // the cumulative pause budget so the
+                                    // next `playbackTick` doesn't see
+                                    // "elapsed" jump multiple columns
+                                    // ahead of where the user actually
+                                    // is.
+                                    if (playbackState.waitStartedAt > 0) {
+                                        playbackState.totalPausedMs +=
+                                            performance.now() - playbackState.waitStartedAt;
+                                        playbackState.waitStartedAt = 0;
+                                    }
+                                    playbackState.waitingForCol = -1;
                                 }
-                                playbackState.waitingForCol = -1;
+                                return;
+                            }
+
+                            // Proximity-score branch: collect every
+                            // onset-tagged reading with its wall-clock
+                            // timestamp (ms since playback start). The
+                            // batch is scored against the column
+                            // schedule at session end in
+                            // `playbackStop`.
+                            if (playbackState.policy === 'tight'
+                                || playbackState.policy === 'casual') {
+                                if (playbackState.playStartTime === 0) return;
+                                const nowMs = performance.now()
+                                    - playbackState.playStartTime
+                                    - playbackState.totalPausedMs;
+                                for (const r of readings) {
+                                    if (!r.from_onset_window) continue;
+                                    playbackState.onsetEvents.push({
+                                        timestamp_ms: Math.max(0, Math.round(nowMs)),
+                                        detected_hz: r.detected_hz,
+                                    });
+                                }
                             }
                         },
                     });
@@ -5789,7 +5858,75 @@
             el('playback-pause-btn').disabled = true;
             el('playback-pause-btn').textContent = 'Pause';
             el('playback-stop-btn').disabled = true;
-            el('playback-hint').textContent = hintText ?? 'stopped';
+            // Proximity-score end-of-session summary. Build the schedule
+            // from the played range + bpm, hand the captured onset
+            // events to the WASM scorer, replace the standard "stopped"
+            // hint with the headline summary. Per-column outcomes are
+            // dropped for now — surfacing them in the renderer (cell
+            // flash, "replay mistakes" pass) is a BACKLOG item.
+            const isScoring = playbackState.policy === 'tight'
+                || playbackState.policy === 'casual';
+            if (isScoring && playbackState.loadedTab) {
+                try {
+                    const summary = playbackComputeScoreSummary();
+                    el('playback-hint').textContent = playbackFormatScoreSummary(summary);
+                } catch (e) {
+                    console.warn('score-summary failed', e);
+                    el('playback-hint').textContent = hintText ?? 'stopped';
+                }
+            } else {
+                el('playback-hint').textContent = hintText ?? 'stopped';
+            }
+        }
+
+        /// Build the schedule for the played loop range, package the
+        /// session's onset events, and ask the WASM scorer to evaluate.
+        /// Returns the `{ hit, late, missed, wrong_pitch, total }`
+        /// shape `score_playback_session` produces; throws on any
+        /// upstream failure (caught + degraded to the plain "stopped"
+        /// hint by the caller).
+        function playbackComputeScoreSummary() {
+            const tab = playbackState.loadedTab.transposed;
+            const bpm = playbackState.bpmOverride ?? tab.tempo();
+            const msPerQuarter = 60_000 / Math.max(1, bpm);
+            const tuningSlug = playbackState.tuning?.getMode();
+            if (!tuningSlug || tuningSlug === 'chromatic') {
+                throw new Error('scoring requires a non-chromatic tuning');
+            }
+            // Build the schedule for the played range only — same
+            // semantics as the CLI's `tab.columns[loop_start..loop_end]`
+            // slice. Each entry: { expected_ms, expected_hits }.
+            const schedule = [];
+            let nowMs = 0;
+            for (let i = playbackState.loopStart; i < playbackState.loopEnd; i++) {
+                const col = tab.column_at(i);
+                if (!col) break;
+                schedule.push({
+                    expected_ms: Math.round(nowMs),
+                    expected_hits: Array.isArray(col.hits) ? col.hits : [],
+                });
+                const denom = Math.max(1, col.duration_denom || 8);
+                nowMs += (4.0 / denom) * msPerQuarter;
+            }
+            const policy = playbackState.policy === 'tight'
+                ? { kind: 'tight' }
+                : { kind: 'casual' };
+            return score_playback_session(
+                schedule,
+                playbackState.onsetEvents,
+                policy,
+                tuningSlug,
+            );
+        }
+
+        /// Human-readable one-line summary for the hint surface.
+        /// Mirrors the CLI's `print_score_summary` format (key:value
+        /// breakdown) collapsed to a single line so it fits in the
+        /// existing hint row.
+        function playbackFormatScoreSummary(s) {
+            if (!s || s.total === 0) return 'finished — nothing scored (no playable notes in range)';
+            const pct = (n) => Math.round(n / s.total * 100);
+            return `finished — ${s.hit}/${s.total} hit (${pct(s.hit)}%), ${s.late} late, ${s.missed} missed, ${s.wrong_pitch} wrong pitch`;
         }
 
         function playbackTick() {
@@ -5841,7 +5978,10 @@
                 // Wait mode: if the new column has hits, hold the playhead
                 // until the mic detects a matching pitch. Rests advance
                 // through normally so the metronome stays musical.
-                if (playbackState.wait) {
+                // Proximity-score and free-play modes never enter this
+                // branch — they run at tempo and score post-hoc (score)
+                // or not at all (free).
+                if (playbackState.policy === 'wait') {
                     const col = playbackState.loadedTab.transposed.column_at(newCol);
                     if (col && Array.isArray(col.hits) && col.hits.length > 0) {
                         playbackState.waitingForCol = newCol;

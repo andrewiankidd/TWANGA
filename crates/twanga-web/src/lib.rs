@@ -342,6 +342,143 @@ pub fn parse_ascii_tab(text: &str) -> Result<WebParsedTab, String> {
     })
 }
 
+// ────────────────────────── Playback scoring (Ship 2C) ──────────────────────────
+
+/// Score one playback session — pair detected onsets against expected
+/// column timings under a [`PlaybackPolicy`], return aggregate counts.
+/// The web playback engine calls this at session end with the onsets
+/// it collected during the run (each onset = a `from_onset_window=true`
+/// reading from the chromatic tuner, timestamped from playhead start).
+///
+/// `tuning_slug` selects the tuning to score pitches against — the
+/// Playback screen passes its controller's current `getMode()`.
+/// Custom (user-defined) tunings + chromatic mode aren't supported
+/// in v1; pass a built-in slug.
+///
+/// Inputs are passed as JS objects deserialised via `serde-wasm-
+/// bindgen`. Shapes:
+///
+///   schedule:  Array<{ expected_ms: number, expected_hits: Array<[number, number]> }>
+///   onsets:    Array<{ timestamp_ms: number, detected_hz: number }>
+///   policy:    { kind: "tight" | "casual" | "wait" | "free" }
+///              or { kind: "proximity", early_ms, late_ms, cents_tolerance }
+///
+/// Returns: `{ hit, late, missed, wrong_pitch, total }`. Non-
+/// proximity policies return all-zeros (scoring isn't meaningful
+/// for them; the JS side shouldn't have called this in the first
+/// place, but the API stays harmless).
+#[wasm_bindgen]
+pub fn score_playback_session(
+    schedule: JsValue,
+    onsets: JsValue,
+    policy: JsValue,
+    tuning_slug: &str,
+) -> Result<JsValue, String> {
+    let schedule: Vec<ScheduleEntryJs> =
+        serde_wasm_bindgen::from_value(schedule).map_err(|e| format!("bad schedule: {e}"))?;
+    let onsets: Vec<OnsetJs> =
+        serde_wasm_bindgen::from_value(onsets).map_err(|e| format!("bad onsets: {e}"))?;
+    let policy: PolicyJs =
+        serde_wasm_bindgen::from_value(policy).map_err(|e| format!("bad policy: {e}"))?;
+
+    let tuning = twanga_core::Tuning::from_preset(tuning_slug)
+        .ok_or_else(|| format!("unknown tuning slug '{tuning_slug}'"))?;
+
+    let schedule: Vec<twanga_tabs::playback::ColumnExpected> = schedule
+        .into_iter()
+        .map(|s| twanga_tabs::playback::ColumnExpected {
+            expected_ms: s.expected_ms,
+            expected_hits: s.expected_hits,
+        })
+        .collect();
+    let onsets: Vec<twanga_tabs::playback::OnsetEvent> = onsets
+        .into_iter()
+        .map(|o| twanga_tabs::playback::OnsetEvent {
+            timestamp_ms: o.timestamp_ms,
+            detected_hz: o.detected_hz,
+        })
+        .collect();
+
+    let outcomes = twanga_tabs::playback::score(&schedule, &onsets, policy.into(), &tuning);
+    let summary = twanga_tabs::playback::PlaybackSummary::from_outcomes(&outcomes);
+
+    let summary_js = SummaryJs {
+        hit: summary.hit,
+        late: summary.late,
+        missed: summary.missed,
+        wrong_pitch: summary.wrong_pitch,
+        total: summary.total(),
+    };
+    serde_wasm_bindgen::to_value(&summary_js).map_err(|e| e.to_string())
+}
+
+/// One entry in the expected schedule the JS playback engine
+/// pre-computes from the tab + bpm. Shape mirrors the Rust
+/// [`twanga_tabs::playback::ColumnExpected`].
+#[derive(serde::Deserialize)]
+struct ScheduleEntryJs {
+    expected_ms: u32,
+    expected_hits: Vec<(u8, u8)>,
+}
+
+/// One detected onset event — what the JS playback engine
+/// collects from the chromatic tuner during a score-mode run.
+#[derive(serde::Deserialize)]
+struct OnsetJs {
+    timestamp_ms: u32,
+    detected_hz: f32,
+}
+
+/// JS-side discriminated union for the policy. `kind` selects which
+/// variant; `proximity` carries the three numeric tuning knobs. The
+/// `tight` / `casual` / `wait` / `free` shortcuts map to the
+/// matching `PlaybackPolicy` preset on the Rust side.
+#[derive(serde::Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+enum PolicyJs {
+    Tight,
+    Casual,
+    Wait,
+    Free,
+    Proximity {
+        early_ms: u32,
+        late_ms: u32,
+        cents_tolerance: f32,
+    },
+}
+
+impl From<PolicyJs> for twanga_tabs::playback::PlaybackPolicy {
+    fn from(p: PolicyJs) -> Self {
+        match p {
+            PolicyJs::Tight => Self::tight(),
+            PolicyJs::Casual => Self::casual(),
+            PolicyJs::Wait => Self::wait(),
+            PolicyJs::Free => Self::FreePlay,
+            PolicyJs::Proximity {
+                early_ms,
+                late_ms,
+                cents_tolerance,
+            } => Self::ProximityScore {
+                early_ms,
+                late_ms,
+                cents_tolerance,
+            },
+        }
+    }
+}
+
+/// Aggregate counts shape the JS UI consumes. Mirrors
+/// [`twanga_tabs::playback::PlaybackSummary`] plus a denormalised
+/// `total` so the JS side doesn't have to sum manually.
+#[derive(serde::Serialize)]
+struct SummaryJs {
+    hit: usize,
+    late: usize,
+    missed: usize,
+    wrong_pitch: usize,
+    total: usize,
+}
+
 /// Serialise a `WebParsedTab` back to alphaTex via the canonical
 /// `AlphaTexWriter`. The Importer calls this after a successful
 /// MusicXML / `.mxl` parse to land bytes in the library that are
