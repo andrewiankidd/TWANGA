@@ -757,6 +757,162 @@ mod tests {
     }
 
     #[test]
+    fn tuner_clear_for_wait_drops_buffer_readings_and_pending_onset() {
+        // The contract the CLI/web wait-mode entry points rely on:
+        // after `clear_for_wait`, no reading queued from before the
+        // call can come back, and no `from_onset_window` flag from a
+        // pre-clear onset can leak into the next reading. Pin both.
+        const SR: u32 = 48_000;
+        let mut tuner = Tuner::new(TunerMode::Chromatic, SR);
+
+        // Pluck → generates queued readings + sets onset_pending.
+        let signal = pluck_signal(SR, Tuner::DEFAULT_WINDOW * 2, 440.0, 0.5, 0.5);
+        tuner.feed(&signal);
+        assert!(
+            tuner.take_readings().count() > 0,
+            "sanity: pluck should produce readings before the test does anything"
+        );
+        // Re-feed half a window so onset_pending could still be set
+        // (no YIN window completed since the last take_readings to
+        // consume it).
+        tuner.feed(&pluck_signal(
+            SR,
+            Tuner::DEFAULT_WINDOW / 2,
+            440.0,
+            0.5,
+            0.5,
+        ));
+
+        tuner.clear_for_wait();
+
+        // After clear: silence in, no readings out (buffer empty, no
+        // sustained-tail leak).
+        tuner.feed(&vec![0.0_f32; Tuner::DEFAULT_WINDOW]);
+        let after_clear: Vec<TunerReading> = tuner.take_readings().collect();
+        assert_eq!(
+            after_clear.len(),
+            0,
+            "silence after clear_for_wait shouldn't produce readings — got {after_clear:?}"
+        );
+    }
+
+    #[test]
+    fn tuner_sustained_tail_doesnt_fire_a_second_from_onset_reading() {
+        // The headline wait-mode failure mode the onset gate is
+        // designed to fix: a sustained note that decays slowly keeps
+        // producing YIN readings as the window slides. Only the
+        // FIRST should be `from_onset_window = true`; the rest are
+        // sustain. Wait-mode treats them as such and won't accept
+        // them for the NEXT column.
+        const SR: u32 = 48_000;
+        let mut tuner = Tuner::new(TunerMode::Chromatic, SR);
+        // 6× window of slow-decay pluck — produces ~10 overlapping
+        // YIN readings on the sustained tail.
+        let signal = pluck_signal(SR, Tuner::DEFAULT_WINDOW * 6, 440.0, 0.6, 1.0);
+        tuner.feed(&signal);
+        let readings: Vec<TunerReading> = tuner.take_readings().collect();
+        let onset_tagged = readings.iter().filter(|r| r.from_onset_window).count();
+        assert_eq!(
+            onset_tagged,
+            1,
+            "exactly one reading should be from_onset_window=true across a long sustain, \
+             got {onset_tagged} of {total}",
+            total = readings.len()
+        );
+    }
+
+    #[test]
+    fn tuner_two_separated_plucks_produce_two_from_onset_readings() {
+        // Two distinct attacks separated by enough silence that
+        // the second is a clean onset. Each should yield one
+        // `from_onset_window = true` reading; sustains in between
+        // tagged false. Verifies wait-mode can match TWO consecutive
+        // columns without spurious matches in the gap.
+        //
+        // Fed in small chunks (mirroring worklet / cpal feed sizes)
+        // so each onset is processed in its own `feed()` call —
+        // matches real-world usage where two onsets never land in
+        // the same buffer (refractory is ~50 ms, typical feed is
+        // ~2-20 ms). A single feed containing both onsets would
+        // collapse them at the Tuner layer (one buffer-clear per
+        // feed call), which is a known limitation documented in
+        // `docs/plans/onset-detection.md`.
+        const SR: u32 = 48_000;
+        let mut tuner = Tuner::new(TunerMode::Chromatic, SR);
+        let mut signal = pluck_signal(SR, Tuner::DEFAULT_WINDOW * 2, 440.0, 0.5, 0.3);
+        signal.extend(vec![0.0_f32; SR as usize / 4]); // 250 ms silence
+        signal.extend(pluck_signal(SR, Tuner::DEFAULT_WINDOW * 2, 660.0, 0.5, 0.3));
+        for chunk in signal.chunks(256) {
+            tuner.feed(chunk);
+        }
+        let readings: Vec<TunerReading> = tuner.take_readings().collect();
+        let onset_tagged = readings.iter().filter(|r| r.from_onset_window).count();
+        assert_eq!(
+            onset_tagged,
+            2,
+            "two separated plucks should produce 2 onset-tagged readings, \
+             got {onset_tagged} of {total}",
+            total = readings.len()
+        );
+    }
+
+    #[test]
+    fn tuner_legato_no_attack_produces_no_extra_from_onset_readings() {
+        // Documented v1 limitation: a hammer-on (no fresh pluck,
+        // just a pitch change inside a sustain envelope) produces
+        // no new onset, so wait-mode can't advance on it. Pin the
+        // behaviour so any future fix is a deliberate change rather
+        // than an accidental regression on legato fixtures.
+        const SR: u32 = 48_000;
+        let mut tuner = Tuner::new(TunerMode::Chromatic, SR);
+        // Single pluck envelope, but pitch shifts halfway through —
+        // synthetic "hammer-on" approximation.
+        let n = Tuner::DEFAULT_WINDOW * 4;
+        let decay_samples = 1.0 * SR as f32;
+        let signal: Vec<f32> = (0..n)
+            .map(|i| {
+                let env = 0.5 * (-(i as f32) / decay_samples).exp();
+                let hz = if i < n / 2 { 440.0 } else { 494.0 }; // A4 -> B4
+                env * (2.0 * std::f32::consts::PI * hz * i as f32 / SR as f32).sin()
+            })
+            .collect();
+        tuner.feed(&signal);
+        let readings: Vec<TunerReading> = tuner.take_readings().collect();
+        let onset_tagged = readings.iter().filter(|r| r.from_onset_window).count();
+        assert_eq!(
+            onset_tagged, 1,
+            "legato/hammer-on (single attack envelope) should produce 1 onset-tagged \
+             reading, got {onset_tagged}"
+        );
+    }
+
+    #[test]
+    fn tuner_from_onset_default_false_on_first_reading_in_silence_session() {
+        // Cold-start a Tuner and feed it pure silence-then-tiny-
+        // noise that's BELOW the onset min_delta_rms floor. No
+        // onset fires → no reading carries the from_onset flag.
+        // This pins that the flag isn't accidentally defaulted to
+        // true at construction.
+        const SR: u32 = 48_000;
+        let mut tuner = Tuner::new(TunerMode::Chromatic, SR);
+        // Quiet sustained sine at amplitude well below min_delta_rms.
+        // RMS = 0.001 * sqrt(2) / 2 ≈ 0.0007 — below the 0.005 floor.
+        let n = Tuner::DEFAULT_WINDOW + Tuner::DEFAULT_SLIDE_BY;
+        let signal: Vec<f32> = (0..n)
+            .map(|i| 0.001 * (2.0 * std::f32::consts::PI * 440.0 * i as f32 / SR as f32).sin())
+            .collect();
+        tuner.feed(&signal);
+        let readings: Vec<TunerReading> = tuner.take_readings().collect();
+        // The silence gate may suppress these readings entirely;
+        // either way, none should be onset-tagged.
+        let onset_tagged = readings.iter().filter(|r| r.from_onset_window).count();
+        assert_eq!(
+            onset_tagged, 0,
+            "no onset → no reading should carry from_onset_window=true"
+        );
+    }
+
+    #[test]
     fn tuner_emits_multiple_readings_when_multiple_windows_fit() {
         let mut tuner = Tuner::new(TunerMode::Strings(Tuning::standard_ukulele()), 44100);
         let total = Tuner::DEFAULT_WINDOW + 2 * Tuner::DEFAULT_SLIDE_BY;

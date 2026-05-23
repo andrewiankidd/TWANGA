@@ -2999,18 +2999,7 @@ fn wait_for_expected_note(
         if n > 0 {
             tuner.feed(&buf[..n]);
             for r in tuner.take_readings() {
-                // Onset-gated matching: only accept a pitch match
-                // from a YIN window that started at a fresh attack.
-                // Without this, the sustained tail of the previous
-                // note can keep producing matching readings as the
-                // YIN window slides — the cursor would advance on
-                // "still hearing the last note" instead of "user
-                // actually played the next one." See
-                // `twanga-dsp::onset` + docs/plans/onset-detection.md.
-                if !r.from_onset_window {
-                    continue;
-                }
-                if matches_any_expected(r.detected, expected, tuning) {
+                if wait_reading_advances(&r, expected, tuning) {
                     return Ok(());
                 }
             }
@@ -3018,6 +3007,33 @@ fn wait_for_expected_note(
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
     }
+}
+
+/// Decide whether a single [`TunerReading`] should advance the
+/// wait-mode cursor for the column whose expected hits are given.
+/// Pure function — same `(reading, expected, tuning)` always gives
+/// the same answer — so the wait-mode contract is unit-testable
+/// without spinning up an `InputStream`.
+///
+/// Two conditions must hold:
+///
+/// 1. **Onset gate:** the reading came from a YIN window that
+///    started at a fresh onset (`from_onset_window == true`). A
+///    sustained tail of the previous note can still YIN-match the
+///    next expected pitch as the window slides; without this gate
+///    the cursor would advance on "still hearing the last note"
+///    rather than "user actually played the next one." See
+///    `twanga-dsp::onset` + docs/plans/onset-detection.md.
+///
+/// 2. **Pitch match:** the detected frequency is within
+///    [`WAIT_MATCH_CENTS`] of any of the column's expected
+///    `(string, fret)` placements on the current tuning.
+fn wait_reading_advances(
+    reading: &twanga_dsp::TunerReading,
+    expected: &[(u8, u8)],
+    tuning: &Tuning,
+) -> bool {
+    reading.from_onset_window && matches_any_expected(reading.detected, expected, tuning)
 }
 
 fn matches_any_expected(detected: Frequency, expected: &[(u8, u8)], tuning: &Tuning) -> bool {
@@ -3039,6 +3055,136 @@ fn matches_any_expected(detected: Frequency, expected: &[(u8, u8)], tuning: &Tun
         }
     }
     false
+}
+
+#[cfg(test)]
+mod wait_match_tests {
+    //! Coverage for the wait-mode match logic. Lives in
+    //! [`wait_reading_advances`] + [`matches_any_expected`]; both
+    //! are pure functions deliberately extracted so the wait-mode
+    //! contract can be tested without an `InputStream` / `Tuner`
+    //! pipeline. Integration-flavoured tests at the
+    //! [`twanga_dsp::Tuner`] layer cover the upstream onset gate.
+    use super::*;
+    use twanga_core::{Frequency, MidiNote};
+
+    fn reading(detected_hz: f32, from_onset: bool) -> twanga_dsp::TunerReading {
+        twanga_dsp::TunerReading {
+            detected: Frequency(detected_hz),
+            label: String::new(),
+            target: Frequency(0.0),
+            cents: 0.0,
+            from_onset_window: from_onset,
+        }
+    }
+
+    #[test]
+    fn matches_any_expected_accepts_exact_pitch_on_open_string() {
+        // Standard guitar string 1 (high E, MIDI 64) at fret 0 → match exact E4.
+        let tuning = Tuning::standard_guitar();
+        let e4 = MidiNote(64).to_frequency();
+        assert!(matches_any_expected(e4, &[(1, 0)], &tuning));
+    }
+
+    #[test]
+    fn matches_any_expected_accepts_fretted_pitch() {
+        // Standard guitar string 2 (B3, MIDI 59) at fret 1 → C4 (MIDI 60).
+        let tuning = Tuning::standard_guitar();
+        let c4 = MidiNote(60).to_frequency();
+        assert!(matches_any_expected(c4, &[(2, 1)], &tuning));
+    }
+
+    #[test]
+    fn matches_any_expected_rejects_unrelated_pitch() {
+        // A4 doesn't match an open E2 (string 6, fret 0).
+        let tuning = Tuning::standard_guitar();
+        let a4 = MidiNote(69).to_frequency();
+        assert!(!matches_any_expected(a4, &[(6, 0)], &tuning));
+    }
+
+    #[test]
+    fn matches_any_expected_accepts_within_cents_tolerance() {
+        // 49 cents sharp of A4 (< WAIT_MATCH_CENTS = 50) — accept.
+        let tuning = Tuning::standard_guitar();
+        let a4 = MidiNote(69).to_frequency().hz();
+        let near = Frequency(a4 * 2_f32.powf(49.0 / 1200.0));
+        assert!(matches_any_expected(near, &[(1, 5)], &tuning));
+    }
+
+    #[test]
+    fn matches_any_expected_rejects_outside_cents_tolerance() {
+        // 51 cents sharp of A4 (> WAIT_MATCH_CENTS = 50) — reject.
+        let tuning = Tuning::standard_guitar();
+        let a4 = MidiNote(69).to_frequency().hz();
+        let far = Frequency(a4 * 2_f32.powf(51.0 / 1200.0));
+        assert!(!matches_any_expected(far, &[(1, 5)], &tuning));
+    }
+
+    #[test]
+    fn matches_any_expected_accepts_any_of_multiple_hits() {
+        // Chord column: hits on strings 1+3. Detected pitch matches
+        // string 3 → accept (doesn't have to match all).
+        let tuning = Tuning::standard_guitar();
+        let g3 = MidiNote(55).to_frequency(); // standard guitar string 3 open
+        assert!(matches_any_expected(g3, &[(1, 0), (3, 0)], &tuning));
+    }
+
+    #[test]
+    fn matches_any_expected_honours_5string_banjo_fret_offset() {
+        // The banjo drone (string 5) has fret_offset = 5 — fret 7 in
+        // a tab means "5 frets above open + 2 more semitones",
+        // i.e. open + 2 semitones in pitch. Match against A4 (open
+        // + 2 = g4 → A4).
+        let tuning = Tuning::standard_banjo();
+        let a4 = MidiNote(69).to_frequency();
+        assert!(matches_any_expected(a4, &[(5, 7)], &tuning));
+    }
+
+    #[test]
+    fn wait_reading_advances_requires_both_onset_and_pitch_match() {
+        let tuning = Tuning::standard_guitar();
+        let e4 = MidiNote(64).to_frequency().hz();
+        let expected = [(1, 0)];
+
+        // Both true → advance.
+        assert!(wait_reading_advances(
+            &reading(e4, true),
+            &expected,
+            &tuning
+        ));
+
+        // Onset false, pitch match → DON'T advance (sustained tail).
+        assert!(!wait_reading_advances(
+            &reading(e4, false),
+            &expected,
+            &tuning
+        ));
+
+        // Onset true, pitch mismatch → DON'T advance (wrong note played).
+        let a4 = MidiNote(69).to_frequency().hz();
+        assert!(!wait_reading_advances(
+            &reading(a4, true),
+            &expected,
+            &tuning
+        ));
+
+        // Both false → DON'T advance.
+        assert!(!wait_reading_advances(
+            &reading(a4, false),
+            &expected,
+            &tuning
+        ));
+    }
+
+    #[test]
+    fn wait_reading_advances_empty_expected_never_matches() {
+        // Defensive: a column with no hits (rest) shouldn't somehow
+        // be wait-mode'd into — the caller already gates on
+        // `column.hits.is_empty()` but pin the inner contract too.
+        let tuning = Tuning::standard_guitar();
+        let e4 = MidiNote(64).to_frequency().hz();
+        assert!(!wait_reading_advances(&reading(e4, true), &[], &tuning));
+    }
 }
 
 #[cfg(test)]

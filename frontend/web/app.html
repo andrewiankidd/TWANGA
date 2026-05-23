@@ -2410,6 +2410,7 @@
         import { makeSilenceThreshold } from './controllers/silence-threshold.js';
         import * as library from './lib/library.js';
         import { renderMarkdown } from './lib/markdown.js';
+        import { findFirstAdvancingReading } from './lib/wait-match.js';
 
         function el(id) { return document.getElementById(id); }
 
@@ -5587,29 +5588,30 @@
                                 );
                             }
                             if (playbackState.waitingForCol < 0) return;
-                            for (const r of readings) {
-                                // Onset-gated matching: only readings
-                                // from a freshly-onset-anchored window
-                                // count, so a sustained note from before
-                                // can't satisfy the next column's match.
-                                // See `twanga-dsp::onset` +
-                                // docs/plans/onset-detection.md.
-                                if (!r.from_onset_window) continue;
-                                if (playbackWaitMatches(r.detected_hz, playbackState.waitingForCol)) {
-                                    // Close out the wait segment: roll the
-                                    // time we spent waiting into the
-                                    // cumulative pause budget so the next
-                                    // `playbackTick` doesn't see "elapsed"
-                                    // jump multiple columns ahead of where
-                                    // the user actually is.
-                                    if (playbackState.waitStartedAt > 0) {
-                                        playbackState.totalPausedMs +=
-                                            performance.now() - playbackState.waitStartedAt;
-                                        playbackState.waitStartedAt = 0;
-                                    }
-                                    playbackState.waitingForCol = -1;
-                                    break;
+                            // Onset-gated matching encapsulated in
+                            // `findFirstAdvancingReading` (pure helper
+                            // in lib/wait-match.js, mirroring the CLI's
+                            // `wait_reading_advances` Rust function).
+                            // Sustained-tail readings never advance —
+                            // see `twanga-dsp::onset` and
+                            // docs/plans/onset-detection.md.
+                            const hit = findFirstAdvancingReading(
+                                readings,
+                                (hz) => playbackWaitMatches(hz, playbackState.waitingForCol),
+                            );
+                            if (hit) {
+                                // Close out the wait segment: roll the
+                                // time we spent waiting into the
+                                // cumulative pause budget so the next
+                                // `playbackTick` doesn't see "elapsed"
+                                // jump multiple columns ahead of where
+                                // the user actually is.
+                                if (playbackState.waitStartedAt > 0) {
+                                    playbackState.totalPausedMs +=
+                                        performance.now() - playbackState.waitStartedAt;
+                                    playbackState.waitStartedAt = 0;
                                 }
+                                playbackState.waitingForCol = -1;
                             }
                         },
                     });
