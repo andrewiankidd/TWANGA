@@ -225,6 +225,7 @@ Tuner-driven passive sample collection. The chore (tuning) becomes the data sour
 Minor asymmetries between the CLI and GUI around live mic configuration. The static-flag versions exist on both sides; the live versions only on one.
 
 - **Runtime device-switch on CLI.** GUI has a device picker on Tuner / Recorder / Playback wait-mode that hot-swaps the active input. CLI has `--device "<name>"` at startup; switching mid-session would need to drop and re-open the `InputStream`. Doable but low-value — CLI users typically know their device before they start.
+- **"Load file" alongside "Start mic" in the GUI** (mirror of CLI's `twanga play --from-file <wav>`). Today the CLI can swap the live mic for a paced WAV replay; the GUI can't. The one real use case is scoring a take you recorded externally (phone voice memo, DAW export, the Recorder's own WAV output) against a tab — handy when you want to evaluate a performance after the fact rather than on the way through. Low priority because the same loop is the live mic 99% of the time. Implementation: file-picker button next to "Start mic" on the Playback screen, route through the existing WASM bridge with a `decodeAudioData` → `Float32Array` chunk feeder that paces against `performance.now()` the same way the CLI's `WavSampleSource` does.
 
 ## Architecture / infrastructure
 
