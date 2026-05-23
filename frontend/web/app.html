@@ -285,6 +285,56 @@
             font-size: 0.8rem;
             line-height: 1.6;
         }
+        .diagnostic-block {
+            margin-top: 1.5rem;
+            padding-top: 1rem;
+            border-top: 1px solid var(--border);
+        }
+        .diag-title {
+            font-size: 1rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin: 0 0 0.5rem;
+        }
+        .diag-help {
+            color: var(--muted);
+            font-size: 0.85rem;
+            line-height: 1.6;
+            margin: 0 0 0.8rem;
+        }
+        .diag-status {
+            margin: 0.6rem 0 0;
+            color: var(--muted);
+            font-size: 0.85rem;
+            min-height: 1.2em;
+        }
+        .diag-status.success { color: var(--highlight); }
+        .diag-status.error { color: #d97a7a; }
+        .mic-check-readout {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 0.8rem 1rem;
+            margin-bottom: 0.6rem;
+            font-family: monospace;
+            font-size: 0.9rem;
+        }
+        .mc-row {
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 0.3rem;
+        }
+        .mc-row:last-child { margin-bottom: 0; }
+        .mc-label {
+            color: var(--muted);
+            min-width: 6.5rem;
+        }
+        .output-verify-row {
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+            margin-top: 0.6rem;
+        }
         .primary-btn {
             background: var(--highlight);
             color: var(--background, #1a1a1a);
@@ -2291,6 +2341,57 @@
                 offset. Have the mic positioned where you usually play; stay quiet during
                 the measurement.
             </p>
+
+            <!-- Mic-check sanity panel. End-to-end pipeline test
+                 (mic → silence gate → YIN → pitch label) so the user
+                 can verify their mic is actually wired up and pitch
+                 detection works before relying on any of it for
+                 scoring. Lightweight version of what the Tuner
+                 screen does; no string mode, no calibration. -->
+            <section class="diagnostic-block" id="calibrate-mic-check-block">
+                <h3 class="diag-title">Mic + pitch-detection check</h3>
+                <p class="diag-help">
+                    Opens your mic and reports live signal level + detected pitch.
+                    Play any note — if the level bar moves and a note name appears,
+                    your end-to-end pipeline (mic → silence gate → pitch detector)
+                    is working.
+                </p>
+                <div class="mic-check-readout">
+                    <div class="mc-row"><span class="mc-label">Level:</span> <span id="calibrate-mc-level">—</span></div>
+                    <div class="mc-row"><span class="mc-label">Pitch:</span> <span id="calibrate-mc-pitch">—</span></div>
+                    <div class="mc-row"><span class="mc-label">Sample rate:</span> <span id="calibrate-mc-sr">—</span></div>
+                </div>
+                <div class="calibrate-actions">
+                    <button type="button" id="calibrate-mc-start-btn" class="primary-btn">Start mic check</button>
+                    <button type="button" id="calibrate-mc-stop-btn" class="primary-btn" hidden>Stop</button>
+                </div>
+                <p class="diag-status" id="calibrate-mc-status"></p>
+            </section>
+
+            <!-- Output-verification panel. Plays a single click;
+                 user confirms whether they heard it. Catches the
+                 "speakers muted / wrong output device" failure mode
+                 before the round-trip measurement does, where it
+                 would just present as "no clicks detected" without
+                 telling you which side of the loop is broken. -->
+            <section class="diagnostic-block" id="calibrate-output-block">
+                <h3 class="diag-title">Audio output check</h3>
+                <p class="diag-help">
+                    Plays a short click through your default audio output.
+                    Listen for it and confirm — catches "speakers muted" /
+                    "wrong output device" before they masquerade as a failed
+                    round-trip measurement.
+                </p>
+                <div class="calibrate-actions">
+                    <button type="button" id="calibrate-out-play-btn" class="primary-btn">Play test click</button>
+                </div>
+                <div class="output-verify-row" id="calibrate-out-verify-row" hidden>
+                    <span class="diag-help">Did you hear it?</span>
+                    <button type="button" id="calibrate-out-yes-btn" class="primary-btn">Yes</button>
+                    <button type="button" id="calibrate-out-no-btn" class="primary-btn">No</button>
+                </div>
+                <p class="diag-status" id="calibrate-out-status"></p>
+            </section>
         </section>
 
         <!-- Tunings screen -->
@@ -2870,24 +2971,41 @@
             )) {
                 r.addEventListener('change', refreshWizardMode);
             }
+            // Mic + pitch sanity check
+            el('calibrate-mc-start-btn').addEventListener('click', startMicCheck);
+            el('calibrate-mc-stop-btn').addEventListener('click', stopMicCheck);
+            // Output verification
+            el('calibrate-out-play-btn').addEventListener('click', playOutputTestClick);
+            el('calibrate-out-yes-btn').addEventListener('click', () => answerOutputCheck(true));
+            el('calibrate-out-no-btn').addEventListener('click', () => answerOutputCheck(false));
 
-            // Menu navigation.
+            // Menu navigation. Stops the mic-check sanity panel on
+            // any screen change so the mic isn't held while the user
+            // is somewhere else — bad citizen otherwise (orange
+            // browser indicator persists, OS-level mic-in-use icon
+            // stays on).
             document.querySelectorAll('[data-screen]').forEach((btn) => {
                 btn.addEventListener('click', () => {
                     const screen = btn.getAttribute('data-screen');
+                    if (screen !== 'calibrate') stopMicCheck();
                     show(screen);
                     if (screen === 'calibrate') refreshCalibrateScreen();
                 });
             });
             document.querySelectorAll('[data-back]').forEach((btn) => {
-                btn.addEventListener('click', () => show('menu'));
+                btn.addEventListener('click', () => {
+                    stopMicCheck();
+                    show('menu');
+                });
             });
             window.addEventListener('hashchange', () => {
+                const screen = location.hash.replace(/^#/, '');
+                if (screen !== 'calibrate') stopMicCheck();
                 routeFromHash();
                 // Deep-link / back-button into Calibrate also needs
                 // the context refresh — the click-based path above
                 // doesn't fire when navigation comes from the URL.
-                if (location.hash.replace(/^#/, '') === 'calibrate') {
+                if (screen === 'calibrate') {
                     refreshCalibrateScreen();
                 }
             });
@@ -6704,6 +6822,165 @@
             } finally {
                 calibrateState.running = false;
                 btn.disabled = false;
+            }
+        }
+
+        // ---- Mic + pitch-detection sanity panel -------------------------
+        //
+        // End-to-end pipeline test: opens the mic, runs a chromatic
+        // WebTuner on the samples, displays level (RMS in dB) +
+        // most-recent detected pitch label. Lets the user confirm
+        // the whole chain (browser permission → WebAudio →
+        // ScriptProcessor → WebTuner → YIN → pitch label) actually
+        // works before they trust score modes. Uses its own
+        // getUserMedia stream rather than sharing the playback
+        // mic-session so navigating between screens doesn't
+        // interrupt anything.
+
+        const micCheckState = {
+            running: false,
+            ctx: null,
+            stream: null,
+            source: null,
+            proc: null,
+            sink: null,
+            tuner: null,
+        };
+
+        async function startMicCheck() {
+            if (micCheckState.running) return;
+            const statusEl = el('calibrate-mc-status');
+            const startBtn = el('calibrate-mc-start-btn');
+            const stopBtn = el('calibrate-mc-stop-btn');
+            statusEl.className = 'diag-status';
+            statusEl.textContent = '';
+            try {
+                const deviceId = playbackState.devicePicker?.getSelectedId?.() ?? null;
+                const ctx = new (window.AudioContext || window.webkitAudioContext)();
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    audio: {
+                        deviceId: deviceId ? { exact: deviceId } : undefined,
+                        echoCancellation: false,
+                        noiseSuppression: false,
+                        autoGainControl: false,
+                    },
+                });
+                const sampleRate = ctx.sampleRate;
+                el('calibrate-mc-sr').textContent = `${Math.round(sampleRate)} Hz`;
+
+                const tuner = WebTuner.new_chromatic(Math.round(sampleRate));
+                const silenceRms = playbackState.silenceThreshold?.getRms?.();
+                if (typeof silenceRms === 'number') tuner.set_silence_rms(silenceRms);
+
+                const source = ctx.createMediaStreamSource(stream);
+                const proc = ctx.createScriptProcessor(2048, 1, 1);
+                proc.onaudioprocess = (e) => {
+                    const input = e.inputBuffer.getChannelData(0);
+                    tuner.feed(input);
+                    // Compute RMS over the chunk for the level display.
+                    let sumSq = 0;
+                    for (let i = 0; i < input.length; i++) sumSq += input[i] * input[i];
+                    const rms = Math.sqrt(sumSq / input.length);
+                    const db = rms > 0 ? 20 * Math.log10(rms) : -Infinity;
+                    el('calibrate-mc-level').textContent =
+                        Number.isFinite(db) ? `${db.toFixed(1)} dB (RMS ${rms.toFixed(4)})` : 'silent';
+                    const readings = tuner.take_readings();
+                    if (readings.length > 0) {
+                        const last = readings[readings.length - 1];
+                        const cents = Math.round(last.cents ?? 0);
+                        const sign = cents > 0 ? '+' : '';
+                        el('calibrate-mc-pitch').textContent =
+                            `${last.label} (${sign}${cents}¢)`;
+                    }
+                };
+                source.connect(proc);
+                const sink = ctx.createGain();
+                sink.gain.value = 0;
+                proc.connect(sink);
+                sink.connect(ctx.destination);
+
+                Object.assign(micCheckState, {
+                    running: true,
+                    ctx, stream, source, proc, sink, tuner,
+                });
+                startBtn.hidden = true;
+                stopBtn.hidden = false;
+                statusEl.className = 'diag-status success';
+                statusEl.textContent = 'Mic open — play any note to verify pitch detection.';
+            } catch (err) {
+                statusEl.className = 'diag-status error';
+                statusEl.textContent = `Couldn't open mic: ${err.message || err}`;
+                stopMicCheck();
+            }
+        }
+
+        function stopMicCheck() {
+            if (!micCheckState.running && !micCheckState.ctx) {
+                el('calibrate-mc-start-btn').hidden = false;
+                el('calibrate-mc-stop-btn').hidden = true;
+                return;
+            }
+            try { micCheckState.source?.disconnect(); } catch {}
+            try { micCheckState.proc?.disconnect(); } catch {}
+            try { micCheckState.sink?.disconnect(); } catch {}
+            if (micCheckState.stream) {
+                for (const t of micCheckState.stream.getTracks()) t.stop();
+            }
+            try { micCheckState.tuner?.free?.(); } catch {}
+            try { micCheckState.ctx?.close(); } catch {}
+            Object.assign(micCheckState, {
+                running: false,
+                ctx: null, stream: null, source: null, proc: null, sink: null, tuner: null,
+            });
+            el('calibrate-mc-start-btn').hidden = false;
+            el('calibrate-mc-stop-btn').hidden = true;
+            el('calibrate-mc-level').textContent = '—';
+            el('calibrate-mc-pitch').textContent = '—';
+            const statusEl = el('calibrate-mc-status');
+            if (statusEl.classList.contains('success')) {
+                statusEl.className = 'diag-status';
+                statusEl.textContent = '';
+            }
+        }
+
+        // ---- Output verification ----------------------------------------
+        //
+        // Plays one short click out the default output and asks the
+        // user yes/no whether they heard it. Catches "speakers
+        // muted" / "wrong output device" before they masquerade as
+        // a failed round-trip ("no clicks detected" with no
+        // indication which side of the loop is broken).
+
+        async function playOutputTestClick() {
+            const statusEl = el('calibrate-out-status');
+            const verifyRow = el('calibrate-out-verify-row');
+            statusEl.className = 'diag-status';
+            statusEl.textContent = '';
+            verifyRow.hidden = true;
+            try {
+                const ctx = new (window.AudioContext || window.webkitAudioContext)();
+                const click = makeCalibrationClick(ctx.sampleRate);
+                await playClickThroughContext(ctx, click);
+                await sleep(150); // let it finish audibly before showing the prompt
+                try { await ctx.close(); } catch {}
+                verifyRow.hidden = false;
+            } catch (err) {
+                statusEl.className = 'diag-status error';
+                statusEl.textContent = `Couldn't play click: ${err.message || err}`;
+            }
+        }
+
+        function answerOutputCheck(heard) {
+            const statusEl = el('calibrate-out-status');
+            el('calibrate-out-verify-row').hidden = true;
+            if (heard) {
+                statusEl.className = 'diag-status success';
+                statusEl.textContent =
+                    'Audio output works. Round-trip calibration should succeed if your mic is positioned to pick up the speakers.';
+            } else {
+                statusEl.className = 'diag-status error';
+                statusEl.textContent =
+                    "Couldn't hear the click — check OS output device + volume. Round-trip calibration would fail; pick Headphones / Visual-only in the wizard and use manual entry instead.";
             }
         }
 

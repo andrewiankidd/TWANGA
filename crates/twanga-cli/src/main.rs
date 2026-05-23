@@ -2010,6 +2010,21 @@ fn calibrate_wizard(path: &Path) -> Result<()> {
         // loopback) → physical round-trip works.
         ("a" | "b", "a") => {
             eprintln!();
+            // Output verification before the real measurement.
+            // Catches "speakers muted / wrong output device" before
+            // it presents as "no clicks detected" (which gives the
+            // user no clue which side of the loop is broken). Only
+            // runs under the wizard — `--round-trip` skips it for
+            // scriptability.
+            if !prompt_output_test()? {
+                eprintln!();
+                eprintln!("Audio output isn't reaching your speakers. Switching to manual entry.");
+                eprintln!(
+                    "(Tip: run `twanga tune` separately to verify your mic + pitch detection.)"
+                );
+                return calibrate_manual_wizard(path);
+            }
+            eprintln!();
             eprintln!("Setup detected: acoustic round-trip available. Running measurement.");
             calibrate_round_trip(path)
         }
@@ -2017,9 +2032,41 @@ fn calibrate_wizard(path: &Path) -> Result<()> {
         _ => {
             eprintln!();
             eprintln!("Setup detected: acoustic round-trip not available. Setting manually.");
+            eprintln!("(Tip: run `twanga tune` separately to verify your mic + pitch detection.)");
             calibrate_manual_wizard(path)
         }
     }
+}
+
+/// Play a single test click + ask whether the user heard it.
+/// Returns `Ok(true)` on yes (proceed with round-trip), `Ok(false)`
+/// on no (the wizard reroutes to manual). Wizard-only — the
+/// `--round-trip` flag skips this and goes straight to measurement.
+fn prompt_output_test() -> Result<bool> {
+    use std::io::{BufRead, Write};
+    eprintln!();
+    eprintln!("Playing one test click — confirm you can hear it.");
+    let mut output = twanga_audio::OutputStream::open()?;
+    let click = metronome_click(output.sample_rate);
+    output.write(&click);
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    let stderr = std::io::stderr();
+    let stdin = std::io::stdin();
+    let mut stderr_lock = stderr.lock();
+    let mut stdin_lock = stdin.lock();
+    let mut line = String::new();
+    for _ in 0..5 {
+        write!(stderr_lock, "Did you hear the click? [y/n]: ")?;
+        stderr_lock.flush()?;
+        line.clear();
+        stdin_lock.read_line(&mut line)?;
+        match line.trim().to_lowercase().as_str() {
+            "y" | "yes" => return Ok(true),
+            "n" | "no" => return Ok(false),
+            _ => writeln!(stderr_lock, "invalid response — y or n")?,
+        }
+    }
+    Err(anyhow!("too many invalid responses"))
 }
 
 /// Interactive manual-entry sub-flow. Shows typical-value

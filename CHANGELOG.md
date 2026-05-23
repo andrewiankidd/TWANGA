@@ -10,6 +10,25 @@ dated section.
 
 ### Fixed
 
+- **Calibrate screen reliability diagnostics: mic check + output check.**
+  Two new sub-panels turn Calibrate into a "is your digital audio
+  chain actually working" surface rather than just "press button,
+  get latency number":
+  - **Mic + pitch-detection check** (GUI) opens the mic via its own
+    short-lived AudioContext, runs a chromatic WebTuner on the
+    samples, displays live RMS-in-dB + most recent detected pitch +
+    sample rate. Lets the user verify the whole pipeline (mic
+    permission → input driver → silence gate → YIN → pitch label)
+    works before trusting any of it for scoring. Auto-stops when
+    navigating away so the mic-in-use indicator doesn't linger.
+    CLI parity: the wizard's manual branch tips users at `twanga tune`
+    which already does this.
+  - **Audio output check** (CLI + GUI) plays one click and asks
+    yes/no whether the user heard it. CLI version is baked into
+    the wizard's round-trip path — answering "no" reroutes to
+    manual entry rather than failing later with an unhelpful "no
+    clicks detected" error. GUI version is a standalone button so
+    users can verify output independently of running calibration.
 - **Calibration wizard — setup-driven, branching, CLI + GUI parity.**
   `twanga calibrate` is no longer "press button, run round-trip" —
   it now asks two setup questions ("where does TWANGA listen for
