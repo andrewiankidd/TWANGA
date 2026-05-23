@@ -149,7 +149,9 @@ pub fn run_calibration(progress: &mut dyn FnMut(usize, usize)) -> Result<Latency
             }
             written += n;
         }
-        if let Some(offset_ms) = locate_click_peak(&capture_buf[..written], input_sr) {
+        if let Some(offset_ms) =
+            twanga_dsp::calibration::locate_click_peak_ms(&capture_buf[..written], input_sr)
+        {
             measurements.push(offset_ms);
         }
         // Space the clicks out.
@@ -161,44 +163,17 @@ pub fn run_calibration(progress: &mut dyn FnMut(usize, usize)) -> Result<Latency
     }
     progress(CLICK_COUNT, CLICK_COUNT);
 
-    if measurements.is_empty() {
-        return Err(anyhow!(
+    let median = twanga_dsp::calibration::median(&mut measurements).ok_or_else(|| {
+        anyhow!(
             "no clicks were detected in the mic input — is the mic muted, or pointed away from the speakers?"
-        ));
-    }
-    measurements.sort_unstable();
-    let median = measurements[measurements.len() / 2];
+        )
+    })?;
 
     Ok(LatencyCalibration {
         device_name,
         latency_ms: median,
         measured_at: now_rfc3339(),
     })
-}
-
-/// Find the sample index of the loudest peak in the captured
-/// window and convert to milliseconds. Returns `None` if the
-/// loudest sample is below a noise-floor heuristic (no audible
-/// click reached the mic — could be muted, too quiet, or the
-/// output isn't actually wired to anything the input can hear).
-fn locate_click_peak(samples: &[f32], sample_rate: u32) -> Option<u32> {
-    let mut peak_idx = 0usize;
-    let mut peak_val = 0.0_f32;
-    for (i, &s) in samples.iter().enumerate() {
-        let a = s.abs();
-        if a > peak_val {
-            peak_val = a;
-            peak_idx = i;
-        }
-    }
-    // 0.02 ≈ -34 dB — below this we don't trust that a click
-    // actually arrived. Tuned generously because the user might
-    // be on a quiet system / low monitor volume; raising it
-    // would reject some legitimate captures.
-    if peak_val < 0.02 {
-        return None;
-    }
-    Some((peak_idx as u64 * 1000 / sample_rate as u64) as u32)
 }
 
 /// Best-effort current-time stamp. Falls back to "unknown" if the
@@ -241,22 +216,5 @@ mod tests {
         let path = dir.path().join("does-not-exist.toml");
         let loaded = LatencyCalibration::load(&path).expect("load");
         assert!(loaded.is_none());
-    }
-
-    #[test]
-    fn locate_peak_finds_loud_sample_position() {
-        // A flat-zero buffer with one loud spike at sample 480 in
-        // a 48 kHz capture → 10 ms offset.
-        let mut samples = vec![0.0_f32; 48_000];
-        samples[480] = 0.8;
-        let offset = locate_click_peak(&samples, 48_000);
-        assert_eq!(offset, Some(10));
-    }
-
-    #[test]
-    fn locate_peak_returns_none_when_below_floor() {
-        // Quiet buffer (max amplitude 0.005) — no audible click.
-        let samples = vec![0.005_f32; 48_000];
-        assert_eq!(locate_click_peak(&samples, 48_000), None);
     }
 }

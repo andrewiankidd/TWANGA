@@ -7,6 +7,7 @@
 
 use twanga_core::{Frequency, MidiNote, Tuning};
 
+pub mod calibration;
 pub mod onset;
 
 pub trait PitchDetector {

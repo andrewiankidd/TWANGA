@@ -342,6 +342,34 @@ pub fn parse_ascii_tab(text: &str) -> Result<WebParsedTab, String> {
     })
 }
 
+// ────────────────────────── Latency calibration ──────────────────────────
+
+/// Find the loudest peak in a captured-click buffer and return its
+/// offset from sample 0, in milliseconds. The web Calibrate screen
+/// calls this once per click (5 times per calibration run), then
+/// medians the results. Mirrors the native `twanga calibrate`
+/// pipeline; the actual mic + speaker handling is JS-side (Web
+/// Audio API) but the peak-finder lives here so CLI and web agree
+/// on what counts as "the click landed at time X."
+///
+/// Returns `null` when the loudest sample is below the peak
+/// threshold (no audible click reached the mic — user is muted,
+/// monitor is off, or the click is below the noise floor).
+#[wasm_bindgen]
+pub fn calibration_locate_click_peak_ms(samples: &[f32], sample_rate: u32) -> Option<u32> {
+    twanga_dsp::calibration::locate_click_peak_ms(samples, sample_rate)
+}
+
+/// Median of a list of per-click measurements. JS could implement
+/// this in three lines, but routing it through the shared crate
+/// guarantees CLI and web agree on the tiebreak rule (lower of
+/// the middle two on even-length input). `null` on empty input.
+#[wasm_bindgen]
+pub fn calibration_median(measurements: &[u32]) -> Option<u32> {
+    let mut owned: Vec<u32> = measurements.to_vec();
+    twanga_dsp::calibration::median(&mut owned)
+}
+
 // ────────────────────────── Playback scoring (Ship 2C) ──────────────────────────
 
 /// Score one playback session — pair detected onsets against expected

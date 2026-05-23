@@ -78,6 +78,17 @@ export function makeDevicePicker({ selectId, storageKey, onChange }) {
         return selectedId;
     }
 
+    /// Human-readable label of the currently-selected input. Used
+    /// by latency calibration as the per-device key — browsers
+    /// expose stable labels (once permission is granted) that
+    /// survive across sessions even when `deviceId` rotates.
+    /// Falls back to a synthetic name when no label is available
+    /// (pre-permission first-load case).
+    function getSelectedLabel() {
+        const opt = select.selectedOptions[0];
+        return opt ? opt.textContent : 'Default (OS-selected)';
+    }
+
     async function refresh() {
         const devices = await enumerate();
         populate(devices);
@@ -104,7 +115,7 @@ export function makeDevicePicker({ selectId, storageKey, onChange }) {
         await refresh();
     }
 
-    return { start, refresh, getSelectedId };
+    return { start, refresh, getSelectedId, getSelectedLabel };
 }
 
 function loadSelectedId(storageKey) {

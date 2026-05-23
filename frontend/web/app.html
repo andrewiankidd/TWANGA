@@ -192,6 +192,64 @@
             line-height: 1.6;
         }
 
+        /* Calibrate screen */
+        .calibrate-context,
+        .calibrate-result {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 1rem 1.2rem;
+            margin-bottom: 1rem;
+        }
+        .calibrate-result strong {
+            color: var(--highlight);
+            font-size: 1.1rem;
+        }
+        .ctx-row {
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 0.3rem;
+            font-size: 0.9rem;
+        }
+        .ctx-row:last-child { margin-bottom: 0; }
+        .ctx-label {
+            color: var(--muted);
+            min-width: 11rem;
+        }
+        .calibrate-status {
+            min-height: 1.4em;
+            margin: 0.6rem 0 1rem;
+            color: var(--muted);
+            font-size: 0.9rem;
+        }
+        .calibrate-status.error { color: #d97a7a; }
+        .calibrate-status.success { color: var(--highlight); }
+        .calibrate-actions {
+            margin-bottom: 1rem;
+        }
+        .calibrate-help {
+            color: var(--muted);
+            font-size: 0.85rem;
+            line-height: 1.6;
+        }
+        .primary-btn {
+            background: var(--highlight);
+            color: var(--background, #1a1a1a);
+            border: 1px solid var(--highlight);
+            padding: 0.6rem 1.4rem;
+            border-radius: var(--radius);
+            font-family: "Montserrat", sans-serif;
+            font-size: 0.9rem;
+            cursor: pointer;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        .primary-btn:hover { opacity: 0.9; }
+        .primary-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
         /* Tuner-screen widgets */
         /* Tuning + capo disclosure. Replaces the old picker-button row
            with a `<select>` dropdown that scales as more tunings are
@@ -1711,6 +1769,10 @@
                     <span class="title">Importer</span>
                     <span class="desc">Add `.alphatex` / `.musicxml` / `.mxl` / `.mid` / `.abc` / `.tab` files to your library</span>
                 </button>
+                <button class="menu-btn" data-screen="calibrate">
+                    <span class="title">Calibrate</span>
+                    <span class="desc">Measure your audio chain's round-trip latency for accurate scoring</span>
+                </button>
                 <button class="menu-btn" data-screen="tunings">
                     <span class="title">Tunings</span>
                     <span class="desc">Built-in presets + your own custom tunings</span>
@@ -2092,6 +2154,45 @@
             </div>
         </section>
 
+        <!-- Calibrate screen -->
+        <section id="screen-calibrate" class="screen">
+            <div class="back-row">
+                <button class="back-btn" data-back>← Menu</button>
+            </div>
+            <h2>Calibrate</h2>
+            <p class="subtitle">
+                Measure your audio chain's output→input round-trip latency
+                so the proximity-score playback modes (tight / casual) credit
+                your on-time plucks as Hit rather than scoring them as Late.
+                One measurement per device — switching mics invalidates the
+                stored value and prompts a recalibration.
+            </p>
+
+            <div class="calibrate-context" id="calibrate-context">
+                <div class="ctx-row"><span class="ctx-label">Mic:</span> <span id="calibrate-mic-name">—</span></div>
+                <div class="ctx-row"><span class="ctx-label">Silence threshold:</span> <span id="calibrate-silence-rms">—</span></div>
+            </div>
+
+            <div class="calibrate-result" id="calibrate-result" hidden>
+                <div class="ctx-row"><span class="ctx-label">Measured latency:</span> <strong id="calibrate-latency-value">—</strong></div>
+                <div class="ctx-row"><span class="ctx-label">Calibrated for:</span> <span id="calibrate-saved-device">—</span></div>
+                <div class="ctx-row"><span class="ctx-label">Measured at:</span> <span id="calibrate-saved-when">—</span></div>
+            </div>
+
+            <div class="calibrate-status" id="calibrate-status"></div>
+
+            <div class="calibrate-actions">
+                <button id="calibrate-run-btn" class="primary-btn">Calibrate</button>
+            </div>
+
+            <p class="calibrate-help">
+                The procedure plays 5 short clicks through your speakers and
+                listens for each one via your mic, then records the median
+                round-trip time. Have the mic positioned where you usually
+                play; stay quiet during the measurement.
+            </p>
+        </section>
+
         <!-- Tunings screen -->
         <section id="screen-tunings" class="screen">
             <div class="back-row">
@@ -2394,6 +2495,8 @@
             parse_ascii_tab,
             parsed_tab_to_alphatex,
             score_playback_session,
+            calibration_locate_click_peak_ms,
+            calibration_median,
             WebTuner,
             WebParsedTab,
         } from './pkg/twanga_web.js';
@@ -2653,14 +2756,33 @@
                 location.hash = '#docs';
             });
 
+            // Calibrate screen — primary CTA wired to the latency
+            // measurement procedure. The context display refreshes
+            // every time the screen activates (next block) so the
+            // mic name + silence threshold stay in sync with what
+            // the user changed elsewhere.
+            el('calibrate-run-btn').addEventListener('click', runCalibrateClick);
+
             // Menu navigation.
             document.querySelectorAll('[data-screen]').forEach((btn) => {
-                btn.addEventListener('click', () => show(btn.getAttribute('data-screen')));
+                btn.addEventListener('click', () => {
+                    const screen = btn.getAttribute('data-screen');
+                    show(screen);
+                    if (screen === 'calibrate') refreshCalibrateScreen();
+                });
             });
             document.querySelectorAll('[data-back]').forEach((btn) => {
                 btn.addEventListener('click', () => show('menu'));
             });
-            window.addEventListener('hashchange', routeFromHash);
+            window.addEventListener('hashchange', () => {
+                routeFromHash();
+                // Deep-link / back-button into Calibrate also needs
+                // the context refresh — the click-based path above
+                // doesn't fire when navigation comes from the URL.
+                if (location.hash.replace(/^#/, '') === 'calibrate') {
+                    refreshCalibrateScreen();
+                }
+            });
             routeFromHash();
 
             // Tuner: hydrate via the shared tuning+capo controller. The
@@ -2768,6 +2890,17 @@
         /// built-in when they load chromatic — see the loadPersisted
         /// fallback in `controllers/tuning.js`.
         const CURRENT_TUNING_KEY = 'twanga-current-tuning-v1';
+
+        // Latency-calibration storage key + measurement constants.
+        // Mirrors the CLI's `$DATA_ROOT/latency.toml` schema (device
+        // name + measured ms + measured-at timestamp); changing input
+        // device invalidates the stored value at read time so we
+        // don't apply a stale measurement from a different mic to
+        // the current onset stream.
+        const LATENCY_STORAGE_KEY = 'twanga-latency-calibration-v1';
+        const CALIBRATION_CLICK_COUNT = 5;
+        const CALIBRATION_CLICK_INTERVAL_MS = 600;
+        const CALIBRATION_CLICK_CAPTURE_MS = 500;
 
         const tunerState = {
             tuner: null,            // active WebTuner instance
@@ -5575,6 +5708,11 @@
             // session — proximity-score outcomes only consider events
             // collected during the current playback run.
             playbackState.onsetEvents = [];
+            // Hardware round-trip latency from a prior calibration
+            // run, if any. Populated below once the live mic is open
+            // and we know its device name (to compare against the
+            // stored calibration's device key); 0 otherwise.
+            playbackState.extraLatencyMs = 0;
 
             // Lock settings + tuning controls.
             playbackState.tuning?.setEnabled(false);
@@ -5667,23 +5805,27 @@
                             // timestamp (ms since playback start). The
                             // batch is scored against the column
                             // schedule at session end in
-                            // `playbackStop`. Subtract the YIN window
-                            // latency so the recorded timestamp
-                            // reflects when the user actually plucked
-                            // (not when YIN confirmed the pitch ~170
-                            // ms later) — matches the CLI fix in
-                            // `capture_onsets_for_duration`.
+                            // `playbackStop`. Subtract two latencies
+                            // to recover when the user actually
+                            // plucked:
+                            //   - `window_latency_ms`: DSP pipeline
+                            //     delay (YIN analysis window length).
+                            //   - `extraLatencyMs`: hardware round
+                            //     trip from a prior calibration; 0
+                            //     if uncalibrated or the stored value
+                            //     was for a different mic.
                             if (playbackState.policy === 'tight'
                                 || playbackState.policy === 'casual') {
                                 if (playbackState.playStartTime === 0) return;
                                 const nowMs = performance.now()
                                     - playbackState.playStartTime
                                     - playbackState.totalPausedMs;
-                                const latencyMs = playbackState.chromaticTuner.window_latency_ms?.() ?? 0;
+                                const windowLatency = playbackState.chromaticTuner.window_latency_ms?.() ?? 0;
+                                const totalLatency = windowLatency + (playbackState.extraLatencyMs || 0);
                                 for (const r of readings) {
                                     if (!r.from_onset_window) continue;
                                     playbackState.onsetEvents.push({
-                                        timestamp_ms: Math.max(0, Math.round(nowMs - latencyMs)),
+                                        timestamp_ms: Math.max(0, Math.round(nowMs - totalLatency)),
                                         detected_hz: r.detected_hz,
                                     });
                                 }
@@ -5719,7 +5861,17 @@
                     playbackState.micMeter.start();
                     // Now we've got permission — refresh the device
                     // list so the labels populate.
-                    playbackState.devicePicker?.refresh().catch(() => {});
+                    await playbackState.devicePicker?.refresh().catch(() => {});
+                    // Resolve any persisted hardware-latency
+                    // calibration for the currently-selected mic.
+                    // Mirror of the CLI's resolve_hardware_latency:
+                    // matches device-label-stored-at-calibration-time
+                    // against the live label; 0 (no compensation) on
+                    // any mismatch, no stored value, or scoring mode
+                    // not in use.
+                    playbackState.extraLatencyMs = resolveLatencyForDevice(
+                        playbackState.devicePicker?.getSelectedLabel?.() ?? '',
+                    );
                 } catch (err) {
                     playbackState.chromaticTuner?.free?.();
                     playbackState.chromaticTuner = null;
@@ -6070,6 +6222,270 @@
                 return entry.strings.map((s) => s.fret_offset ?? 0);
             } catch {
                 return fallback;
+            }
+        }
+
+        // ----------------------------------------------------------------
+        // CALIBRATE (output→input round-trip latency measurement)
+        // ----------------------------------------------------------------
+        //
+        // Mirrors `twanga calibrate` in the CLI. Plays
+        // `CALIBRATION_CLICK_COUNT` short clicks through the
+        // default audio output, captures the mic via a one-shot
+        // AudioWorklet-free path (Web Audio's AnalyserNode is too
+        // slow; we use a MediaStreamAudioSourceNode + ScriptProcessor
+        // for capture because it gives us the raw Float32Array each
+        // chunk), and asks the shared WASM peak finder
+        // `calibration_locate_click_peak_ms` where the click landed
+        // in each capture. Median of the 5 measurements is the
+        // round-trip hardware latency.
+        //
+        // Persisted under `LATENCY_STORAGE_KEY` keyed by the input
+        // device's label (browsers expose a stable label string
+        // once mic permission is granted) so the playback loop can
+        // invalidate the value if the user changes mics later.
+
+        const calibrateState = {
+            running: false,
+            stream: null, // MediaStream from getUserMedia, released after each run
+        };
+
+        /// Read the persisted latency calibration from localStorage.
+        /// Returns `null` if missing or malformed. Schema mirrors the
+        /// native `latency.toml` shape (device name + ms + measured
+        /// timestamp) so both surfaces stay conceptually aligned.
+        function loadLatencyCalibration() {
+            try {
+                const raw = localStorage.getItem(LATENCY_STORAGE_KEY);
+                if (!raw) return null;
+                const parsed = JSON.parse(raw);
+                if (typeof parsed?.latencyMs !== 'number') return null;
+                if (typeof parsed?.deviceName !== 'string') return null;
+                return parsed;
+            } catch {
+                return null;
+            }
+        }
+
+        function saveLatencyCalibration(cal) {
+            try {
+                localStorage.setItem(LATENCY_STORAGE_KEY, JSON.stringify(cal));
+            } catch (e) {
+                console.warn('saveLatencyCalibration failed', e);
+            }
+        }
+
+        /// Return the persisted latency value IFF it was measured
+        /// for `deviceLabel`; 0 otherwise. Symmetric with the CLI's
+        /// `resolve_hardware_latency` — stale measurement after a
+        /// device swap is treated the same as "never calibrated."
+        function resolveLatencyForDevice(deviceLabel) {
+            const cal = loadLatencyCalibration();
+            if (!cal) return 0;
+            if (cal.deviceName !== deviceLabel) return 0;
+            return Math.max(0, Math.round(cal.latencyMs));
+        }
+
+        /// Generate the same 50 ms / 1 kHz click TWANGA uses for
+        /// pre-roll, scaled down so it isn't piercing. Matches
+        /// `metronome_click` in `twanga-cli/src/main.rs`.
+        function makeCalibrationClick(sampleRate) {
+            const n = Math.round(sampleRate * 0.05);
+            const buf = new Float32Array(n);
+            const decayN = sampleRate * 0.012;
+            for (let i = 0; i < n; i++) {
+                const env = Math.exp(-i / decayN);
+                buf[i] = 0.3 * env * Math.sin(2 * Math.PI * 1000 * i / sampleRate);
+            }
+            return buf;
+        }
+
+        /// Run the full calibration procedure. Returns a measurement
+        /// object on success or throws on failure (no audio device,
+        /// no clicks detected, etc).
+        async function runCalibrationMeasurement(deviceId, deviceLabel, onProgress) {
+            // Fresh audio context per run so the sample rate matches
+            // the input device's natural rate.
+            const ctx = new (window.AudioContext || window.webkitAudioContext)();
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    audio: {
+                        deviceId: deviceId ? { exact: deviceId } : undefined,
+                        echoCancellation: false,
+                        noiseSuppression: false,
+                        autoGainControl: false,
+                    },
+                });
+                calibrateState.stream = stream;
+                const sampleRate = ctx.sampleRate;
+                const captureLen = Math.round(sampleRate * CALIBRATION_CLICK_CAPTURE_MS / 1000);
+                const measurements = [];
+
+                // Mic capture path: source → ScriptProcessor → we
+                // append each onaudioprocess chunk to a Float32Array
+                // sized to one CALIBRATION_CLICK_CAPTURE_MS window.
+                // ScriptProcessor is deprecated in favour of
+                // AudioWorklet but is universally supported and
+                // simpler for one-shot capture; the perf concerns
+                // don't apply at this duration.
+                const source = ctx.createMediaStreamSource(stream);
+                const proc = ctx.createScriptProcessor(2048, 1, 1);
+                let captureBuf = null;
+                let written = 0;
+                proc.onaudioprocess = (e) => {
+                    if (!captureBuf) return;
+                    const input = e.inputBuffer.getChannelData(0);
+                    const remaining = captureBuf.length - written;
+                    if (remaining <= 0) return;
+                    const n = Math.min(input.length, remaining);
+                    captureBuf.set(input.subarray(0, n), written);
+                    written += n;
+                };
+                source.connect(proc);
+                // ScriptProcessor requires a destination connection
+                // to actually run, even though we don't want it audible.
+                // Route through a 0-gain node so nothing leaks out.
+                const sink = ctx.createGain();
+                sink.gain.value = 0;
+                proc.connect(sink);
+                sink.connect(ctx.destination);
+
+                // Warmup: play once to prime the output buffer; drop
+                // the result. Some platforms eat the first frames.
+                const clickSamples = makeCalibrationClick(sampleRate);
+                await playClickThroughContext(ctx, clickSamples);
+                await sleep(CALIBRATION_CLICK_INTERVAL_MS);
+
+                for (let i = 0; i < CALIBRATION_CLICK_COUNT; i++) {
+                    onProgress?.(i, CALIBRATION_CLICK_COUNT);
+                    captureBuf = new Float32Array(captureLen);
+                    written = 0;
+                    const startedAt = performance.now();
+                    await playClickThroughContext(ctx, clickSamples);
+                    // Wait the full capture window before peak-finding
+                    // so the click has had time to be recorded.
+                    await sleep(CALIBRATION_CLICK_CAPTURE_MS);
+                    const usedBuf = captureBuf.subarray(0, written);
+                    const offsetMs = calibration_locate_click_peak_ms(usedBuf, Math.round(sampleRate));
+                    if (offsetMs != null) {
+                        measurements.push(offsetMs);
+                    }
+                    captureBuf = null;
+                    // Space the clicks out.
+                    const elapsed = performance.now() - startedAt;
+                    const remaining = CALIBRATION_CLICK_INTERVAL_MS - elapsed;
+                    if (remaining > 0) await sleep(remaining);
+                }
+                onProgress?.(CALIBRATION_CLICK_COUNT, CALIBRATION_CLICK_COUNT);
+
+                source.disconnect();
+                proc.disconnect();
+                sink.disconnect();
+
+                const medianMs = calibration_median(Uint32Array.from(measurements));
+                if (medianMs == null) {
+                    throw new Error(
+                        "no clicks were detected in the mic input — is the mic muted, "
+                        + "or pointed away from the speakers?"
+                    );
+                }
+                return {
+                    deviceName: deviceLabel,
+                    latencyMs: medianMs,
+                    measuredAt: new Date().toISOString(),
+                };
+            } finally {
+                if (calibrateState.stream) {
+                    for (const t of calibrateState.stream.getTracks()) t.stop();
+                    calibrateState.stream = null;
+                }
+                try { await ctx.close(); } catch {}
+            }
+        }
+
+        function playClickThroughContext(ctx, samples) {
+            return new Promise((resolve) => {
+                const buf = ctx.createBuffer(1, samples.length, ctx.sampleRate);
+                buf.copyToChannel(samples, 0);
+                const src = ctx.createBufferSource();
+                src.buffer = buf;
+                src.connect(ctx.destination);
+                src.onended = () => resolve();
+                src.start();
+            });
+        }
+
+        function sleep(ms) {
+            return new Promise((resolve) => setTimeout(resolve, ms));
+        }
+
+        /// Populate the Calibrate screen with the current
+        /// device/silence context + last measurement. Called on
+        /// every screen activation so the values stay fresh if the
+        /// user changed mic / threshold elsewhere.
+        function refreshCalibrateScreen() {
+            // Borrow the playback screen's controllers — they're
+            // initialised before this gets called and represent the
+            // same shared mic + threshold state.
+            const deviceLabel = playbackState.devicePicker?.getSelectedLabel?.()
+                || 'Default (OS-selected)';
+            const silenceRms = playbackState.silenceThreshold?.getRms?.();
+            el('calibrate-mic-name').textContent = deviceLabel;
+            el('calibrate-silence-rms').textContent =
+                typeof silenceRms === 'number' ? silenceRms.toFixed(4) : '—';
+
+            const cal = loadLatencyCalibration();
+            const resultEl = el('calibrate-result');
+            if (cal) {
+                resultEl.hidden = false;
+                el('calibrate-latency-value').textContent = `${cal.latencyMs} ms`;
+                el('calibrate-saved-device').textContent = cal.deviceName;
+                el('calibrate-saved-when').textContent = cal.measuredAt;
+                el('calibrate-run-btn').textContent = 'Recalibrate';
+                if (cal.deviceName !== deviceLabel) {
+                    el('calibrate-status').className = 'calibrate-status error';
+                    el('calibrate-status').textContent =
+                        `Saved value is for '${cal.deviceName}', not the live mic. Recalibrate to use it.`;
+                } else {
+                    el('calibrate-status').className = 'calibrate-status';
+                    el('calibrate-status').textContent = '';
+                }
+            } else {
+                resultEl.hidden = true;
+                el('calibrate-run-btn').textContent = 'Calibrate';
+                el('calibrate-status').className = 'calibrate-status';
+                el('calibrate-status').textContent = '';
+            }
+        }
+
+        async function runCalibrateClick() {
+            if (calibrateState.running) return;
+            calibrateState.running = true;
+            const btn = el('calibrate-run-btn');
+            const status = el('calibrate-status');
+            btn.disabled = true;
+            status.className = 'calibrate-status';
+            try {
+                const deviceId = playbackState.devicePicker?.getSelectedId?.() ?? null;
+                const deviceLabel = playbackState.devicePicker?.getSelectedLabel?.()
+                    || 'Default (OS-selected)';
+                const cal = await runCalibrationMeasurement(
+                    deviceId,
+                    deviceLabel,
+                    (i, total) => {
+                        status.textContent = `Click ${i}/${total}…`;
+                    },
+                );
+                saveLatencyCalibration(cal);
+                status.className = 'calibrate-status success';
+                status.textContent = `Measured ${cal.latencyMs} ms round-trip.`;
+                refreshCalibrateScreen();
+            } catch (err) {
+                status.className = 'calibrate-status error';
+                status.textContent = String(err.message || err);
+            } finally {
+                calibrateState.running = false;
+                btn.disabled = false;
             }
         }
 

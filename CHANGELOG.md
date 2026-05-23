@@ -10,6 +10,23 @@ dated section.
 
 ### Fixed
 
+- **Calibrate screen + latency measurement (web parity).**
+  Top-level Calibrate screen in the GUI, slotted before Tunings in
+  the nav. Reuses the playback screen's mic device picker + silence
+  threshold for context (read-only — those still live on the
+  per-screen mic component), runs the same 5-click / median
+  measurement procedure as `twanga calibrate`, persists to
+  `localStorage` under the same schema as the native `latency.toml`
+  (device label + ms + measured-at timestamp). The web playback
+  loop resolves the stored value at mic-open time and subtracts it
+  from captured onset timestamps alongside `window_latency_ms`,
+  identical to the CLI's `capture_onsets_for_duration`. Two new
+  shared functions in `twanga-dsp::calibration` (peak-finder +
+  median) back both surfaces; the WASM bridge exposes them as
+  `calibration_locate_click_peak_ms` + `calibration_median` so the
+  JS calibration runner doesn't reimplement DSP in JavaScript.
+  `device-picker.js` gains a `getSelectedLabel()` accessor (the
+  per-device calibration key on web).
 - **`twanga calibrate` — output→input round-trip latency measurement (CLI).**
   Plays 5 metronome clicks through the default audio output,
   captures the mic input, finds the loudest peak per click,
