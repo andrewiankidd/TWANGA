@@ -77,6 +77,16 @@ impl DataRoot {
         self.root().join("play-resume.toml")
     }
 
+    /// `<root>/latency.toml` — persisted output→input round-trip
+    /// latency measurement from `twanga calibrate`. Tied to the
+    /// current input device by name; reading it back compares the
+    /// stored device against the live one and ignores the value on
+    /// mismatch (forcing a recalibration prompt rather than scoring
+    /// against a stale measurement from a different mic).
+    pub fn latency_path(&self) -> PathBuf {
+        self.root().join("latency.toml")
+    }
+
     /// `<root>/recordings/` — output of `twanga record` and the GUI
     /// recorder. Created on demand by callers.
     pub fn recordings_dir(&self) -> PathBuf {
@@ -245,6 +255,7 @@ mod tests {
         let r = root.root().to_path_buf();
         assert_eq!(root.tunings_path(), r.join("tunings.toml"));
         assert_eq!(root.play_resume_path(), r.join("play-resume.toml"));
+        assert_eq!(root.latency_path(), r.join("latency.toml"));
         assert_eq!(root.recordings_dir(), r.join("recordings"));
         assert_eq!(root.library_dir(), r.join("library"));
     }

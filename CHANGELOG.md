@@ -10,6 +10,22 @@ dated section.
 
 ### Fixed
 
+- **`twanga calibrate` — output→input round-trip latency measurement (CLI).**
+  Plays 5 metronome clicks through the default audio output,
+  captures the mic input, finds the loudest peak per click,
+  records the median click-to-peak offset as the hardware
+  round-trip latency. Persisted to `$DATA_ROOT/latency.toml`
+  keyed by input-device name (changing devices invalidates the
+  stored value rather than scoring against a stale measurement).
+  `twanga play` reads it back on startup, reports calibration
+  status to stderr ("Latency: 42 ms (calibrated for '<device>')"
+  / "uncalibrated, run `twanga calibrate` for tighter scoring"),
+  and subtracts the value from captured onset timestamps
+  alongside the existing `Tuner::window_latency_ms()` correction.
+  `twanga calibrate --show` reads the stored value without
+  measuring. Web parity for this is a follow-up — same TOML
+  schema will back the GUI's Calibrate screen with `localStorage`
+  rather than a file.
 - **YIN-window latency compensation in proximity scoring (CLI + web parity).**
   The playback loop was timestamping `from_onset_window` readings
   at the moment YIN finalised the pitch — which is ~170 ms after

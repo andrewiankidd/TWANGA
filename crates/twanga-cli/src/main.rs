@@ -1,5 +1,6 @@
 mod audio_source;
 mod bundled;
+mod calibration;
 mod import;
 mod play_resume;
 mod tunings;
@@ -295,6 +296,19 @@ enum Command {
         /// `patterns`, `editor`, `tunings`. Omit to list the available
         /// pages.
         feature: Option<String>,
+    },
+    /// Measure your audio chain's output→input round-trip latency.
+    /// Plays a series of clicks through the default output, captures
+    /// the mic, and records the median offset between scheduled-play
+    /// and detected-peak times. Result is persisted under the data
+    /// root and consumed by `twanga play`'s proximity-score modes
+    /// (tight / casual) — without calibration those modes systematically
+    /// score on-time plucks as Late.
+    Calibrate {
+        /// Print the currently-stored calibration without measuring.
+        /// Useful in scripts that just want to read the value back.
+        #[arg(long)]
+        show: bool,
     },
 }
 
@@ -1824,8 +1838,100 @@ fn main() -> Result<()> {
         },
         Command::Edit { path, out, action } => run_edit(path, out, action)?,
         Command::Docs { feature } => run_docs(feature)?,
+        Command::Calibrate { show } => run_calibrate(show)?,
     }
     Ok(())
+}
+
+/// `twanga calibrate` — measure round-trip latency + persist, or
+/// (with `--show`) just print what's already on disk. Persisted to
+/// `$DATA_ROOT/latency.toml` keyed by input-device name so a switch
+/// to a different mic invalidates the value at read time.
+fn run_calibrate(show: bool) -> Result<()> {
+    let Some(root) = twanga_paths::data_root() else {
+        return Err(anyhow!(
+            "couldn't resolve a data root (no home dir + no portable sentinel)"
+        ));
+    };
+    let path = root.latency_path();
+
+    if show {
+        match calibration::LatencyCalibration::load(&path)? {
+            Some(cal) => {
+                eprintln!("Device:       {}", cal.device_name);
+                eprintln!("Latency:      {} ms", cal.latency_ms);
+                eprintln!("Measured at:  {}", cal.measured_at);
+                eprintln!("Path:         {}", path.display());
+            }
+            None => {
+                eprintln!("No calibration on disk at {}.", path.display());
+                eprintln!("Run `twanga calibrate` (without --show) to measure.");
+            }
+        }
+        return Ok(());
+    }
+
+    eprintln!(
+        "Calibrating output→input round-trip latency over {} clicks.",
+        calibration::CLICK_COUNT
+    );
+    eprintln!("Have your mic positioned where you'd play. Stay quiet during the measurement.");
+    eprintln!();
+
+    let mut progress = |i: usize, total: usize| {
+        eprint!("\rClick {i}/{total}…   ");
+    };
+    let cal = calibration::run_calibration(&mut progress)?;
+    eprintln!("\r                       "); // clear the progress line
+
+    cal.save(&path)?;
+    eprintln!("Device:    {}", cal.device_name);
+    eprintln!("Latency:   {} ms", cal.latency_ms);
+    eprintln!("Saved to:  {}", path.display());
+    Ok(())
+}
+
+/// Look up the persisted hardware-latency value for the currently-
+/// open input device. Returns the calibrated millisecond offset on
+/// match, 0 on any other outcome (no calibration, stale calibration
+/// from a different device, IO error reading the file). Prints a
+/// status line to stderr in each case so the user always knows
+/// what scoring assumptions are in play before plucking the first
+/// note — the most common failure mode is "I calibrated once, then
+/// switched USB cables, now my scores look weird."
+fn resolve_hardware_latency(device_name: &str) -> u32 {
+    let Some(root) = twanga_paths::data_root() else {
+        return 0;
+    };
+    let path = root.latency_path();
+    match calibration::LatencyCalibration::load(&path) {
+        Ok(Some(cal)) if cal.applies_to(device_name) => {
+            eprintln!(
+                "Latency:    {} ms (calibrated for '{}')",
+                cal.latency_ms, cal.device_name
+            );
+            cal.latency_ms
+        }
+        Ok(Some(cal)) => {
+            eprintln!(
+                "Latency:    uncalibrated for '{}' (saved value is for '{}'). \
+                 Scoring may be off; run `twanga calibrate` to refresh.",
+                device_name, cal.device_name
+            );
+            0
+        }
+        Ok(None) => {
+            eprintln!("Latency:    uncalibrated. Run `twanga calibrate` for tighter scoring.");
+            0
+        }
+        Err(e) => {
+            eprintln!(
+                "Latency:    couldn't read {} ({e}); treating as uncalibrated.",
+                path.display()
+            );
+            0
+        }
+    }
 }
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -2555,13 +2661,26 @@ fn run_playback(
     };
     let click = output.as_ref().map(|o| metronome_click(o.sample_rate));
 
+    // Hardware round-trip latency from a prior `twanga calibrate`
+    // run. Populated below if we open a live mic AND the saved
+    // calibration's device matches; 0 in every other case (first
+    // run, WAV-file replay, stale calibration after a device swap).
+    let mut extra_latency_ms: u32 = 0;
+
     let (mut input_state, mut input_buf): (InputState, Vec<f32>) = if needs_audio {
         // Either a live mic or a paced WAV-file replay, depending on
         // `--from-file`. Both implement the narrow `SampleSource`
         // trait — the playback loop doesn't care which it has.
         let source: Box<dyn audio_source::SampleSource> = match from_file.as_deref() {
             Some(path) => Box::new(audio_source::WavSampleSource::from_file(path)?),
-            None => Box::new(InputStream::open()?),
+            None => {
+                let stream = InputStream::open()?;
+                // Live mic — resolve the persisted calibration. WAV
+                // replay skips this because synth audio has no
+                // hardware round-trip to compensate for.
+                extra_latency_ms = resolve_hardware_latency(&stream.device_name);
+                Box::new(stream)
+            }
         };
         let sr = source.sample_rate();
         let mut tuner = Tuner::new(TunerMode::Chromatic, sr);
@@ -2852,6 +2971,7 @@ fn run_playback(
                     ms_per_col,
                     playback_clock_origin,
                     &mut onset_events,
+                    extra_latency_ms,
                 );
             } else {
                 std::thread::sleep(std::time::Duration::from_millis(ms_per_col as u64));
@@ -2906,20 +3026,25 @@ fn capture_onsets_for_duration(
     duration_ms: u32,
     clock_origin: std::time::Instant,
     events: &mut Vec<twanga_tabs::playback::OnsetEvent>,
+    extra_latency_ms: u32,
 ) {
     let Some((stream, tuner)) = input_state.as_mut() else {
         std::thread::sleep(std::time::Duration::from_millis(duration_ms as u64));
         return;
     };
-    // YIN can't return a reading until the analysis window is full,
-    // so a `from_onset_window` reading arrives ~window_latency_ms
-    // AFTER the pluck actually started. Subtracting the latency from
-    // the wall-clock timestamp recovers "when did the user pluck"
-    // rather than "when did we confirm the pitch" — without this
-    // correction, an on-time pluck under tight policy always scores
-    // as Late because the reported timestamp is +170 ms past the
-    // expected column time.
-    let latency_ms = tuner.window_latency_ms();
+    // Two latency sources stack:
+    //
+    //   1. `Tuner::window_latency_ms()` — DSP pipeline delay (YIN
+    //      analysis window length, ~170 ms at 8192/48k).
+    //   2. `extra_latency_ms` — hardware round-trip from a prior
+    //      `twanga calibrate` run, or 0 if uncalibrated.
+    //
+    // Subtracting both from the wall-clock onset timestamp recovers
+    // "when did the user pluck" rather than "when did we confirm
+    // the pitch and when did the audio chain get round-tripped
+    // through driver buffers." Without it, on-time plucks under
+    // tight policy systematically score as Late.
+    let latency_ms = tuner.window_latency_ms() + extra_latency_ms;
     let until = std::time::Instant::now() + std::time::Duration::from_millis(duration_ms as u64);
     while std::time::Instant::now() < until {
         let n = stream.read(buf);
@@ -3125,7 +3250,9 @@ fn char_for_column(col: &alphatex::TabColumn, string_idx: usize) -> char {
 
 /// Generate a short metronome click — 50 ms of 1 kHz sine with a fast
 /// exponential decay envelope, scaled down so it isn't piercing.
-fn metronome_click(sample_rate: u32) -> Vec<f32> {
+/// `pub` so the `calibration` module can reuse the same click sample
+/// for round-trip latency measurement (different consumer, same signal).
+pub fn metronome_click(sample_rate: u32) -> Vec<f32> {
     let n = (sample_rate as f32 * 0.05) as usize;
     let mut buf = sine(Frequency(1000.0), sample_rate, n);
     exp_decay(&mut buf, sample_rate, 0.012);

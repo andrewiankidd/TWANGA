@@ -4371,6 +4371,7 @@ dependencies = [
  "clap",
  "serde",
  "serde_json",
+ "tempfile",
  "toml 0.8.23",
  "twanga-audio",
  "twanga-core",
