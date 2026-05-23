@@ -5667,17 +5667,23 @@
                             // timestamp (ms since playback start). The
                             // batch is scored against the column
                             // schedule at session end in
-                            // `playbackStop`.
+                            // `playbackStop`. Subtract the YIN window
+                            // latency so the recorded timestamp
+                            // reflects when the user actually plucked
+                            // (not when YIN confirmed the pitch ~170
+                            // ms later) — matches the CLI fix in
+                            // `capture_onsets_for_duration`.
                             if (playbackState.policy === 'tight'
                                 || playbackState.policy === 'casual') {
                                 if (playbackState.playStartTime === 0) return;
                                 const nowMs = performance.now()
                                     - playbackState.playStartTime
                                     - playbackState.totalPausedMs;
+                                const latencyMs = playbackState.chromaticTuner.window_latency_ms?.() ?? 0;
                                 for (const r of readings) {
                                     if (!r.from_onset_window) continue;
                                     playbackState.onsetEvents.push({
-                                        timestamp_ms: Math.max(0, Math.round(nowMs)),
+                                        timestamp_ms: Math.max(0, Math.round(nowMs - latencyMs)),
                                         detected_hz: r.detected_hz,
                                     });
                                 }

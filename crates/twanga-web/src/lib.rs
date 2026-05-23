@@ -1024,6 +1024,16 @@ impl WebTuner {
         self.inner.silence_rms()
     }
 
+    /// Approximate delay between when a pluck begins entering the
+    /// buffer and when YIN can produce a pitch reading for it
+    /// (= window_size / sample_rate, ~170 ms at the default
+    /// 8192/48k). The proximity-score playback loop subtracts this
+    /// from the captured onset timestamp so scoring reflects when
+    /// the user actually plucked, not when the pitch was confirmed.
+    pub fn window_latency_ms(&self) -> u32 {
+        self.inner.window_latency_ms()
+    }
+
     /// Update the silence threshold at runtime. Clamped to [0, 1].
     /// Lower values catch quieter plucks at the cost of more cable-
     /// hum / room-noise false detections; higher values reject more
