@@ -10,6 +10,24 @@ dated section.
 
 ### Fixed
 
+- **Calibration wizard — setup-driven, branching, CLI + GUI parity.**
+  `twanga calibrate` is no longer "press button, run round-trip" —
+  it now asks two setup questions ("where does TWANGA listen for
+  your playing?" / "how do you hear TWANGA's audio?") and dispatches
+  to the right method based on the answers. Mic + speakers in the
+  same room → physical round-trip (existing flow). Anything else
+  (headphones, line-in, no mic) → manual entry with a typical-values
+  list to pick from. Persistence schema gains a `method` field
+  (`round-trip` / `manual`) surfaced as "via round-trip" / "via
+  manual" in the result display so users can tell at a glance how
+  the number was produced. New non-interactive flags for scripts:
+  `--round-trip` (skip wizard, measure now), `--manual <ms>` (skip
+  wizard, save value), `--show` (read-only). The GUI Calibrate
+  screen mirrors the wizard with two radio groups + a conditional
+  manual-entry input that appears when the radio combination
+  doesn't support round-trip. Backwards-compat: calibrations saved
+  before the `method` field existed (early dev only) load as
+  round-trip via serde default + JS fallback.
 - **Calibration status on the Playback screen + new Calibrate doc page.**
   Latency-status row under the Playback screen's mic meter, parity
   with the CLI's `Latency: …` stderr line — surfaces calibrated /

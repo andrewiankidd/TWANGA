@@ -232,6 +232,59 @@
             font-size: 0.85rem;
             line-height: 1.6;
         }
+        .calibrate-wizard { margin-bottom: 1rem; }
+        .wizard-q {
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 0.8rem 1rem;
+            margin-bottom: 0.8rem;
+        }
+        .wizard-q legend {
+            font-size: 0.9rem;
+            font-weight: 600;
+            padding: 0 0.4rem;
+        }
+        .wizard-q label {
+            display: block;
+            font-size: 0.9rem;
+            margin: 0.3rem 0;
+            cursor: pointer;
+        }
+        .wizard-q label input { margin-right: 0.5rem; }
+        .wizard-manual {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 0.8rem 1rem;
+            margin-bottom: 0.8rem;
+        }
+        .wizard-manual label {
+            display: block;
+            font-size: 0.9rem;
+            margin-bottom: 0.4rem;
+        }
+        .wizard-manual input[type="number"] {
+            width: 6rem;
+            padding: 0.3rem 0.5rem;
+            background: var(--background, #1a1a1a);
+            color: var(--text, #e0e0e0);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            font-family: inherit;
+            font-size: 0.9rem;
+        }
+        .wizard-hints {
+            margin: 0.6rem 0 0.3rem;
+            color: var(--muted);
+            font-size: 0.8rem;
+        }
+        .wizard-hints-list {
+            margin: 0;
+            padding-left: 1.2rem;
+            color: var(--muted);
+            font-size: 0.8rem;
+            line-height: 1.6;
+        }
         .primary-btn {
             background: var(--highlight);
             color: var(--background, #1a1a1a);
@@ -2172,11 +2225,12 @@
             </div>
             <h2>Calibrate</h2>
             <p class="subtitle">
-                Measure your audio chain's output→input round-trip latency
-                so the proximity-score playback modes (tight / casual) credit
-                your on-time plucks as Hit rather than scoring them as Late.
-                One measurement per device — switching mics invalidates the
-                stored value and prompts a recalibration.
+                Measure or set your audio chain's input latency so the
+                proximity-score playback modes (tight / casual) credit your
+                on-time plucks as Hit rather than scoring them as Late.
+                The wizard picks the right method based on a couple of setup
+                questions — round-trip when an acoustic loop is available,
+                manual entry otherwise.
             </p>
 
             <div class="calibrate-context" id="calibrate-context">
@@ -2186,21 +2240,56 @@
 
             <div class="calibrate-result" id="calibrate-result" hidden>
                 <div class="ctx-row"><span class="ctx-label">Measured latency:</span> <strong id="calibrate-latency-value">—</strong></div>
+                <div class="ctx-row"><span class="ctx-label">Method:</span> <span id="calibrate-saved-method">—</span></div>
                 <div class="ctx-row"><span class="ctx-label">Calibrated for:</span> <span id="calibrate-saved-device">—</span></div>
                 <div class="ctx-row"><span class="ctx-label">Measured at:</span> <span id="calibrate-saved-when">—</span></div>
             </div>
 
-            <div class="calibrate-status" id="calibrate-status"></div>
+            <!-- Wizard form. Replaces the previous one-button empty
+                 state with a two-question setup picker that branches
+                 to round-trip vs manual entry. -->
+            <form class="calibrate-wizard" id="calibrate-wizard">
+                <fieldset class="wizard-q">
+                    <legend>Q1. Where does TWANGA listen for your playing?</legend>
+                    <label><input type="radio" name="calibrate-input" value="mic" checked> Microphone (acoustic mic, USB mic, mic'd amp)</label>
+                    <label><input type="radio" name="calibrate-input" value="line-in"> Line-in (electric instrument via cable + audio interface)</label>
+                    <label><input type="radio" name="calibrate-input" value="none"> Nothing connected yet (I'll set manually)</label>
+                </fieldset>
 
-            <div class="calibrate-actions">
-                <button id="calibrate-run-btn" class="primary-btn">Calibrate</button>
-            </div>
+                <fieldset class="wizard-q" id="calibrate-q2">
+                    <legend>Q2. How do you hear TWANGA's audio (metronome, count-in)?</legend>
+                    <label><input type="radio" name="calibrate-output" value="speakers" checked> Speakers in the same room as the mic</label>
+                    <label><input type="radio" name="calibrate-output" value="headphones"> Headphones (or speakers far from the mic)</label>
+                    <label><input type="radio" name="calibrate-output" value="silent"> No audible playback (visual cues only)</label>
+                </fieldset>
 
-            <p class="calibrate-help">
-                The procedure plays 5 short clicks through your speakers and
-                listens for each one via your mic, then records the median
-                round-trip time. Have the mic positioned where you usually
-                play; stay quiet during the measurement.
+                <!-- Manual-entry input revealed when the wizard
+                     selects the manual branch. Hidden under the
+                     round-trip branch since the value is measured. -->
+                <div class="wizard-manual" id="calibrate-manual-row" hidden>
+                    <label for="calibrate-manual-input">Manual latency (milliseconds, 0–1000):</label>
+                    <input type="number" id="calibrate-manual-input" min="0" max="1000" step="1" value="30">
+                    <p class="wizard-hints">Typical values to pick from:</p>
+                    <ul class="wizard-hints-list">
+                        <li><strong>10 ms</strong> — ASIO / CoreAudio dedicated interface</li>
+                        <li><strong>30 ms</strong> — Built-in audio (WASAPI / CoreAudio / PulseAudio)</li>
+                        <li><strong>40 ms</strong> — Class-compliant USB mic</li>
+                        <li><strong>150 ms</strong> — Bluetooth audio (any direction)</li>
+                    </ul>
+                </div>
+
+                <div class="calibrate-status" id="calibrate-status"></div>
+
+                <div class="calibrate-actions">
+                    <button type="button" id="calibrate-run-btn" class="primary-btn">Calibrate</button>
+                </div>
+            </form>
+
+            <p class="calibrate-help" id="calibrate-help">
+                Round-trip path: TWANGA plays 5 short clicks through your speakers and
+                listens for each one via your mic, recording the median click-to-peak
+                offset. Have the mic positioned where you usually play; stay quiet during
+                the measurement.
             </p>
         </section>
 
@@ -2771,8 +2860,16 @@
             // measurement procedure. The context display refreshes
             // every time the screen activates (next block) so the
             // mic name + silence threshold stay in sync with what
-            // the user changed elsewhere.
+            // the user changed elsewhere. The wizard radio groups
+            // trigger a UI re-render so the manual-entry input
+            // shows / hides as the user picks an inappropriate
+            // combination for round-trip.
             el('calibrate-run-btn').addEventListener('click', runCalibrateClick);
+            for (const r of document.querySelectorAll(
+                'input[name="calibrate-input"], input[name="calibrate-output"]'
+            )) {
+                r.addEventListener('change', refreshWizardMode);
+            }
 
             // Menu navigation.
             document.querySelectorAll('[data-screen]').forEach((btn) => {
@@ -6301,8 +6398,11 @@
 
         /// Read the persisted latency calibration from localStorage.
         /// Returns `null` if missing or malformed. Schema mirrors the
-        /// native `latency.toml` shape (device name + ms + measured
-        /// timestamp) so both surfaces stay conceptually aligned.
+        /// native `latency.toml` shape (device + ms + timestamp +
+        /// method) so both surfaces stay conceptually aligned.
+        /// Calibrations saved before `method` existed (early dev
+        /// builds, never shipped) default to 'round-trip' for
+        /// backwards compat — matches the Rust `default_method`.
         function loadLatencyCalibration() {
             try {
                 const raw = localStorage.getItem(LATENCY_STORAGE_KEY);
@@ -6310,6 +6410,9 @@
                 const parsed = JSON.parse(raw);
                 if (typeof parsed?.latencyMs !== 'number') return null;
                 if (typeof parsed?.deviceName !== 'string') return null;
+                if (typeof parsed?.method !== 'string') {
+                    parsed.method = 'round-trip';
+                }
                 return parsed;
             } catch {
                 return null;
@@ -6442,6 +6545,7 @@
                     deviceName: deviceLabel,
                     latencyMs: medianMs,
                     measuredAt: new Date().toISOString(),
+                    method: 'round-trip',
                 };
             } finally {
                 if (calibrateState.stream) {
@@ -6468,6 +6572,50 @@
             return new Promise((resolve) => setTimeout(resolve, ms));
         }
 
+        /// Decide which calibration method the current wizard answers
+        /// correspond to. Mirrors the CLI's match in `calibrate_wizard`:
+        /// Q1 = mic OR line-in + Q2 = speakers → round-trip works.
+        /// Anything else → manual entry.
+        function pickCalibrationMethod() {
+            const input = document.querySelector('input[name="calibrate-input"]:checked')?.value || 'mic';
+            const output = document.querySelector('input[name="calibrate-output"]:checked')?.value || 'speakers';
+            if (input === 'none') return 'manual';
+            if (output === 'speakers') return 'round-trip';
+            return 'manual';
+        }
+
+        /// Toggle the wizard UI to reflect which method the current
+        /// radio selection picks: round-trip hides the manual input
+        /// and shows the round-trip help text; manual reveals the
+        /// number input and updates the button label + help text to
+        /// match.
+        function refreshWizardMode() {
+            const method = pickCalibrationMethod();
+            const manualRow = el('calibrate-manual-row');
+            const q2 = el('calibrate-q2');
+            const help = el('calibrate-help');
+            const btn = el('calibrate-run-btn');
+            // Q2 only matters when input is mic/line-in; if input is
+            // "none", short-circuit straight to manual.
+            const input = document.querySelector('input[name="calibrate-input"]:checked')?.value || 'mic';
+            q2.style.display = input === 'none' ? 'none' : '';
+            if (method === 'round-trip') {
+                manualRow.hidden = true;
+                btn.textContent = loadLatencyCalibration() ? 'Recalibrate' : 'Calibrate';
+                help.textContent =
+                    "Round-trip: TWANGA plays 5 short clicks through your speakers and listens "
+                    + "for each one via your mic, recording the median click-to-peak offset. "
+                    + "Have the mic positioned where you usually play; stay quiet during the measurement.";
+            } else {
+                manualRow.hidden = false;
+                btn.textContent = 'Save manually';
+                help.textContent =
+                    "Manual entry: type in the input-pipeline latency you know from your "
+                    + "interface's spec, or pick a starting value from the typical-values list. "
+                    + "You can always recalibrate later if you wire up speakers + mic.";
+            }
+        }
+
         /// Populate the Calibrate screen with the current
         /// device/silence context + last measurement. Called on
         /// every screen activation so the values stay fresh if the
@@ -6488,9 +6636,9 @@
             if (cal) {
                 resultEl.hidden = false;
                 el('calibrate-latency-value').textContent = `${cal.latencyMs} ms`;
+                el('calibrate-saved-method').textContent = `via ${cal.method}`;
                 el('calibrate-saved-device').textContent = cal.deviceName;
                 el('calibrate-saved-when').textContent = cal.measuredAt;
-                el('calibrate-run-btn').textContent = 'Recalibrate';
                 if (cal.deviceName !== deviceLabel) {
                     el('calibrate-status').className = 'calibrate-status error';
                     el('calibrate-status').textContent =
@@ -6501,33 +6649,51 @@
                 }
             } else {
                 resultEl.hidden = true;
-                el('calibrate-run-btn').textContent = 'Calibrate';
                 el('calibrate-status').className = 'calibrate-status';
                 el('calibrate-status').textContent = '';
             }
+            refreshWizardMode();
         }
 
         async function runCalibrateClick() {
             if (calibrateState.running) return;
+            const method = pickCalibrationMethod();
             calibrateState.running = true;
             const btn = el('calibrate-run-btn');
             const status = el('calibrate-status');
             btn.disabled = true;
             status.className = 'calibrate-status';
             try {
-                const deviceId = playbackState.devicePicker?.getSelectedId?.() ?? null;
                 const deviceLabel = playbackState.devicePicker?.getSelectedLabel?.()
                     || 'Default (OS-selected)';
-                const cal = await runCalibrationMeasurement(
-                    deviceId,
-                    deviceLabel,
-                    (i, total) => {
-                        status.textContent = `Click ${i}/${total}…`;
-                    },
-                );
+                let cal;
+                if (method === 'manual') {
+                    const ms = Number.parseInt(el('calibrate-manual-input').value, 10);
+                    if (!Number.isInteger(ms) || ms < 0 || ms > 1000) {
+                        throw new Error('Manual latency must be an integer in 0..=1000.');
+                    }
+                    cal = {
+                        deviceName: deviceLabel,
+                        latencyMs: ms,
+                        measuredAt: new Date().toISOString(),
+                        method: 'manual',
+                    };
+                } else {
+                    const deviceId = playbackState.devicePicker?.getSelectedId?.() ?? null;
+                    cal = await runCalibrationMeasurement(
+                        deviceId,
+                        deviceLabel,
+                        (i, total) => {
+                            status.textContent = `Click ${i}/${total}…`;
+                        },
+                    );
+                }
                 saveLatencyCalibration(cal);
                 status.className = 'calibrate-status success';
-                status.textContent = `Measured ${cal.latencyMs} ms round-trip.`;
+                status.textContent =
+                    method === 'manual'
+                        ? `Saved ${cal.latencyMs} ms (manual entry).`
+                        : `Measured ${cal.latencyMs} ms round-trip.`;
                 refreshCalibrateScreen();
                 // Sibling screen — keep its readout in sync without
                 // requiring a manual revisit.

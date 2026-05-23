@@ -47,6 +47,29 @@ pub const CLICK_INTERVAL_MS: u64 = 600;
 /// silence floor.
 pub const CLICK_CAPTURE_MS: u64 = 500;
 
+/// How a saved `LatencyCalibration` was produced. Round-trip is
+/// the most accurate (an actual measurement of the user's audio
+/// chain); manual is what the user typed in (typically when their
+/// setup doesn't support the acoustic round-trip — headphones,
+/// line-in, no mic). Surfaced in the UI as "via round-trip" /
+/// "set manually" so users can tell at a glance how much to trust
+/// the number.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum CalibrationMethod {
+    RoundTrip,
+    Manual,
+}
+
+impl CalibrationMethod {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::RoundTrip => "round-trip",
+            Self::Manual => "manual",
+        }
+    }
+}
+
 /// Persisted calibration result. Tied to the device that produced
 /// the measurement; reading back asserts the live device matches
 /// before honouring the value.
@@ -59,12 +82,23 @@ pub struct LatencyCalibration {
     /// recalibrate.
     pub device_name: String,
     /// Measured round-trip latency in milliseconds. Median of
-    /// `CLICK_COUNT` individual measurements.
+    /// `CLICK_COUNT` individual measurements (round-trip method),
+    /// or whatever the user typed in (manual method).
     pub latency_ms: u32,
     /// Wall-clock timestamp of the measurement, RFC 3339. Not
     /// load-bearing for scoring; used by the GUI's
     /// "calibrated <when>" affordance.
     pub measured_at: String,
+    /// How the value was produced. Defaults to `RoundTrip` for
+    /// backwards compatibility with calibrations saved before this
+    /// field existed (anything on disk without it came from the
+    /// original round-trip-only `twanga calibrate` flow).
+    #[serde(default = "default_method")]
+    pub method: CalibrationMethod,
+}
+
+fn default_method() -> CalibrationMethod {
+    CalibrationMethod::RoundTrip
 }
 
 impl LatencyCalibration {
@@ -173,7 +207,23 @@ pub fn run_calibration(progress: &mut dyn FnMut(usize, usize)) -> Result<Latency
         device_name,
         latency_ms: median,
         measured_at: now_rfc3339(),
+        method: CalibrationMethod::RoundTrip,
     })
+}
+
+/// Build a manual-entry calibration record. The wizard's
+/// "headphones / line-in / no-mic" branches construct one of these
+/// when the user types in a known value rather than running a
+/// physical measurement. `device_name` is captured the same way as
+/// in `run_calibration` so the per-device invalidation logic in
+/// the playback loop still works.
+pub fn manual_calibration(device_name: String, latency_ms: u32) -> LatencyCalibration {
+    LatencyCalibration {
+        device_name,
+        latency_ms,
+        measured_at: now_rfc3339(),
+        method: CalibrationMethod::Manual,
+    }
 }
 
 /// Best-effort current-time stamp. Falls back to "unknown" if the
@@ -199,6 +249,7 @@ mod tests {
             device_name: "Test Mic".to_string(),
             latency_ms: 42,
             measured_at: "epoch-seconds:12345".to_string(),
+            method: CalibrationMethod::RoundTrip,
         };
         cal.save(&path).expect("save");
         let loaded = LatencyCalibration::load(&path)
@@ -206,8 +257,41 @@ mod tests {
             .expect("present");
         assert_eq!(loaded.device_name, "Test Mic");
         assert_eq!(loaded.latency_ms, 42);
+        assert_eq!(loaded.method, CalibrationMethod::RoundTrip);
         assert!(loaded.applies_to("Test Mic"));
         assert!(!loaded.applies_to("Other Mic"));
+    }
+
+    #[test]
+    fn manual_calibration_serializes_method() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("latency.toml");
+        let cal = manual_calibration("Headphones + Mic".to_string(), 30);
+        cal.save(&path).expect("save");
+        let loaded = LatencyCalibration::load(&path)
+            .expect("load")
+            .expect("present");
+        assert_eq!(loaded.latency_ms, 30);
+        assert_eq!(loaded.method, CalibrationMethod::Manual);
+    }
+
+    #[test]
+    fn missing_method_field_defaults_to_round_trip() {
+        // Backwards compat: calibrations saved before the `method`
+        // field existed should still load and be treated as
+        // round-trip (the only path the old binary supported).
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("latency.toml");
+        let toml = r#"
+            device_name = "Old Mic"
+            latency_ms = 25
+            measured_at = "epoch-seconds:999"
+        "#;
+        std::fs::write(&path, toml).expect("write");
+        let loaded = LatencyCalibration::load(&path)
+            .expect("load")
+            .expect("present");
+        assert_eq!(loaded.method, CalibrationMethod::RoundTrip);
     }
 
     #[test]

@@ -297,18 +297,34 @@ enum Command {
         /// pages.
         feature: Option<String>,
     },
-    /// Measure your audio chain's output→input round-trip latency.
-    /// Plays a series of clicks through the default output, captures
-    /// the mic, and records the median offset between scheduled-play
-    /// and detected-peak times. Result is persisted under the data
-    /// root and consumed by `twanga play`'s proximity-score modes
-    /// (tight / casual) — without calibration those modes systematically
-    /// score on-time plucks as Late.
+    /// Measure your audio chain's output→input round-trip latency,
+    /// or set it manually for setups (headphones, line-in, no-mic)
+    /// where the acoustic loop isn't available. By default,
+    /// `twanga calibrate` runs an interactive wizard that picks the
+    /// right method based on a couple of setup questions; pass one
+    /// of the flags below to skip the wizard for scripting. Result
+    /// is persisted under the data root and consumed by
+    /// `twanga play`'s proximity-score modes (tight / casual) —
+    /// without calibration those modes systematically score on-time
+    /// plucks as Late.
     Calibrate {
         /// Print the currently-stored calibration without measuring.
         /// Useful in scripts that just want to read the value back.
-        #[arg(long)]
+        #[arg(long, conflicts_with_all = ["round_trip", "manual"])]
         show: bool,
+        /// Skip the wizard and run the round-trip measurement
+        /// (plays clicks through your speakers, captures via mic).
+        /// Requires both speakers + mic that can acoustically loop;
+        /// errors out cleanly if no clicks are detected.
+        #[arg(long, conflicts_with = "manual")]
+        round_trip: bool,
+        /// Skip the wizard and save a manually-entered value in
+        /// milliseconds. Use when you know your input pipeline
+        /// latency from your interface's spec sheet, or when the
+        /// acoustic round-trip isn't possible (headphones / line-in).
+        /// Range 0..=1000.
+        #[arg(long, value_name = "MS")]
+        manual: Option<u32>,
     },
 }
 
@@ -1838,16 +1854,22 @@ fn main() -> Result<()> {
         },
         Command::Edit { path, out, action } => run_edit(path, out, action)?,
         Command::Docs { feature } => run_docs(feature)?,
-        Command::Calibrate { show } => run_calibrate(show)?,
+        Command::Calibrate {
+            show,
+            round_trip,
+            manual,
+        } => run_calibrate(show, round_trip, manual)?,
     }
     Ok(())
 }
 
-/// `twanga calibrate` — measure round-trip latency + persist, or
-/// (with `--show`) just print what's already on disk. Persisted to
-/// `$DATA_ROOT/latency.toml` keyed by input-device name so a switch
-/// to a different mic invalidates the value at read time.
-fn run_calibrate(show: bool) -> Result<()> {
+/// `twanga calibrate` — dispatch to the right calibration flow.
+/// `--show` prints the stored value; `--round-trip` skips the
+/// wizard and runs the measurement directly; `--manual <ms>` skips
+/// the wizard and saves a hand-entered value; bare invocation runs
+/// the interactive wizard that picks the right method based on
+/// the user's mic / output setup.
+fn run_calibrate(show: bool, round_trip: bool, manual: Option<u32>) -> Result<()> {
     let Some(root) = twanga_paths::data_root() else {
         return Err(anyhow!(
             "couldn't resolve a data root (no home dir + no portable sentinel)"
@@ -1856,39 +1878,236 @@ fn run_calibrate(show: bool) -> Result<()> {
     let path = root.latency_path();
 
     if show {
-        match calibration::LatencyCalibration::load(&path)? {
-            Some(cal) => {
-                eprintln!("Device:       {}", cal.device_name);
-                eprintln!("Latency:      {} ms", cal.latency_ms);
-                eprintln!("Measured at:  {}", cal.measured_at);
-                eprintln!("Path:         {}", path.display());
-            }
-            None => {
-                eprintln!("No calibration on disk at {}.", path.display());
-                eprintln!("Run `twanga calibrate` (without --show) to measure.");
-            }
-        }
-        return Ok(());
+        return calibrate_show(&path);
     }
+    if round_trip {
+        return calibrate_round_trip(&path);
+    }
+    if let Some(ms) = manual {
+        return calibrate_manual_from_flag(&path, ms);
+    }
+    calibrate_wizard(&path)
+}
 
+fn calibrate_show(path: &Path) -> Result<()> {
+    match calibration::LatencyCalibration::load(path)? {
+        Some(cal) => {
+            eprintln!("Device:       {}", cal.device_name);
+            eprintln!(
+                "Latency:      {} ms (via {})",
+                cal.latency_ms,
+                cal.method.label()
+            );
+            eprintln!("Measured at:  {}", cal.measured_at);
+            eprintln!("Path:         {}", path.display());
+        }
+        None => {
+            eprintln!("No calibration on disk at {}.", path.display());
+            eprintln!("Run `twanga calibrate` (without --show) to measure.");
+        }
+    }
+    Ok(())
+}
+
+fn calibrate_round_trip(path: &Path) -> Result<()> {
     eprintln!(
         "Calibrating output→input round-trip latency over {} clicks.",
         calibration::CLICK_COUNT
     );
     eprintln!("Have your mic positioned where you'd play. Stay quiet during the measurement.");
     eprintln!();
-
     let mut progress = |i: usize, total: usize| {
         eprint!("\rClick {i}/{total}…   ");
     };
     let cal = calibration::run_calibration(&mut progress)?;
-    eprintln!("\r                       "); // clear the progress line
-
-    cal.save(&path)?;
+    eprintln!("\r                       ");
+    cal.save(path)?;
     eprintln!("Device:    {}", cal.device_name);
-    eprintln!("Latency:   {} ms", cal.latency_ms);
+    eprintln!(
+        "Latency:   {} ms (via {})",
+        cal.latency_ms,
+        cal.method.label()
+    );
     eprintln!("Saved to:  {}", path.display());
     Ok(())
+}
+
+fn calibrate_manual_from_flag(path: &Path, ms: u32) -> Result<()> {
+    if ms > 1000 {
+        return Err(anyhow!(
+            "manual latency {ms} ms is out of plausible range (max 1000)"
+        ));
+    }
+    // Capture the device name by briefly opening a stream — same
+    // invalidation key the round-trip path uses. If no mic is
+    // available, fall back to a synthetic name so the calibration
+    // is still applied (matches the headphones / no-mic case).
+    let device_name = match twanga_audio::InputStream::open() {
+        Ok(s) => s.device_name,
+        Err(_) => "(no mic detected)".to_string(),
+    };
+    let cal = calibration::manual_calibration(device_name, ms);
+    cal.save(path)?;
+    eprintln!("Device:    {}", cal.device_name);
+    eprintln!(
+        "Latency:   {} ms (via {})",
+        cal.latency_ms,
+        cal.method.label()
+    );
+    eprintln!("Saved to:  {}", path.display());
+    Ok(())
+}
+
+/// Interactive wizard. Asks two setup questions then dispatches to
+/// the right measurement method:
+///
+///   Q1=mic + Q2=speakers   → round-trip (acoustic loop works)
+///   anything else           → manual entry (with driver hints)
+///
+/// Aborts if stdin / stderr aren't TTYs — the wizard expects a
+/// human typing answers. Scripts should pass `--round-trip` or
+/// `--manual <ms>` explicitly.
+fn calibrate_wizard(path: &Path) -> Result<()> {
+    use std::io::IsTerminal;
+    if !std::io::stdin().is_terminal() || !std::io::stderr().is_terminal() {
+        return Err(anyhow!(
+            "interactive wizard requires a TTY. Use `--round-trip` or `--manual <ms>` for scripts."
+        ));
+    }
+
+    eprintln!("Calibration wizard");
+    eprintln!("──────────────────");
+    eprintln!("Two questions to pick the right measurement for your setup.");
+    eprintln!();
+
+    let input = prompt_choice(
+        "Q1. Where does TWANGA listen for your playing?",
+        &[
+            ("a", "Microphone (acoustic mic, USB mic, mic'd amp)"),
+            (
+                "b",
+                "Line-in (electric instrument via cable + audio interface)",
+            ),
+            ("c", "Nothing connected yet (set manually for now)"),
+        ],
+    )?;
+
+    let output = if input == "c" {
+        "skip".to_string()
+    } else {
+        prompt_choice(
+            "Q2. How do you hear TWANGA's audio (metronome, count-in)?",
+            &[
+                ("a", "Speakers in the same room as the mic"),
+                ("b", "Headphones (or speakers far from the mic)"),
+                ("c", "No audible playback (visual cues only)"),
+            ],
+        )?
+    };
+
+    match (input.as_str(), output.as_str()) {
+        // Mic + speakers OR line-in + speakers (with hardware
+        // loopback) → physical round-trip works.
+        ("a" | "b", "a") => {
+            eprintln!();
+            eprintln!("Setup detected: acoustic round-trip available. Running measurement.");
+            calibrate_round_trip(path)
+        }
+        // Everything else: manual entry with a driver-default hint.
+        _ => {
+            eprintln!();
+            eprintln!("Setup detected: acoustic round-trip not available. Setting manually.");
+            calibrate_manual_wizard(path)
+        }
+    }
+}
+
+/// Interactive manual-entry sub-flow. Shows typical-value
+/// suggestions per detected platform so the user has a starting
+/// point even if they don't know their interface's spec.
+fn calibrate_manual_wizard(path: &Path) -> Result<()> {
+    eprintln!();
+    eprintln!("Typical values to pick from:");
+    for (label, ms) in driver_default_hints() {
+        eprintln!("  {ms:>3} ms — {label}");
+    }
+    eprintln!();
+
+    let ms = prompt_u32("Enter latency in milliseconds (0–1000)", 0, 1000)?;
+    calibrate_manual_from_flag(path, ms)
+}
+
+/// Platform-specific "typical" latency hints surfaced in the
+/// manual-entry wizard. Wide ranges intentional — they're
+/// suggestions, not measurements.
+fn driver_default_hints() -> Vec<(&'static str, u32)> {
+    let common = vec![
+        ("ASIO / CoreAudio dedicated interface", 10),
+        ("Built-in audio (WASAPI / CoreAudio / PulseAudio)", 30),
+        ("Class-compliant USB mic", 40),
+        ("Bluetooth audio (any direction)", 150),
+    ];
+    common
+}
+
+/// Prompt for a single-letter choice from a small menu. Re-prompts
+/// on invalid input up to 5 times.
+fn prompt_choice(question: &str, options: &[(&str, &str)]) -> Result<String> {
+    use std::io::{BufRead, Write};
+    eprintln!("{question}");
+    for (key, label) in options {
+        eprintln!("  [{key}] {label}");
+    }
+    let stdin = std::io::stdin();
+    let stderr = std::io::stderr();
+    let mut stderr_lock = stderr.lock();
+    let mut stdin_lock = stdin.lock();
+    let mut line = String::new();
+    for _ in 0..5 {
+        write!(stderr_lock, "> ")?;
+        stderr_lock.flush()?;
+        line.clear();
+        stdin_lock.read_line(&mut line)?;
+        let trimmed = line.trim().to_lowercase();
+        if options.iter().any(|(k, _)| *k == trimmed) {
+            return Ok(trimmed);
+        }
+        writeln!(
+            stderr_lock,
+            "invalid choice — type one of: {}",
+            options
+                .iter()
+                .map(|(k, _)| *k)
+                .collect::<Vec<_>>()
+                .join(", ")
+        )?;
+    }
+    Err(anyhow!("too many invalid responses"))
+}
+
+/// Prompt for an integer in a closed range. Re-prompts up to 5
+/// times.
+fn prompt_u32(question: &str, min: u32, max: u32) -> Result<u32> {
+    use std::io::{BufRead, Write};
+    let stdin = std::io::stdin();
+    let stderr = std::io::stderr();
+    let mut stderr_lock = stderr.lock();
+    let mut stdin_lock = stdin.lock();
+    let mut line = String::new();
+    for _ in 0..5 {
+        write!(stderr_lock, "{question}: ")?;
+        stderr_lock.flush()?;
+        line.clear();
+        stdin_lock.read_line(&mut line)?;
+        let trimmed = line.trim();
+        if let Ok(n) = trimmed.parse::<u32>()
+            && (min..=max).contains(&n)
+        {
+            return Ok(n);
+        }
+        writeln!(stderr_lock, "invalid number — expected {min}..={max}")?;
+    }
+    Err(anyhow!("too many invalid responses"))
 }
 
 /// Look up the persisted hardware-latency value for the currently-
