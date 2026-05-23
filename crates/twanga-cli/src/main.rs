@@ -1955,6 +1955,7 @@ const DOC_PLAYBACK: &str = include_str!("../../../docs/features/playback.md");
 const DOC_PATTERNS: &str = include_str!("../../../docs/features/patterns.md");
 const DOC_EDITOR: &str = include_str!("../../../docs/features/editor.md");
 const DOC_TUNINGS: &str = include_str!("../../../docs/features/tunings.md");
+const DOC_CALIBRATE: &str = include_str!("../../../docs/features/calibrate.md");
 const DOC_HARDWARE: &str = include_str!("../../../docs/features/hardware.md");
 const DOC_USER_GUIDE: &str = include_str!("../../../docs/features/user-guide.md");
 const DOC_IMPORTER: &str = include_str!("../../../docs/features/importer.md");
@@ -1992,6 +1993,11 @@ const DOCS_PAGES: &[(&str, &str, &str)] = &[
         "tunings",
         "Built-in + user-defined tuning registry.",
         DOC_TUNINGS,
+    ),
+    (
+        "calibrate",
+        "Measure your audio chain's round-trip latency for accurate scoring.",
+        DOC_CALIBRATE,
     ),
     (
         "hardware",
@@ -3658,6 +3664,7 @@ mod docs_tests {
             "editor",
             "importer",
             "tunings",
+            "calibrate",
             "hardware",
             "user-guide",
         ];

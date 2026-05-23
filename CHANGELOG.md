@@ -10,6 +10,19 @@ dated section.
 
 ### Fixed
 
+- **Calibration status on the Playback screen + new Calibrate doc page.**
+  Latency-status row under the Playback screen's mic meter, parity
+  with the CLI's `Latency: …` stderr line — surfaces calibrated /
+  uncalibrated / stale state when a score policy is active so the
+  user knows whether their tight / casual scoring is using a
+  calibrated value before pressing Play. New `docs/features/calibrate.md`
+  walks the feature end-to-end (when to calibrate, GUI + CLI flows,
+  storage location); the per-feature docs in `playback.md` got the
+  Ship 2 update they were missing (proximity-score policy dropdown,
+  end-of-session score summary, `--policy` flag, cross-link to
+  `calibrate.md`). The doc page is embedded in the CLI's `twanga
+  docs` command and reachable via `#calibrate/calibrate` in the GUI
+  Docs viewer.
 - **Calibrate screen + latency measurement (web parity).**
   Top-level Calibrate screen in the GUI, slotted before Tunings in
   the nav. Reuses the playback screen's mic device picker + silence

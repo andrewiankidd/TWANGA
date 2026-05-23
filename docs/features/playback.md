@@ -62,11 +62,26 @@ The same loaded tab in each combination:
   tempo.
 - **Loop** — dropdown with `off` / `full` / `range…`. `range…` reveals
   start + end column inputs. Equivalent to the CLI's `--loop` flag.
-- **Pre-roll / metronome toggle / wait toggle** — same controls as the
-  Recorder. Wait mode opens the mic and reveals the same mic-level
-  meter (with input device picker + silence-threshold slider) the
-  Recorder uses. Choices persist independently under
+- **Pre-roll / metronome toggle** — same controls as the Recorder.
+- **Playhead policy dropdown** — picks the scoring + advancement
+  behaviour. Four options:
+  - **Free play** — just scrolls, no scoring, no mic open.
+  - **Wait** — cursor pauses on each note until you play it (Ship 1
+    behaviour). Mic open, no scoring.
+  - **Score: casual** — runs at tempo with a ±150 ms hit window per
+    column. Tolerant of amateur timing.
+  - **Score: tight** — same but ±50 ms. Useful once the user has
+    calibrated their audio chain (see [Calibrate](calibrate.md));
+    otherwise systematic hardware latency will skew everything Late.
+- Wait / score modes open the mic and reveal the same mic-level meter
+  (with input device picker + silence-threshold slider) the Recorder
+  uses. Choices persist independently under
   `twanga-playback-device-v1` / `twanga-playback-silence-rms-v1`.
+- **Latency status row** — under the mic meter when a score mode is
+  selected: one-line readout of the calibration state. Shows the
+  measured value when calibrated for the current mic; warns when the
+  saved value is for a different device; prompts to visit the
+  Calibrate screen when uncalibrated.
 - **Renderer picker** — Tab or Highway view. Both surface a per-string
   **live-note cell** that shows the absolute pitch class (e.g. `C`,
   `F#`) for the fret being played at the playhead column on that
@@ -83,12 +98,34 @@ under `twanga-playback-resume-v1`. Bookmark writes happen on Stop and on
 Back-to-library. "Finished" stops don't save (replaying from the end is
 useless).
 
+### Score summary
+
+At the end of a `tight` / `casual` session the score is printed inline:
+
+```
+Score:
+  Hit:         12 (75%)
+  Late:         2 (13%)
+  Missed:       1 (6%)
+  Wrong pitch:  1 (6%)
+  Total notes: 16
+```
+
+Hit / Late / Missed / Wrong pitch are mutually exclusive per non-rest
+column. The pairing window is generous (`late_ms × 4`) so a very-late
+attack still pairs with the column the user was aiming at rather than
+double-counting onto the next one.
+
 ## CLI
 
-The audio loop is gated by either time (default) or detected input
-(`--wait`). In wait mode the cursor pauses on each note until the mic detects
-a matching pitch (±50 cents on any expected string/fret). Rests still advance
-with time so the metronome stays musical.
+The audio loop runs under one of four playback policies, picked via the
+`--policy` flag: `wait` (cursor pauses on each note), `casual` (run at
+tempo, ±150 ms scoring), `tight` (run at tempo, ±50 ms scoring), or `free`
+(no scoring, no mic). In wait mode the cursor pauses on each note until
+the mic detects a matching pitch (±50 cents on any expected string/fret).
+Rests still advance with time so the metronome stays musical. In score
+modes, the end-of-session summary prints the same Hit / Late / Missed /
+Wrong-pitch breakdown the GUI shows.
 
 ```
 $ twanga play assets/examples/twinkle-twinkle-uke.alphatex --bpm 60
@@ -147,7 +184,8 @@ twanga play assets/examples/cripple-creek-banjo.alphatex \
 | `--capo <spec>` | Capo applied to the tab's tuning. Precedence: `--capo` wins; otherwise falls back to whatever the file embedded in its `\subtitle` field. |
 | `--bpm <N>` | Override the tempo from the file. |
 | `--no-metronome` | Silence the click (default is on). |
-| `--wait` | Practice mode — cursor pauses at each note until you play it. |
+| `--wait` | Shorthand for `--policy wait`. Practice mode — cursor pauses at each note until you play it. |
+| `--policy <wait\|tight\|casual\|free>` | Playback behaviour. `wait` pauses on each note; `tight` / `casual` run at tempo and score each column by proximity to expected onsets (±50 ms / ±150 ms hit windows); `free` just scrolls with no scoring. Score modes consume the [calibration](calibrate.md) value if one is stored — uncalibrated systems will see on-time plucks score Late under tight. |
 | `--loop` | Loop the entire file continuously. |
 | `--loop <START:END>` | Loop a column range (0-indexed, end exclusive). |
 | `--pre-roll <N>` | Audible count-in ticks before playback starts (0–16). Default 4. |
@@ -183,6 +221,9 @@ rather than most-recent-only.
 
 ## See also
 
+- [Calibrate feature](calibrate.md) — measure your audio chain's
+  round-trip latency so `tight` / `casual` scoring credits on-time
+  plucks correctly.
 - [Recorder feature](recorder.md) — where most user-recordings come
   from.
 - [Tab editor feature](editor.md) — fix up recordings cell-by-cell;

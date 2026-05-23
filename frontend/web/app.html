@@ -249,6 +249,14 @@
             opacity: 0.5;
             cursor: not-allowed;
         }
+        .latency-status {
+            color: var(--muted);
+            font-size: 0.8rem;
+            margin: 0.3rem 0 0;
+            min-height: 1.2em;
+        }
+        .latency-status.calibrated { color: var(--highlight); }
+        .latency-status.stale { color: #d97a7a; }
 
         /* Tuner-screen widgets */
         /* Tuning + capo disclosure. Replaces the old picker-button row
@@ -2143,6 +2151,9 @@
                     <span class="mic-meter-cal-status" id="playback-mic-meter-cal-status" hidden
                           title="Auto noise-floor calibration. Measures the noise floor over 3 s when a new mic device starts; updates the silence-threshold slider with a value clamped above your noise floor."></span>
                 </div>
+
+                <p class="latency-status" id="playback-latency-status"
+                   title="Hardware round-trip latency from `twanga calibrate` / the Calibrate screen. Subtracted from captured onset timestamps under tight / casual scoring policies. Click Calibrate to measure."></p>
 
                 <p class="tuner-hint" id="playback-hint">click Play to start</p>
 
@@ -5595,7 +5606,45 @@
                 }
                 playbackState.policy = policySelect.value;
                 playbackSaveToStorage();
+                refreshPlaybackLatencyStatus();
             });
+            // Initial render so the status line isn't blank on a
+            // fresh load with no policy interaction yet.
+            refreshPlaybackLatencyStatus();
+        }
+
+        /// Surface the calibration-state of the active mic on the
+        /// Playback screen, parity with the CLI's `Latency: …` line
+        /// in `resolve_hardware_latency`. Only meaningful under
+        /// tight / casual policies (the only ones that consume the
+        /// value); blank otherwise so the row doesn't clutter
+        /// free-play / wait UX.
+        function refreshPlaybackLatencyStatus() {
+            const el_ = el('playback-latency-status');
+            if (!el_) return;
+            const policy = playbackState.policy;
+            if (policy !== 'tight' && policy !== 'casual') {
+                el_.className = 'latency-status';
+                el_.textContent = '';
+                return;
+            }
+            const deviceLabel = playbackState.devicePicker?.getSelectedLabel?.()
+                || 'Default (OS-selected)';
+            const cal = loadLatencyCalibration();
+            if (!cal) {
+                el_.className = 'latency-status';
+                el_.textContent =
+                    'Latency: uncalibrated. Visit Calibrate for tighter scoring.';
+                return;
+            }
+            if (cal.deviceName !== deviceLabel) {
+                el_.className = 'latency-status stale';
+                el_.textContent =
+                    `Latency: stale (saved for '${cal.deviceName}'). Recalibrate.`;
+                return;
+            }
+            el_.className = 'latency-status calibrated';
+            el_.textContent = `Latency: ${cal.latencyMs} ms (calibrated for '${cal.deviceName}').`;
         }
 
         // ---- Transport (Play / Pause / Stop + Space shortcut) --------------
@@ -6480,6 +6529,9 @@
                 status.className = 'calibrate-status success';
                 status.textContent = `Measured ${cal.latencyMs} ms round-trip.`;
                 refreshCalibrateScreen();
+                // Sibling screen — keep its readout in sync without
+                // requiring a manual revisit.
+                refreshPlaybackLatencyStatus();
             } catch (err) {
                 status.className = 'calibrate-status error';
                 status.textContent = String(err.message || err);
@@ -6539,6 +6591,7 @@
             { slug: 'editor', name: 'Tab editor', blurb: 'Post-capture cell-level edits to recordings.' },
             { slug: 'importer', name: 'Importer', blurb: 'Add alphaTex / MusicXML / MXL files to your library.' },
             { slug: 'tunings', name: 'Tunings', blurb: 'Built-in + user-defined tuning registry.' },
+            { slug: 'calibrate', name: 'Calibrate', blurb: 'Measure your audio chain\'s round-trip latency for accurate scoring.' },
             { slug: 'hardware', name: 'Hardware', blurb: 'Audio-input setup — mics, instrument cables, interfaces.' },
             { slug: 'user-guide', name: 'User guide', blurb: 'Paths + portable mode, audio architecture, privacy, credits.' },
         ];
