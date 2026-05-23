@@ -98,8 +98,20 @@ enum Command {
         #[arg(long)]
         no_metronome: bool,
         /// Wait for the user to play each note before advancing the cursor.
-        #[arg(long)]
+        /// Equivalent to `--policy wait`. Mutually exclusive with
+        /// `--policy <other>` — pick one verb for what the playhead does.
+        #[arg(long, conflicts_with = "policy")]
         wait: bool,
+        /// Playhead behaviour for the session. `wait` pauses on each note
+        /// until you play it (slow drill, same as `--wait`); `tight` and
+        /// `casual` run at tempo and score each note by proximity to the
+        /// expected onset (±50 ms / ±150 ms respectively); `free` scrolls
+        /// at tempo with no verification. Defaults to `free` if neither
+        /// `--wait` nor `--policy` is passed (matches the pre-Ship-2
+        /// behaviour). Score-mode prints a hit/late/missed/wrong-pitch
+        /// summary at the end of the run.
+        #[arg(long, value_parser = ["wait", "tight", "casual", "free"])]
+        policy: Option<String>,
         /// Loop playback. Pass with no value to loop the entire file, or with
         /// `START:END` (0-indexed column range, end exclusive) to loop a
         /// section, e.g. `--loop 0:20` or `--loop 20:30`.
@@ -1698,6 +1710,7 @@ fn main() -> Result<()> {
             bpm,
             no_metronome,
             wait,
+            policy,
             loop_spec,
             capo,
             pre_roll,
@@ -1739,6 +1752,23 @@ fn main() -> Result<()> {
             // (`--resume`, `--no-resume`, neither) → either skip the
             // prompt one way or the other, or ask interactively.
             let resume_col = resolve_resume_choice(&path, &parsed, resume, no_resume)?;
+            // Resolve `--wait` + `--policy` into a single PlaybackPolicy.
+            // `--wait` is the legacy verb (kept working for back-compat);
+            // `--policy <name>` is the Ship 2 surface. Clap rejects passing
+            // both, so exactly one path runs. Default (neither passed) is
+            // `FreePlay` — same behaviour the CLI shipped before Ship 2,
+            // so existing scripts don't suddenly grow a scoring summary.
+            let policy = if wait {
+                twanga_tabs::playback::PlaybackPolicy::wait()
+            } else {
+                match policy.as_deref() {
+                    Some("wait") => twanga_tabs::playback::PlaybackPolicy::wait(),
+                    Some("tight") => twanga_tabs::playback::PlaybackPolicy::tight(),
+                    Some("casual") => twanga_tabs::playback::PlaybackPolicy::casual(),
+                    Some("free") | None => twanga_tabs::playback::PlaybackPolicy::FreePlay,
+                    Some(other) => unreachable!("clap value_parser rejected '{other}'"),
+                }
+            };
             run_playback(
                 path,
                 parsed,
@@ -1746,7 +1776,7 @@ fn main() -> Result<()> {
                 transpose_mode,
                 bpm,
                 !no_metronome,
-                wait,
+                policy,
                 loop_spec,
                 capo,
                 pre_roll,
@@ -2161,6 +2191,14 @@ fn run_patterns_play(
     } else {
         Some("full".to_string())
     };
+    // Patterns play stays on the simpler `wait → policy` mapping —
+    // `twanga patterns play` doesn't take `--policy` yet (it's a v2-of-v2
+    // surface, gated on someone wanting scoring on drill exercises).
+    let policy = if wait {
+        twanga_tabs::playback::PlaybackPolicy::wait()
+    } else {
+        twanga_tabs::playback::PlaybackPolicy::FreePlay
+    };
     run_playback(
         path,
         parsed,
@@ -2168,7 +2206,7 @@ fn run_patterns_play(
         alphatex::TransposeMode::Drop,
         bpm,
         !no_metronome,
-        wait,
+        policy,
         loop_spec,
         /* capo_spec */ None,
         /* pre_roll */ 4,
@@ -2384,13 +2422,27 @@ fn run_playback(
     transpose_mode: alphatex::TransposeMode,
     bpm_override: Option<u32>,
     metronome: bool,
-    wait: bool,
+    policy: twanga_tabs::playback::PlaybackPolicy,
     loop_spec: Option<String>,
     capo_spec: Option<String>,
     pre_roll: u32,
     resume_col: Option<u64>,
     silence_rms: Option<f32>,
 ) -> Result<()> {
+    // Local boolean derived from the policy for spots that still read
+    // "is this wait mode?" in the obvious way — the previous code
+    // threaded `wait: bool` deep into the loop and the tuner-init
+    // branch, and keeping a local alias minimises churn while we
+    // grow the policy surface.
+    let wait = matches!(
+        policy,
+        twanga_tabs::playback::PlaybackPolicy::WaitOnPitch { .. }
+    );
+    // Does this policy need mic input at all? Wait mode does (pitch
+    // matching) and ProximityScore does (onset collection); FreePlay
+    // doesn't open a stream so the user can play at-tempo with no
+    // audio routing.
+    let needs_audio = !matches!(policy, twanga_tabs::playback::PlaybackPolicy::FreePlay);
     // Transpose if --tuning was provided (either explicitly via flag or via
     // the prompt). The transposed tab carries the target tuning's names in
     // its header, so downstream code (wait mode, display) sees one consistent
@@ -2455,7 +2507,14 @@ fn run_playback(
     // `fret_offset` metadata survives — alphaTex's `\tuning` header doesn't
     // carry it, and without it wait-mode would expect the wrong pitch on a
     // banjo drone fretted above its peg.
-    let tuning_for_wait: Option<Tuning> = if wait {
+    // Effective tuning used for ALL pitch-match comparisons during
+    // the session (wait-mode advance check + proximity-score onset
+    // pairing). Constructed once when audio is needed; rebuilt from
+    // the `target_tuning` (if a transpose ran — preserves
+    // `fret_offset` metadata the alphaTex header can't carry) with
+    // the `effective_capo` baked in so fret 0 means "the open
+    // string above the capo."
+    let tuning_for_pitch_match: Option<Tuning> = if needs_audio {
         let base = target_tuning.clone().map(Ok).unwrap_or_else(|| {
             tab.tuning()
                 .ok_or_else(|| anyhow!("'\\tuning' header is missing or unparseable"))
@@ -2476,14 +2535,15 @@ fn run_playback(
     };
     let click = output.as_ref().map(|o| metronome_click(o.sample_rate));
 
-    let (mut input_state, mut input_buf) = if wait {
+    let (mut input_state, mut input_buf) = if needs_audio {
         let s = InputStream::open()?;
         let sr = s.sample_rate;
         let mut tuner = Tuner::new(TunerMode::Chromatic, sr);
-        // Wait mode's note matching is gated by the silence threshold —
-        // without auto-cal, a noisy mic + the conservative default can
-        // miss legitimately quiet plucks. Auto-calibrate at session start
-        // unless the user pinned a value with `--silence-rms`.
+        // Both wait-mode and proximity-score depend on the silence
+        // threshold being correct — a too-high default suppresses
+        // legitimately quiet plucks; a too-low one fires YIN on
+        // cable hum. Auto-calibrate at session start unless the
+        // user pinned a value with `--silence-rms`.
         if let Some(rms) = silence_rms {
             tuner.set_silence_rms(rms);
         } else {
@@ -2629,6 +2689,20 @@ fn run_playback(
         return Ok(());
     }
 
+    // Proximity-score state — only populated when `policy` is
+    // `ProximityScore`. The clock starts AFTER pre-roll so column
+    // expected_ms values + collected onset timestamps share the
+    // same zero. Events accumulate across the whole session;
+    // looping sessions get scored from the first iteration's
+    // schedule, not per-iteration (a planned per-iteration view
+    // lives in the BACKLOG).
+    let is_scoring = matches!(
+        policy,
+        twanga_tabs::playback::PlaybackPolicy::ProximityScore { .. }
+    );
+    let playback_clock_origin = std::time::Instant::now();
+    let mut onset_events: Vec<twanga_tabs::playback::OnsetEvent> = Vec::new();
+
     // Track the current column outside the inner loops so the
     // user-initiated stop paths can save a resume bookmark before
     // returning. Updated on every column tick; the initial value
@@ -2724,10 +2798,18 @@ fn run_playback(
                 }
             }
 
-            // Wait mode: pause for hits until the user plays a matching note.
-            // Rests still consume one column of time so the metronome stays musical.
+            // Per-column tick. Three branches by policy:
+            //   1. wait mode + non-rest column → block until matched.
+            //   2. proximity-score mode → sleep ms_per_col while
+            //      simultaneously reading the mic + recording any
+            //      onset-tagged readings with their wall-clock
+            //      timestamp (scored against the schedule at session
+            //      end).
+            //   3. free-play / wait-mode rest → simple sleep.
             if wait && !column.hits.is_empty() {
-                let tuning = tuning_for_wait.as_ref().expect("wait mode requires tuning");
+                let tuning = tuning_for_pitch_match
+                    .as_ref()
+                    .expect("wait mode requires tuning");
                 wait_for_expected_note(
                     &mut input_state,
                     &mut input_buf,
@@ -2735,6 +2817,14 @@ fn run_playback(
                     tuning,
                     &stdin_rx,
                 )?;
+            } else if is_scoring {
+                capture_onsets_for_duration(
+                    &mut input_state,
+                    &mut input_buf,
+                    ms_per_col,
+                    playback_clock_origin,
+                    &mut onset_events,
+                );
             } else {
                 std::thread::sleep(std::time::Duration::from_millis(ms_per_col as u64));
             }
@@ -2747,7 +2837,109 @@ fn run_playback(
 
     eprintln!();
     eprintln!("Playback finished.");
+
+    // Score the session if we were in proximity-score mode. Build the
+    // expected schedule from the loop range we just played, pair
+    // detected onsets against expected columns via
+    // `twanga_tabs::playback::score`, and surface the aggregate. Per-
+    // column outcomes are dropped here — the BACKLOG-tracked "replay
+    // mistakes" feature is the natural home for keeping them.
+    if is_scoring {
+        // `needs_audio` was true, so `tuning_for_pitch_match` is
+        // populated — unwrap is safe by construction.
+        let tuning = tuning_for_pitch_match
+            .as_ref()
+            .expect("proximity-score policy requires tuning");
+        let played_columns = &tab.columns[loop_start..loop_end];
+        let schedule = twanga_tabs::playback::build_schedule(played_columns, bpm);
+        let outcomes = twanga_tabs::playback::score(&schedule, &onset_events, policy, tuning);
+        let summary = twanga_tabs::playback::PlaybackSummary::from_outcomes(&outcomes);
+        print_score_summary(&summary);
+    }
+
     Ok(())
+}
+
+/// Capture mic samples for `duration_ms` while accumulating onset-
+/// tagged tuner readings as [`OnsetEvent`]s. Used by proximity-score
+/// playback to collect what the user actually played alongside the
+/// tempo-driven playhead — the resulting events get scored against
+/// the expected schedule at session end.
+///
+/// Timestamps are measured from `clock_origin` so they share a zero
+/// with `build_schedule`'s `expected_ms` values (the caller passes
+/// the post-pre-roll Instant). When `input_state` is `None` (no mic
+/// session opened — wouldn't normally happen in score mode but kept
+/// defensive) the call degrades to a plain sleep so the tempo still
+/// holds.
+fn capture_onsets_for_duration(
+    input_state: &mut Option<(InputStream, Tuner)>,
+    buf: &mut [f32],
+    duration_ms: u32,
+    clock_origin: std::time::Instant,
+    events: &mut Vec<twanga_tabs::playback::OnsetEvent>,
+) {
+    let Some((stream, tuner)) = input_state.as_mut() else {
+        std::thread::sleep(std::time::Duration::from_millis(duration_ms as u64));
+        return;
+    };
+    let until = std::time::Instant::now() + std::time::Duration::from_millis(duration_ms as u64);
+    while std::time::Instant::now() < until {
+        let n = stream.read(buf);
+        if n > 0 {
+            tuner.feed(&buf[..n]);
+            // Timestamp once per drain — all readings produced by
+            // this `feed` call share the same "now" within the
+            // resolution we care about (the onset detector chunk is
+            // ~5 ms; YIN window is ~170 ms; tagging them all with
+            // the post-feed `elapsed` is well within the scoring
+            // tolerance window).
+            let now_ms = clock_origin.elapsed().as_millis() as u32;
+            for r in tuner.take_readings() {
+                if r.from_onset_window {
+                    events.push(twanga_tabs::playback::OnsetEvent {
+                        timestamp_ms: now_ms,
+                        detected_hz: r.detected.hz(),
+                    });
+                }
+            }
+        } else {
+            // No samples queued yet — yield briefly to avoid spinning
+            // the CPU while still respecting the column deadline.
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+    }
+}
+
+/// Pretty-print a proximity-score `PlaybackSummary` to stderr after
+/// the playback loop finishes. Format chosen to match the rest of
+/// the CLI's session-end output style (single block, key: value rows,
+/// no trailing newline noise). Percentages render against the played
+/// total so a 5-note song gives a useful breakdown rather than
+/// rounding-to-100% on every line.
+fn print_score_summary(summary: &twanga_tabs::playback::PlaybackSummary) {
+    let total = summary.total();
+    if total == 0 {
+        // No non-rest columns in the played range — nothing to score.
+        // Quiet exit; the user already saw "Playback finished."
+        return;
+    }
+    eprintln!();
+    eprintln!("Score:");
+    let pct = |n: usize| (n as f32 / total as f32 * 100.0).round() as u32;
+    eprintln!("  Hit:         {} ({}%)", summary.hit, pct(summary.hit));
+    eprintln!("  Late:        {} ({}%)", summary.late, pct(summary.late));
+    eprintln!(
+        "  Missed:      {} ({}%)",
+        summary.missed,
+        pct(summary.missed)
+    );
+    eprintln!(
+        "  Wrong pitch: {} ({}%)",
+        summary.wrong_pitch,
+        pct(summary.wrong_pitch)
+    );
+    eprintln!("  Total notes: {total}");
 }
 
 /// Parse the `--loop` spec into `(start, end, repeat)`. `start..end` is the
