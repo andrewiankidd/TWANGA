@@ -10,6 +10,42 @@ dated section.
 
 ### Fixed
 
+- **Calibration redesign: pluck-along is now the primary method,
+  compatibility-matrix wizard, "Mic" → "Input" terminology, prominent
+  score summary.** Substantial polish pass on the Calibrate + Playback
+  surfaces:
+  - **Pluck-along** added as the recommended primary calibration
+    method. TWANGA plays a metronome (4 pre-roll + 8 measurement
+    clicks at 80 BPM); the user plucks a single note on each click;
+    the onset detector pairs each scheduled beat with its nearest
+    detected onset within ±half-a-beat; the median signed offset is
+    the latency. Works for *any* input (mic, line-in, USB instrument
+    cable) because it captures what the user actually plays. Includes
+    the user's reaction time, which is the correct value to subtract
+    for scoring ("score Hit when I play on the beat as I perceive
+    it"). Round-trip is kept as the secondary method for users who
+    specifically want hardware-only delay. CLI: `--pluck-along`,
+    `--round-trip`, `--manual <ms>`, `--show` flags.
+  - **Compatibility-matrix wizard** replaces the old Q1/Q2 branching.
+    Two dropdowns describe the user's input + output; TWANGA's matrix
+    determines which methods are physically possible, recommends the
+    best one, and disables incompatible options with the reason
+    surfaced inline. Shared dispatch logic in CLI (`evaluate_setup`)
+    and JS (`evaluateSetup`).
+  - **"Mic" → "Input" terminology pass** across user-facing surfaces.
+    Direct-cable / line-in users don't have a mic, so generic UI
+    text was misleading. Renamed: Start/Stop button labels, meter
+    label, hint text, Calibrate context label, tooltips, docs.
+    Kept "mic" intentionally where it's specifically about a
+    microphone (round-trip flow, compatibility-matrix reasons, the
+    "Microphone" dropdown option that contrasts with "Direct
+    cable"). Internal CSS classes, JS identifiers, and HTML IDs
+    untouched — code references stay readable.
+  - **Prominent score summary** on the Playback screen. End-of-take
+    scoring under tight/casual now renders in a panel above the
+    renderer with a 1.3rem highlight headline ("22 / 42 hit (52%)")
+    and a separate breakdown line, instead of being buried in the
+    small hint row under the transport. Cleared on next Play.
 - **Calibrate screen reliability diagnostics: mic check + output check.**
   Two new sub-panels turn Calibrate into a "is your digital audio
   chain actually working" surface rather than just "press button,

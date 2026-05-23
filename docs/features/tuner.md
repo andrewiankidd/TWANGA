@@ -21,7 +21,7 @@ Open the Tuner card from the main menu (or hash route `#tuner`).
   banjo 5th-string drone / partial capos).
 - **Per-string display** — every open string of the selected tuning
   rendered as its own row with live frequency, target, and a cents-off
-  indicator. The mic-level meter (small RMS bar) sits above the rows so
+  indicator. The input-level meter (small RMS bar) sits above the rows so
   you can tell "no signal" apart from "signal but no target match".
 - **Input device picker** — dropdown above the meter, populated from
   `navigator.mediaDevices.enumerateDevices()`. Browsers gate the
@@ -96,7 +96,7 @@ The threshold change prints a line like `[silence: 0.00500 RMS (-46.0 dB)]` so y
   persists in `localStorage` under `twanga-tuner-device-v1`.
 - **Silence threshold** — runtime-tunable on both surfaces. CLI:
   `--silence-rms <RMS>` flag, or `[` / `]` runtime keys. GUI: the
-  slider on the mic meter, persisted under
+  slider on the input meter, persisted under
   `twanga-tuner-silence-rms-v1`.
 
 ## See also

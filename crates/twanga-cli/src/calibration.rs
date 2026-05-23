@@ -47,16 +47,32 @@ pub const CLICK_INTERVAL_MS: u64 = 600;
 /// silence floor.
 pub const CLICK_CAPTURE_MS: u64 = 500;
 
-/// How a saved `LatencyCalibration` was produced. Round-trip is
-/// the most accurate (an actual measurement of the user's audio
-/// chain); manual is what the user typed in (typically when their
-/// setup doesn't support the acoustic round-trip — headphones,
-/// line-in, no mic). Surfaced in the UI as "via round-trip" /
-/// "set manually" so users can tell at a glance how much to trust
-/// the number.
+/// How a saved `LatencyCalibration` was produced.
+///
+/// - **PluckAlong** is the primary method: TWANGA plays a metronome
+///   and the user plucks a single note on each beat. The median
+///   offset between scheduled-beat-time and detected-onset-time
+///   becomes the latency. Works for any input (mic, line-in, USB
+///   instrument cable) because it captures *what the user actually
+///   plays*. Includes the user's reaction time, which is the
+///   correct thing to subtract for scoring (the user wants to
+///   score Hit when they play on the beat *as they perceive it*).
+/// - **RoundTrip** is a hardware-only measurement: TWANGA plays
+///   clicks through speakers and captures them via mic. Measures
+///   system delay only (no human reaction time). Useful for users
+///   who specifically want hardware compensation and not their
+///   own reaction time absorbed. Only works with mic + speakers
+///   in the same room.
+/// - **Manual** is what the user typed in. Always available as a
+///   fallback when neither measurement method is practical.
+///
+/// Surfaced in the UI as "via pluck-along" / "via round-trip" /
+/// "via manual" so users can tell at a glance how the number was
+/// produced.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum CalibrationMethod {
+    PluckAlong,
     RoundTrip,
     Manual,
 }
@@ -64,6 +80,7 @@ pub enum CalibrationMethod {
 impl CalibrationMethod {
     pub fn label(self) -> &'static str {
         match self {
+            Self::PluckAlong => "pluck-along",
             Self::RoundTrip => "round-trip",
             Self::Manual => "manual",
         }
@@ -224,6 +241,204 @@ pub fn manual_calibration(device_name: String, latency_ms: u32) -> LatencyCalibr
         measured_at: now_rfc3339(),
         method: CalibrationMethod::Manual,
     }
+}
+
+// ─────────────────────────── Pluck-along measurement ───────────────────────────
+
+/// Metronome tempo for the pluck-along procedure. 80 BPM (750 ms
+/// per beat) is slow enough for a beginner to land notes cleanly
+/// but fast enough that 8 beats finishes in ~6 seconds.
+pub const PLUCK_ALONG_BPM: u32 = 80;
+/// How many beats the user is asked to pluck along to. Median over
+/// this many measurements absorbs one or two miss-timed plucks
+/// without throwing off the result.
+pub const PLUCK_ALONG_BEATS: usize = 8;
+/// Pre-roll beat count before the measurement begins, giving the
+/// user time to lock onto the tempo. Plays clicks at the same BPM
+/// but no plucks are recorded.
+pub const PLUCK_ALONG_PRE_ROLL: usize = 4;
+/// Minimum fraction of beats that must produce a detected pluck
+/// for the measurement to be trusted. Below this threshold the
+/// caller errors out with "play louder / clearer" guidance rather
+/// than saving a garbage value derived from one or two plucks.
+pub const PLUCK_ALONG_MIN_MATCH_RATIO: f32 = 0.5;
+
+/// Progress events emitted during a pluck-along run so the caller
+/// (CLI / GUI / tests) can render feedback without coupling to the
+/// measurement loop's internals.
+pub enum PluckProgress<'a> {
+    PreRoll {
+        i: usize,
+        total: usize,
+    },
+    Beat {
+        i: usize,
+        total: usize,
+    },
+    Done {
+        matched: usize,
+        total: usize,
+        label: &'a str,
+    },
+}
+
+/// Run a pluck-along calibration: TWANGA plays a metronome and
+/// the user plucks a single note on each beat. The median offset
+/// between scheduled beat time and detected onset becomes the
+/// latency.
+///
+/// Works for any input that produces a detectable energy spike
+/// per pluck — mic, line-in, USB instrument cable. The procedure
+/// includes the user's reaction time in the measured offset,
+/// which is the correct thing to subtract for scoring (a user
+/// playing "on the beat as they perceive it" should score Hit,
+/// not Late by their reaction time).
+pub fn run_pluck_along_calibration(
+    progress: &mut dyn FnMut(PluckProgress<'_>),
+) -> Result<LatencyCalibration> {
+    let mut input = InputStream::open()?;
+    let mut output = OutputStream::open()?;
+    let device_name = input.device_name.clone();
+    let click = metronome_click(output.sample_rate);
+    let input_sr = input.sample_rate;
+    let beat_ms: u64 = (60_000 / PLUCK_ALONG_BPM as u64).max(50);
+
+    // Tuner is reused for its onset detector — we don't care about
+    // pitch here, only timing. `from_onset_window` readings tell us
+    // when a fresh attack arrived.
+    let mut tuner = twanga_dsp::Tuner::new(twanga_dsp::TunerMode::Chromatic, input_sr);
+    let window_latency_ms = tuner.window_latency_ms() as u64;
+    let mut buf = vec![0.0_f32; 4096];
+
+    // Pre-roll: clicks without recording, so the user can lock
+    // onto the tempo before the measurement starts.
+    for i in 0..PLUCK_ALONG_PRE_ROLL {
+        progress(PluckProgress::PreRoll {
+            i: i + 1,
+            total: PLUCK_ALONG_PRE_ROLL,
+        });
+        let beat_at = Instant::now();
+        output.write(&click);
+        let elapsed = beat_at.elapsed();
+        let target = Duration::from_millis(beat_ms);
+        if elapsed < target {
+            std::thread::sleep(target - elapsed);
+        }
+    }
+    // Drain any mic samples accumulated during pre-roll so they
+    // don't pollute the first beat's window.
+    while input.read(&mut buf) > 0 {}
+
+    // Measurement phase. clock_origin = "beat 1 starts now."
+    let clock_origin = Instant::now();
+    let mut scheduled_beats_ms: Vec<u64> = Vec::with_capacity(PLUCK_ALONG_BEATS);
+    let mut onsets_ms: Vec<u64> = Vec::new();
+
+    for beat_idx in 0..PLUCK_ALONG_BEATS {
+        progress(PluckProgress::Beat {
+            i: beat_idx + 1,
+            total: PLUCK_ALONG_BEATS,
+        });
+        let beat_at = clock_origin + Duration::from_millis(beat_idx as u64 * beat_ms);
+        let now = Instant::now();
+        if now < beat_at {
+            std::thread::sleep(beat_at - now);
+        }
+        let actual_beat_ms = clock_origin.elapsed().as_millis() as u64;
+        scheduled_beats_ms.push(actual_beat_ms);
+        output.write(&click);
+
+        // Capture mic for the duration of this beat (until the next
+        // one is due). Collect any onset-tagged readings.
+        let until = Instant::now() + Duration::from_millis(beat_ms);
+        while Instant::now() < until {
+            let n = input.read(&mut buf);
+            if n > 0 {
+                tuner.feed(&buf[..n]);
+                let now_ms = clock_origin.elapsed().as_millis() as u64;
+                for r in tuner.take_readings() {
+                    if r.from_onset_window {
+                        onsets_ms.push(now_ms.saturating_sub(window_latency_ms));
+                    }
+                }
+            } else {
+                std::thread::sleep(Duration::from_millis(2));
+            }
+        }
+    }
+
+    // Trailing capture: an onset arriving in the last beat's window
+    // might land in the YIN buffer just after the loop above exits.
+    // Capture for one more beat-length so we don't drop it.
+    let trailing_until = Instant::now() + Duration::from_millis(beat_ms);
+    while Instant::now() < trailing_until {
+        let n = input.read(&mut buf);
+        if n > 0 {
+            tuner.feed(&buf[..n]);
+            let now_ms = clock_origin.elapsed().as_millis() as u64;
+            for r in tuner.take_readings() {
+                if r.from_onset_window {
+                    onsets_ms.push(now_ms.saturating_sub(window_latency_ms));
+                }
+            }
+        } else {
+            std::thread::sleep(Duration::from_millis(2));
+        }
+    }
+
+    // Pair each scheduled beat with its nearest unused onset within
+    // ±half-a-beat. Compute the signed offset (positive = late,
+    // negative = early) and median over the matches.
+    let mut used = vec![false; onsets_ms.len()];
+    let half_beat = (beat_ms / 2) as i64;
+    let mut offsets: Vec<i64> = Vec::new();
+    for &beat in &scheduled_beats_ms {
+        let mut best: Option<(usize, i64)> = None;
+        for (i, &onset) in onsets_ms.iter().enumerate() {
+            if used[i] {
+                continue;
+            }
+            let signed = onset as i64 - beat as i64;
+            if signed.abs() > half_beat {
+                continue;
+            }
+            if best.is_none_or(|(_, d)| signed.abs() < d.abs()) {
+                best = Some((i, signed));
+            }
+        }
+        if let Some((i, signed)) = best {
+            used[i] = true;
+            offsets.push(signed);
+        }
+    }
+
+    let matched = offsets.len();
+    let total = scheduled_beats_ms.len();
+    let min_matches = (total as f32 * PLUCK_ALONG_MIN_MATCH_RATIO).ceil() as usize;
+    if matched < min_matches {
+        return Err(anyhow!(
+            "only {matched} of {total} beats had a detected pluck — try again with louder, more deliberate plucks, or check your input level (silence threshold may be too high)"
+        ));
+    }
+
+    offsets.sort_unstable();
+    let median = offsets[offsets.len() / 2];
+    // Negative offsets (playing early) clamp to 0 — we don't want
+    // to ADD latency to onset timestamps, only subtract.
+    let latency_ms = median.max(0) as u32;
+
+    let label = CalibrationMethod::PluckAlong.label();
+    progress(PluckProgress::Done {
+        matched,
+        total,
+        label,
+    });
+    Ok(LatencyCalibration {
+        device_name,
+        latency_ms,
+        measured_at: now_rfc3339(),
+        method: CalibrationMethod::PluckAlong,
+    })
 }
 
 /// Best-effort current-time stamp. Falls back to "unknown" if the

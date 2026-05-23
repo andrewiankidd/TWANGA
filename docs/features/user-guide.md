@@ -121,12 +121,12 @@ detected frequency within ±50 cents, accounting for the capo.
 Below a configurable RMS threshold (default `0.005` ≈ -46 dB) the
 detector doesn't fire, which avoids cable hum / room noise getting
 mistaken for plucks. The threshold is runtime-tunable on both
-surfaces — CLI keys `[` / `]`, GUI slider on the mic meter.
+surfaces — CLI keys `[` / `]`, GUI slider on the input meter.
 
 ### Wait mode latency budget
 
 `twanga play --wait` (CLI) and the GUI's Wait toggle both pause the
-cursor at each note until the mic detects a matching pitch. Round-
+cursor at each note until the input detects a matching pitch. Round-
 trip latency budget is ≤100 ms — anything beyond that and the
 practice loop feels broken. Hits this budget on a built-in laptop
 mic + Realtone cable on a wired interface; struggles on Bluetooth

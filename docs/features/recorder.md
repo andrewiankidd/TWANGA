@@ -45,7 +45,7 @@ out while recording is in-flight, display-only cards stay live.
   `navigator.mediaDevices.enumerateDevices()`. Persists in
   `localStorage` under `twanga-recorder-device-v1`. Hot-plug supported.
   No mid-take swap; the choice takes effect on the next Start.
-- **Mic-level meter + silence-threshold slider + detected-note pill** —
+- **Input-level meter + silence-threshold slider + detected-note pill** —
   small RMS bar surfaces "no signal" diagnostics (helps distinguish
   missing pitch detection from a dead input; particularly useful on
   macOS where the AudioContext can start suspended). The slider thumb

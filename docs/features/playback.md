@@ -73,13 +73,13 @@ The same loaded tab in each combination:
   - **Score: tight** — same but ±50 ms. Useful once the user has
     calibrated their audio chain (see [Calibrate](calibrate.md));
     otherwise systematic hardware latency will skew everything Late.
-- Wait / score modes open the mic and reveal the same mic-level meter
+- Wait / score modes open the input and reveal the same input-level meter
   (with input device picker + silence-threshold slider) the Recorder
   uses. Choices persist independently under
   `twanga-playback-device-v1` / `twanga-playback-silence-rms-v1`.
-- **Latency status row** — under the mic meter when a score mode is
+- **Latency status row** — under the input meter when a score mode is
   selected: one-line readout of the calibration state. Shows the
-  measured value when calibrated for the current mic; warns when the
+  measured value when calibrated for the current input device; warns when the
   saved value is for a different device; prompts to visit the
   Calibrate screen when uncalibrated.
 - **Renderer picker** — Tab or Highway view. Both surface a per-string
@@ -122,7 +122,7 @@ The audio loop runs under one of four playback policies, picked via the
 `--policy` flag: `wait` (cursor pauses on each note), `casual` (run at
 tempo, ±150 ms scoring), `tight` (run at tempo, ±50 ms scoring), or `free`
 (no scoring, no mic). In wait mode the cursor pauses on each note until
-the mic detects a matching pitch (±50 cents on any expected string/fret).
+the input detects a matching pitch (±50 cents on any expected string/fret).
 Rests still advance with time so the metronome stays musical. In score
 modes, the end-of-session summary prints the same Hit / Late / Missed /
 Wrong-pitch breakdown the GUI shows.

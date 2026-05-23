@@ -21,7 +21,7 @@
 // Required markup (matches `.mic-meter` CSS in app.html):
 //
 //   <div class="mic-meter" id="..."> hidden
-//     <span class="mic-meter-label">mic</span>
+//     <span class="mic-meter-label">input</span>
 //     <div class="mic-meter-bar-wrap">
 //       <div class="mic-meter-bar">
 //         <div class="mic-meter-fill" id="..."></div>

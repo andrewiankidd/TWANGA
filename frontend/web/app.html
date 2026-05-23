@@ -285,6 +285,48 @@
             font-size: 0.8rem;
             line-height: 1.6;
         }
+        .wizard-setup-row {
+            display: flex;
+            flex-direction: column;
+            gap: 0.3rem;
+            margin: 0.4rem 0;
+            font-size: 0.9rem;
+        }
+        .wizard-setup-row label {
+            color: var(--muted);
+            font-size: 0.8rem;
+        }
+        .wizard-setup-select {
+            padding: 0.4rem 0.6rem;
+            background: var(--background, #1a1a1a);
+            color: var(--text, #e0e0e0);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            font-family: inherit;
+            font-size: 0.9rem;
+        }
+        .wizard-recommendation {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 0.6rem 0.9rem;
+            margin: 0 0 0.8rem;
+            font-size: 0.85rem;
+        }
+        .wizard-recommendation strong { color: var(--highlight); }
+        .wizard-q label[data-method-row].blocked {
+            opacity: 0.45;
+            cursor: not-allowed;
+        }
+        .wizard-q label[data-method-row].blocked input { cursor: not-allowed; }
+        .method-blocked {
+            display: block;
+            color: #d97a7a;
+            font-size: 0.75rem;
+            margin-top: 0.2rem;
+            margin-left: 1.5rem;
+            font-style: italic;
+        }
         .diagnostic-block {
             margin-top: 1.5rem;
             padding-top: 1rem;
@@ -360,6 +402,31 @@
         }
         .latency-status.calibrated { color: var(--highlight); }
         .latency-status.stale { color: #d97a7a; }
+        .score-summary {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-left: 4px solid var(--highlight);
+            border-radius: var(--radius);
+            padding: 0.9rem 1.2rem;
+            margin: 0.4rem 0 0.8rem;
+            font-size: 1.05rem;
+            line-height: 1.5;
+        }
+        .score-summary[hidden] { display: none; }
+        .score-summary .ss-headline {
+            font-size: 1.3rem;
+            font-weight: 700;
+            color: var(--highlight);
+            margin-bottom: 0.4rem;
+        }
+        .score-summary .ss-breakdown {
+            color: var(--muted);
+            font-size: 0.95rem;
+        }
+        .score-summary .ss-breakdown strong {
+            color: var(--text, #e0e0e0);
+            font-weight: 600;
+        }
 
         /* Tuner-screen widgets */
         /* Tuning + capo disclosure. Replaces the old picker-button row
@@ -1902,7 +1969,7 @@
             </div>
             <h2>Tuner</h2>
             <p class="subtitle">
-                Pick a tuning, click Start mic, and play any string. Each row
+                Pick a tuning, click Start input, and play any string. Each row
                 shows your detected pitch against the target — the bar's
                 cursor slides left if you're flat, right if you're sharp,
                 centred when you're in tune (within ±5¢). Same YIN detector
@@ -1931,7 +1998,7 @@
             </div>
 
             <div class="mic-meter" id="tuner-mic-meter" hidden>
-                <span class="mic-meter-label">mic</span>
+                <span class="mic-meter-label">input</span>
                 <div class="mic-meter-bar-wrap">
                     <div class="mic-meter-bar">
                         <div class="mic-meter-fill" id="tuner-mic-meter-fill"></div>
@@ -1945,13 +2012,13 @@
                 <span class="mic-meter-note" id="tuner-mic-meter-note"
                       title="Detected pitch — only populated while the detector is firing (silence gate cleared, YIN found a periodic signal)"></span>
                 <span class="mic-meter-cal-status" id="tuner-mic-meter-cal-status" hidden
-                      title="Auto noise-floor calibration. Measures the noise floor over 3 s when a new mic device starts; updates the silence-threshold slider with a value clamped above your noise floor."></span>
+                      title="Auto noise-floor calibration. Measures the noise floor over 3 s when a new input device starts; updates the silence-threshold slider with a value clamped above your noise floor."></span>
             </div>
 
-            <p class="tuner-hint" id="tuner-hint">click Start mic to begin</p>
+            <p class="tuner-hint" id="tuner-hint">click Start input to begin</p>
 
             <div class="row">
-                <button class="action" id="mic-btn">Start mic</button>
+                <button class="action" id="mic-btn">Start input</button>
                 <button class="action secondary" id="pitch-btn">Test (440 Hz sine)</button>
             </div>
         </section>
@@ -2050,7 +2117,7 @@
             </div>
 
             <div class="mic-meter" id="recorder-mic-meter" hidden>
-                <span class="mic-meter-label">mic</span>
+                <span class="mic-meter-label">input</span>
                 <div class="mic-meter-bar-wrap">
                     <div class="mic-meter-bar">
                         <div class="mic-meter-fill" id="recorder-mic-meter-fill"></div>
@@ -2064,7 +2131,7 @@
                 <span class="mic-meter-note" id="recorder-mic-meter-note"
                       title="Detected pitch — only populated while the detector is firing (silence gate cleared, YIN found a periodic signal)"></span>
                 <span class="mic-meter-cal-status" id="recorder-mic-meter-cal-status" hidden
-                      title="Auto noise-floor calibration. Measures the noise floor over 3 s when a new mic device starts; updates the silence-threshold slider with a value clamped above your noise floor."></span>
+                      title="Auto noise-floor calibration. Measures the noise floor over 3 s when a new input device starts; updates the silence-threshold slider with a value clamped above your noise floor."></span>
             </div>
 
             <p class="tuner-hint" id="recorder-hint">pick a tuning, then click Start recording</p>
@@ -2225,6 +2292,14 @@
                     </div>
                 </div>
 
+                <!-- End-of-session score summary. Populated by
+                     `playbackStop` under tight / casual policies;
+                     cleared when a new session starts. Sits above
+                     the renderer so it lands in the user's eyeline
+                     when a take finishes, rather than being buried
+                     under the transport row. -->
+                <div class="score-summary" id="playback-score-summary" hidden></div>
+
                 <div class="renderer-host" id="playback-renderer-host"></div>
 
                 <!-- Mic-level meter — only visible during wait-mode playback
@@ -2238,7 +2313,7 @@
                 </div>
 
                 <div class="mic-meter" id="playback-mic-meter" hidden>
-                    <span class="mic-meter-label">mic</span>
+                    <span class="mic-meter-label">input</span>
                     <div class="mic-meter-bar-wrap">
                         <div class="mic-meter-bar">
                             <div class="mic-meter-fill" id="playback-mic-meter-fill"></div>
@@ -2252,7 +2327,7 @@
                     <span class="mic-meter-note" id="playback-mic-meter-note"
                           title="Detected pitch — only populated while the detector is firing (silence gate cleared, YIN found a periodic signal)"></span>
                     <span class="mic-meter-cal-status" id="playback-mic-meter-cal-status" hidden
-                          title="Auto noise-floor calibration. Measures the noise floor over 3 s when a new mic device starts; updates the silence-threshold slider with a value clamped above your noise floor."></span>
+                          title="Auto noise-floor calibration. Measures the noise floor over 3 s when a new input device starts; updates the silence-threshold slider with a value clamped above your noise floor."></span>
                 </div>
 
                 <p class="latency-status" id="playback-latency-status"
@@ -2284,7 +2359,7 @@
             </p>
 
             <div class="calibrate-context" id="calibrate-context">
-                <div class="ctx-row"><span class="ctx-label">Mic:</span> <span id="calibrate-mic-name">—</span></div>
+                <div class="ctx-row"><span class="ctx-label">Input:</span> <span id="calibrate-mic-name">—</span></div>
                 <div class="ctx-row"><span class="ctx-label">Silence threshold:</span> <span id="calibrate-silence-rms">—</span></div>
             </div>
 
@@ -2295,27 +2370,57 @@
                 <div class="ctx-row"><span class="ctx-label">Measured at:</span> <span id="calibrate-saved-when">—</span></div>
             </div>
 
-            <!-- Wizard form. Replaces the previous one-button empty
-                 state with a two-question setup picker that branches
-                 to round-trip vs manual entry. -->
+            <!-- Setup picker — two dropdowns describing the user's
+                 input + output. The compatibility matrix below
+                 figures out which calibration methods are possible
+                 and recommends the best one. The method radio
+                 disables incompatible options so users can't pick
+                 one that won't work. -->
             <form class="calibrate-wizard" id="calibrate-wizard">
                 <fieldset class="wizard-q">
-                    <legend>Q1. Where does TWANGA listen for your playing?</legend>
-                    <label><input type="radio" name="calibrate-input" value="mic" checked> Microphone — captures sound acoustically (USB mic, condenser, dynamic mic in front of an amp)</label>
-                    <label><input type="radio" name="calibrate-input" value="line-in"> Direct cable from instrument — USB instrument cable, or instrument cable into an audio interface (no acoustic capture)</label>
-                    <label><input type="radio" name="calibrate-input" value="none"> Nothing connected yet (I'll set manually)</label>
+                    <legend>Your setup</legend>
+                    <div class="wizard-setup-row">
+                        <label for="calibrate-input-select">Input — how does TWANGA hear you?</label>
+                        <select id="calibrate-input-select" class="wizard-setup-select">
+                            <option value="mic" selected>Microphone (captures sound acoustically)</option>
+                            <option value="direct">Direct cable from instrument (USB cable, line-in via interface)</option>
+                            <option value="none">Nothing connected yet</option>
+                        </select>
+                    </div>
+                    <div class="wizard-setup-row">
+                        <label for="calibrate-output-select">Output — how do you hear TWANGA?</label>
+                        <select id="calibrate-output-select" class="wizard-setup-select">
+                            <option value="speakers" selected>Speakers in the same room as the mic</option>
+                            <option value="headphones">Headphones (or speakers far from the mic)</option>
+                            <option value="silent">No audible playback (visual cues only)</option>
+                        </select>
+                    </div>
                 </fieldset>
 
-                <fieldset class="wizard-q" id="calibrate-q2">
-                    <legend>Q2. How do you hear TWANGA's audio (metronome, count-in)?</legend>
-                    <label><input type="radio" name="calibrate-output" value="speakers" checked> Speakers in the same room as the mic</label>
-                    <label><input type="radio" name="calibrate-output" value="headphones"> Headphones (or speakers far from the mic)</label>
-                    <label><input type="radio" name="calibrate-output" value="silent"> No audible playback (visual cues only)</label>
+                <p class="wizard-recommendation" id="calibrate-recommendation"></p>
+
+                <fieldset class="wizard-q">
+                    <legend>Calibration method (recommended pre-selected; override if you want)</legend>
+                    <label data-method-row="pluck-along">
+                        <input type="radio" name="calibrate-method" value="pluck-along" checked>
+                        <strong>Pluck-along</strong> — TWANGA plays a metronome; you pluck a note on each beat.
+                        Includes your reaction time, which is the correct value to subtract for scoring.
+                        <span class="method-blocked" hidden></span>
+                    </label>
+                    <label data-method-row="round-trip">
+                        <input type="radio" name="calibrate-method" value="round-trip">
+                        <strong>Speaker→mic round-trip</strong> — TWANGA plays clicks and captures them via mic.
+                        Measures system delay only (no reaction time).
+                        <span class="method-blocked" hidden></span>
+                    </label>
+                    <label data-method-row="manual">
+                        <input type="radio" name="calibrate-method" value="manual">
+                        <strong>Manual entry</strong> — Type a known value.
+                        <span class="method-blocked" hidden></span>
+                    </label>
                 </fieldset>
 
-                <!-- Manual-entry input revealed when the wizard
-                     selects the manual branch. Hidden under the
-                     round-trip branch since the value is measured. -->
+                <!-- Manual-entry input revealed only when method=manual. -->
                 <div class="wizard-manual" id="calibrate-manual-row" hidden>
                     <label for="calibrate-manual-input">Manual latency (milliseconds, 0–1000):</label>
                     <input type="number" id="calibrate-manual-input" min="0" max="1000" step="1" value="30">
@@ -2331,15 +2436,16 @@
                 <div class="calibrate-status" id="calibrate-status"></div>
 
                 <div class="calibrate-actions">
-                    <button type="button" id="calibrate-run-btn" class="primary-btn">Calibrate</button>
+                    <button type="button" id="calibrate-run-btn" class="primary-btn">Start</button>
                 </div>
             </form>
 
             <p class="calibrate-help" id="calibrate-help">
-                Round-trip path: TWANGA plays 5 short clicks through your speakers and
-                listens for each one via your mic, recording the median click-to-peak
-                offset. Have the mic positioned where you usually play; stay quiet during
-                the measurement.
+                Pluck-along: TWANGA plays 4 pre-roll clicks then 8 metronome clicks. Pluck
+                a single note on each click (any string, any fret). The median offset
+                between scheduled click and detected pluck is your latency — includes both
+                your hardware's input delay and your reaction time, which is the correct
+                value to subtract for scoring.
             </p>
 
             <!-- Mic-check sanity panel. End-to-end pipeline test
@@ -2349,11 +2455,11 @@
                  scoring. Lightweight version of what the Tuner
                  screen does; no string mode, no calibration. -->
             <section class="diagnostic-block" id="calibrate-mic-check-block">
-                <h3 class="diag-title">Mic + pitch-detection check</h3>
+                <h3 class="diag-title">Input + pitch-detection check</h3>
                 <p class="diag-help">
-                    Opens your mic and reports live signal level + detected pitch.
+                    Opens your input and reports live signal level + detected pitch.
                     Play any note — if the level bar moves and a note name appears,
-                    your end-to-end pipeline (mic → silence gate → pitch detector)
+                    your end-to-end pipeline (input → silence gate → pitch detector)
                     is working.
                 </p>
                 <div class="mic-check-readout">
@@ -2362,7 +2468,7 @@
                     <div class="mc-row"><span class="mc-label">Sample rate:</span> <span id="calibrate-mc-sr">—</span></div>
                 </div>
                 <div class="calibrate-actions">
-                    <button type="button" id="calibrate-mc-start-btn" class="primary-btn">Start mic check</button>
+                    <button type="button" id="calibrate-mc-start-btn" class="primary-btn">Start input check</button>
                     <button type="button" id="calibrate-mc-stop-btn" class="primary-btn" hidden>Stop</button>
                 </div>
                 <p class="diag-status" id="calibrate-mc-status"></p>
@@ -2966,10 +3072,15 @@
             // shows / hides as the user picks an inappropriate
             // combination for round-trip.
             el('calibrate-run-btn').addEventListener('click', runCalibrateClick);
-            for (const r of document.querySelectorAll(
-                'input[name="calibrate-input"], input[name="calibrate-output"]'
-            )) {
+            for (const r of document.querySelectorAll('input[name="calibrate-method"]')) {
                 r.addEventListener('change', refreshWizardMode);
+            }
+            // Setup dropdowns: re-evaluate the compatibility matrix
+            // whenever the user changes input or output, which can
+            // both narrow the recommendation and disable previously-
+            // available methods.
+            for (const s of ['calibrate-input-select', 'calibrate-output-select']) {
+                el(s)?.addEventListener('change', refreshWizardMode);
             }
             // Mic + pitch sanity check
             el('calibrate-mc-start-btn').addEventListener('click', startMicCheck);
@@ -3082,7 +3193,7 @@
                     startMic().catch((err) => {
                         console.error('startMic failed', err);
                         el('tuner-hint').textContent = String(err.message || err);
-                        el('mic-btn').textContent = 'Start mic';
+                        el('mic-btn').textContent = 'Start input';
                     });
                 }
             });
@@ -3482,7 +3593,7 @@
         };
 
         async function startMic() {
-            el('tuner-hint').textContent = 'requesting microphone…';
+            el('tuner-hint').textContent = 'requesting input permission…';
             // Lazy-init the meter + device picker on first start. Each
             // factory's `getActiveConsumer` hook hides the meter when
             // a different consumer owns the session, so the same
@@ -3557,7 +3668,7 @@
             // devices to fill in their human-readable labels (browsers
             // hide them until permission is granted).
             tunerState.devicePicker.refresh().catch(() => {});
-            el('mic-btn').textContent = 'Stop mic';
+            el('mic-btn').textContent = 'Stop input';
             el('tuner-hint').textContent = `listening… (${Math.round(sr)} Hz mic)`;
         }
 
@@ -3570,8 +3681,8 @@
             // if WE are still the active consumer so we don't clobber a
             // recorder that's currently using the mic.
             tunerState.micMeter?.stop();
-            el('mic-btn').textContent = 'Start mic';
-            el('tuner-hint').textContent = 'mic stopped';
+            el('mic-btn').textContent = 'Start input';
+            el('tuner-hint').textContent = 'input stopped';
             if (micSession.consumerName === 'tuner') {
                 micSession.stop();
             }
@@ -5972,6 +6083,9 @@
             // session — proximity-score outcomes only consider events
             // collected during the current playback run.
             playbackState.onsetEvents = [];
+            // Clear any previous take's score summary so the panel
+            // doesn't show stale results during the new run.
+            clearPlaybackScoreSummary();
             // Hardware round-trip latency from a prior calibration
             // run, if any. Populated below once the live mic is open
             // and we know its device name (to compare against the
@@ -6282,16 +6396,18 @@
             el('playback-stop-btn').disabled = true;
             // Proximity-score end-of-session summary. Build the schedule
             // from the played range + bpm, hand the captured onset
-            // events to the WASM scorer, replace the standard "stopped"
-            // hint with the headline summary. Per-column outcomes are
-            // dropped for now — surfacing them in the renderer (cell
-            // flash, "replay mistakes" pass) is a BACKLOG item.
+            // events to the WASM scorer, render the prominent
+            // summary panel above the renderer. Per-column outcomes
+            // are dropped for now — surfacing them in the renderer
+            // (cell flash, "replay mistakes" pass) is a BACKLOG
+            // item.
             const isScoring = playbackState.policy === 'tight'
                 || playbackState.policy === 'casual';
             if (isScoring && playbackState.loadedTab) {
                 try {
                     const summary = playbackComputeScoreSummary();
-                    el('playback-hint').textContent = playbackFormatScoreSummary(summary);
+                    renderPlaybackScoreSummary(summary);
+                    el('playback-hint').textContent = hintText ?? 'stopped';
                 } catch (e) {
                     console.warn('score-summary failed', e);
                     el('playback-hint').textContent = hintText ?? 'stopped';
@@ -6344,11 +6460,46 @@
         /// Human-readable one-line summary for the hint surface.
         /// Mirrors the CLI's `print_score_summary` format (key:value
         /// breakdown) collapsed to a single line so it fits in the
-        /// existing hint row.
+        /// existing hint row. Kept around for consumers that want
+        /// the inline string (logs, future toasts).
         function playbackFormatScoreSummary(s) {
             if (!s || s.total === 0) return 'finished — nothing scored (no playable notes in range)';
             const pct = (n) => Math.round(n / s.total * 100);
             return `finished — ${s.hit}/${s.total} hit (${pct(s.hit)}%), ${s.late} late, ${s.missed} missed, ${s.wrong_pitch} wrong pitch`;
+        }
+
+        /// Render the prominent end-of-session score summary panel
+        /// above the renderer. Headline = hit ratio + percentage;
+        /// breakdown line = late / missed / wrong-pitch counts.
+        /// Lands in the user's eyeline when a take finishes (vs.
+        /// the small hint row buried under the transport).
+        function renderPlaybackScoreSummary(s) {
+            const panel = el('playback-score-summary');
+            if (!panel) return;
+            if (!s || s.total === 0) {
+                panel.hidden = false;
+                panel.innerHTML =
+                    '<div class="ss-headline">No notes scored</div>'
+                    + '<div class="ss-breakdown">The played range had no scorable notes.</div>';
+                return;
+            }
+            const pct = (n) => Math.round(n / s.total * 100);
+            panel.hidden = false;
+            panel.innerHTML =
+                `<div class="ss-headline">${s.hit} / ${s.total} hit (${pct(s.hit)}%)</div>`
+                + `<div class="ss-breakdown">`
+                + `<strong>${s.late}</strong> late · `
+                + `<strong>${s.missed}</strong> missed · `
+                + `<strong>${s.wrong_pitch}</strong> wrong pitch`
+                + `</div>`;
+        }
+
+        function clearPlaybackScoreSummary() {
+            const panel = el('playback-score-summary');
+            if (panel) {
+                panel.hidden = true;
+                panel.innerHTML = '';
+            }
         }
 
         function playbackTick() {
@@ -6690,47 +6841,285 @@
             return new Promise((resolve) => setTimeout(resolve, ms));
         }
 
-        /// Decide which calibration method the current wizard answers
-        /// correspond to. Mirrors the CLI's match in `calibrate_wizard`:
-        /// only Q1=mic + Q2=speakers supports round-trip (the only
-        /// case where TWANGA can physically capture its own click).
-        /// Line-in has no acoustic capture path; "nothing connected"
-        /// has no input at all. Both go straight to manual entry.
-        function pickCalibrationMethod() {
-            const input = document.querySelector('input[name="calibrate-input"]:checked')?.value || 'mic';
-            if (input !== 'mic') return 'manual';
-            const output = document.querySelector('input[name="calibrate-output"]:checked')?.value || 'speakers';
-            return output === 'speakers' ? 'round-trip' : 'manual';
+        // Pluck-along constants. Match the CLI's
+        // PLUCK_ALONG_* constants in twanga-cli::calibration so
+        // both surfaces agree on the procedure.
+        const PLUCK_ALONG_BPM = 80;
+        const PLUCK_ALONG_BEATS = 8;
+        const PLUCK_ALONG_PRE_ROLL = 4;
+        const PLUCK_ALONG_MIN_MATCH_RATIO = 0.5;
+
+        /// Pluck-along latency measurement. Plays a metronome
+        /// (pre-roll + measurement beats), captures the mic
+        /// throughout, runs onset detection on the captured samples,
+        /// pairs each scheduled beat with its nearest detected onset
+        /// within ±half-a-beat, takes the median signed offset
+        /// (clamped at 0) as the latency. Works for any input
+        /// (mic, line-in, USB instrument cable) because it captures
+        /// what the user actually plays.
+        async function runPluckAlongMeasurement(deviceId, deviceLabel, onProgress) {
+            const ctx = new (window.AudioContext || window.webkitAudioContext)();
+            let stream = null;
+            const beatMs = Math.round(60_000 / PLUCK_ALONG_BPM);
+            try {
+                stream = await navigator.mediaDevices.getUserMedia({
+                    audio: {
+                        deviceId: deviceId ? { exact: deviceId } : undefined,
+                        echoCancellation: false,
+                        noiseSuppression: false,
+                        autoGainControl: false,
+                    },
+                });
+                calibrateState.stream = stream;
+                const sampleRate = ctx.sampleRate;
+                const click = makeCalibrationClick(sampleRate);
+                const tuner = WebTuner.new_chromatic(Math.round(sampleRate));
+                const silenceRms = playbackState.silenceThreshold?.getRms?.();
+                if (typeof silenceRms === 'number') tuner.set_silence_rms(silenceRms);
+                const windowLatencyMs = tuner.window_latency_ms?.() ?? 0;
+
+                // Mic capture path. ScriptProcessor isn't real-time
+                // safe but is simple + universally available, and
+                // the procedure is short enough that any glitches
+                // average out across 8 beats.
+                const source = ctx.createMediaStreamSource(stream);
+                const proc = ctx.createScriptProcessor(2048, 1, 1);
+                const onsetsMs = [];
+                let captureClockOriginPerf = 0;
+                proc.onaudioprocess = (e) => {
+                    if (captureClockOriginPerf === 0) return; // pre-roll phase
+                    const input = e.inputBuffer.getChannelData(0);
+                    tuner.feed(input);
+                    const readings = tuner.take_readings();
+                    if (readings.length === 0) return;
+                    const nowMs = performance.now() - captureClockOriginPerf;
+                    for (const r of readings) {
+                        if (!r.from_onset_window) continue;
+                        const onsetAt = Math.max(0, Math.round(nowMs - windowLatencyMs));
+                        onsetsMs.push(onsetAt);
+                    }
+                };
+                source.connect(proc);
+                const sink = ctx.createGain();
+                sink.gain.value = 0;
+                proc.connect(sink);
+                sink.connect(ctx.destination);
+
+                // Pre-roll. Plays clicks without recording so the
+                // user can lock onto the tempo. captureClockOriginPerf
+                // stays at 0 → onaudioprocess no-ops these chunks.
+                for (let i = 0; i < PLUCK_ALONG_PRE_ROLL; i++) {
+                    onProgress?.({ kind: 'preroll', i: i + 1, total: PLUCK_ALONG_PRE_ROLL });
+                    const startedAt = performance.now();
+                    await playClickThroughContext(ctx, click);
+                    const elapsed = performance.now() - startedAt;
+                    if (elapsed < beatMs) await sleep(beatMs - elapsed);
+                }
+
+                // Measurement phase begins. Mark "beat 1 starts now"
+                // and let onaudioprocess start recording onsets.
+                captureClockOriginPerf = performance.now();
+                const scheduledBeatsMs = [];
+                for (let beatIdx = 0; beatIdx < PLUCK_ALONG_BEATS; beatIdx++) {
+                    onProgress?.({ kind: 'beat', i: beatIdx + 1, total: PLUCK_ALONG_BEATS });
+                    const beatAt = beatIdx * beatMs;
+                    const nowRel = performance.now() - captureClockOriginPerf;
+                    if (nowRel < beatAt) await sleep(beatAt - nowRel);
+                    scheduledBeatsMs.push(Math.round(performance.now() - captureClockOriginPerf));
+                    await playClickThroughContext(ctx, click);
+                    // Wait the rest of this beat so onaudioprocess
+                    // has time to collect any onsets from this pluck.
+                    const nowAfter = performance.now() - captureClockOriginPerf;
+                    const targetEnd = beatAt + beatMs;
+                    if (nowAfter < targetEnd) await sleep(targetEnd - nowAfter);
+                }
+
+                // Trailing window for the last beat's onset (YIN
+                // buffer may not have completed yet for the final pluck).
+                await sleep(beatMs);
+
+                source.disconnect();
+                proc.disconnect();
+                sink.disconnect();
+
+                // Pair each scheduled beat with nearest unused onset
+                // within ±half-a-beat. Take median signed offset.
+                const halfBeat = Math.floor(beatMs / 2);
+                const used = new Array(onsetsMs.length).fill(false);
+                const offsets = [];
+                for (const beat of scheduledBeatsMs) {
+                    let bestIdx = -1;
+                    let bestDist = Infinity;
+                    for (let i = 0; i < onsetsMs.length; i++) {
+                        if (used[i]) continue;
+                        const signed = onsetsMs[i] - beat;
+                        const dist = Math.abs(signed);
+                        if (dist > halfBeat) continue;
+                        if (dist < bestDist) {
+                            bestDist = dist;
+                            bestIdx = i;
+                        }
+                    }
+                    if (bestIdx !== -1) {
+                        used[bestIdx] = true;
+                        offsets.push(onsetsMs[bestIdx] - beat);
+                    }
+                }
+
+                try { tuner.free?.(); } catch {}
+
+                const matched = offsets.length;
+                const total = scheduledBeatsMs.length;
+                const minMatches = Math.ceil(total * PLUCK_ALONG_MIN_MATCH_RATIO);
+                if (matched < minMatches) {
+                    throw new Error(
+                        `Only ${matched} of ${total} beats had a detected pluck — `
+                        + `try again with louder, more deliberate plucks, `
+                        + `or check your input level (silence threshold may be too high).`
+                    );
+                }
+                offsets.sort((a, b) => a - b);
+                const median = offsets[Math.floor(offsets.length / 2)];
+                const latencyMs = Math.max(0, median);
+                return {
+                    deviceName: deviceLabel,
+                    latencyMs,
+                    measuredAt: new Date().toISOString(),
+                    method: 'pluck-along',
+                    matched,
+                    total,
+                };
+            } finally {
+                if (calibrateState.stream) {
+                    for (const t of calibrateState.stream.getTracks()) t.stop();
+                    calibrateState.stream = null;
+                }
+                try { await ctx.close(); } catch {}
+            }
         }
 
-        /// Toggle the wizard UI to reflect which method the current
-        /// radio selection picks: round-trip hides the manual input
-        /// and shows the round-trip help text; manual reveals the
-        /// number input and updates the button label + help text to
-        /// match. Q2 is hidden when Q1 isn't "Microphone" since
-        /// there's nothing for it to influence in those branches.
+        /// Currently-selected method from the wizard radio group.
+        /// Defaults to 'pluck-along' (the recommended catch-all
+        /// approach). Mirrors the CLI's three-method enum.
+        function pickCalibrationMethod() {
+            return document.querySelector('input[name="calibrate-method"]:checked')?.value
+                || 'pluck-along';
+        }
+
+        /// Compatibility matrix: given user-declared input + output
+        /// kinds, decide which calibration methods are physically
+        /// possible and which one to recommend. Mirrors the same
+        /// logic in the CLI's `recommend_method` so the surfaces
+        /// dispatch identically.
+        ///
+        /// Returns `{ recommended, methods: { <name>: { ok, reason? } } }`.
+        function evaluateSetup(input, output) {
+            const hasInput = input !== 'none';
+            const hasOutput = output !== 'silent';
+            const isMic = input === 'mic';
+            const isSpeakers = output === 'speakers';
+
+            const methods = {
+                'pluck-along': hasInput && hasOutput
+                    ? { ok: true }
+                    : { ok: false, reason:
+                        !hasInput ? 'needs a working input'
+                        : 'needs audible output (metronome to play along to)' },
+                'round-trip': isMic && isSpeakers
+                    ? { ok: true }
+                    : { ok: false, reason:
+                        !isMic && !isSpeakers ? 'needs microphone + speakers (no direct-cable / headphones loop)'
+                        : !isMic ? 'needs a microphone (no acoustic capture via direct cable)'
+                        : 'needs speakers in the same room as the mic' },
+                'manual': { ok: true },
+            };
+
+            // Recommendation: pluck-along if available (most accurate
+            // + applies to most users); otherwise manual.
+            const recommended = methods['pluck-along'].ok ? 'pluck-along' : 'manual';
+            return { recommended, methods };
+        }
+
+        /// Toggle the wizard UI to reflect the current dropdown
+        /// selection + chosen method. Recomputes the recommendation,
+        /// disables blocked method radios, updates the recommendation
+        /// banner, and re-renders the help text + button label for
+        /// the selected method. If the currently-selected method is
+        /// blocked by the new setup, auto-snap to the recommended
+        /// one so the user can't run an impossible calibration.
         function refreshWizardMode() {
+            const input = el('calibrate-input-select')?.value || 'mic';
+            const output = el('calibrate-output-select')?.value || 'speakers';
+            const setup = evaluateSetup(input, output);
+
+            // Disable blocked method radios + annotate with reason.
+            for (const [name, status] of Object.entries(setup.methods)) {
+                const row = document.querySelector(`label[data-method-row="${name}"]`);
+                if (!row) continue;
+                const input_ = row.querySelector('input[type="radio"]');
+                const reasonSpan = row.querySelector('.method-blocked');
+                if (status.ok) {
+                    row.classList.remove('blocked');
+                    input_.disabled = false;
+                    reasonSpan.hidden = true;
+                    reasonSpan.textContent = '';
+                } else {
+                    row.classList.add('blocked');
+                    input_.disabled = true;
+                    reasonSpan.hidden = false;
+                    reasonSpan.textContent = `Not available: ${status.reason}.`;
+                }
+            }
+
+            // If the currently-checked method is now disabled, snap
+            // to the recommended one.
+            const checked = document.querySelector('input[name="calibrate-method"]:checked');
+            if (!checked || checked.disabled) {
+                const recommendedRadio = document.querySelector(
+                    `input[name="calibrate-method"][value="${setup.recommended}"]`,
+                );
+                if (recommendedRadio) recommendedRadio.checked = true;
+            }
+
+            // Recommendation banner.
+            const rec = el('calibrate-recommendation');
+            if (rec) {
+                const why = setup.recommended === 'pluck-along'
+                    ? 'works for your setup and includes reaction time (best for scoring)'
+                    : 'no measurement method works with your setup — type a known value';
+                rec.innerHTML = `Recommended: <strong>${setup.recommended}</strong> — ${why}.`;
+            }
+
             const method = pickCalibrationMethod();
             const manualRow = el('calibrate-manual-row');
-            const q2 = el('calibrate-q2');
             const help = el('calibrate-help');
             const btn = el('calibrate-run-btn');
-            const input = document.querySelector('input[name="calibrate-input"]:checked')?.value || 'mic';
-            q2.style.display = input === 'mic' ? '' : 'none';
-            if (method === 'round-trip') {
-                manualRow.hidden = true;
-                btn.textContent = loadLatencyCalibration() ? 'Recalibrate' : 'Calibrate';
-                help.textContent =
-                    "Round-trip: TWANGA plays 5 short clicks through your speakers and listens "
-                    + "for each one via your mic, recording the median click-to-peak offset. "
-                    + "Have the mic positioned where you usually play; stay quiet during the measurement.";
-            } else {
+            const hasSaved = !!loadLatencyCalibration();
+            if (method === 'manual') {
                 manualRow.hidden = false;
-                btn.textContent = 'Save manually';
+                btn.textContent = hasSaved ? 'Save (replaces stored value)' : 'Save manually';
                 help.textContent =
                     "Manual entry: type in the input-pipeline latency you know from your "
                     + "interface's spec, or pick a starting value from the typical-values list. "
-                    + "You can always recalibrate later if you wire up speakers + mic.";
+                    + "You can always recalibrate later.";
+            } else if (method === 'round-trip') {
+                manualRow.hidden = true;
+                btn.textContent = hasSaved ? 'Recalibrate (round-trip)' : 'Start (round-trip)';
+                help.textContent =
+                    "Round-trip: TWANGA plays 5 short clicks through your speakers and listens "
+                    + "for each one via your mic, recording the median click-to-peak offset. "
+                    + "Have the mic positioned where you usually play; stay quiet during the measurement. "
+                    + "Measures system delay only — your reaction time isn't included.";
+            } else {
+                // pluck-along (default)
+                manualRow.hidden = true;
+                btn.textContent = hasSaved ? 'Recalibrate (pluck-along)' : 'Start (pluck-along)';
+                help.textContent =
+                    "Pluck-along: TWANGA plays 4 pre-roll clicks then 8 metronome clicks. Pluck a "
+                    + "single note on each click (any string, any fret). The median offset between "
+                    + "scheduled click and detected pluck is your latency — includes both your "
+                    + "hardware's input delay and your reaction time, which is the correct value "
+                    + "to subtract for scoring.";
             }
         }
 
@@ -6775,6 +7164,10 @@
 
         async function runCalibrateClick() {
             if (calibrateState.running) return;
+            // Stop the mic-check sanity panel if it's running — it
+            // holds the user's mic and would conflict with the
+            // calibration's own getUserMedia call.
+            stopMicCheck();
             const method = pickCalibrationMethod();
             calibrateState.running = true;
             const btn = el('calibrate-run-btn');
@@ -6784,6 +7177,7 @@
             try {
                 const deviceLabel = playbackState.devicePicker?.getSelectedLabel?.()
                     || 'Default (OS-selected)';
+                const deviceId = playbackState.devicePicker?.getSelectedId?.() ?? null;
                 let cal;
                 if (method === 'manual') {
                     const ms = Number.parseInt(el('calibrate-manual-input').value, 10);
@@ -6796,13 +7190,25 @@
                         measuredAt: new Date().toISOString(),
                         method: 'manual',
                     };
-                } else {
-                    const deviceId = playbackState.devicePicker?.getSelectedId?.() ?? null;
+                } else if (method === 'round-trip') {
                     cal = await runCalibrationMeasurement(
                         deviceId,
                         deviceLabel,
                         (i, total) => {
                             status.textContent = `Click ${i}/${total}…`;
+                        },
+                    );
+                } else {
+                    // pluck-along (default)
+                    cal = await runPluckAlongMeasurement(
+                        deviceId,
+                        deviceLabel,
+                        (evt) => {
+                            if (evt.kind === 'preroll') {
+                                status.textContent = `Pre-roll ${evt.i}/${evt.total}…`;
+                            } else if (evt.kind === 'beat') {
+                                status.textContent = `Beat ${evt.i}/${evt.total} — pluck!`;
+                            }
                         },
                     );
                 }
@@ -6811,7 +7217,9 @@
                 status.textContent =
                     method === 'manual'
                         ? `Saved ${cal.latencyMs} ms (manual entry).`
-                        : `Measured ${cal.latencyMs} ms round-trip.`;
+                        : method === 'round-trip'
+                            ? `Measured ${cal.latencyMs} ms (round-trip).`
+                            : `Measured ${cal.latencyMs} ms (pluck-along, ${cal.matched ?? '?'}/${cal.total ?? '?'} beats).`;
                 refreshCalibrateScreen();
                 // Sibling screen — keep its readout in sync without
                 // requiring a manual revisit.
@@ -6906,10 +7314,10 @@
                 startBtn.hidden = true;
                 stopBtn.hidden = false;
                 statusEl.className = 'diag-status success';
-                statusEl.textContent = 'Mic open — play any note to verify pitch detection.';
+                statusEl.textContent = 'Input open — play any note to verify pitch detection.';
             } catch (err) {
                 statusEl.className = 'diag-status error';
-                statusEl.textContent = `Couldn't open mic: ${err.message || err}`;
+                statusEl.textContent = `Couldn't open input: ${err.message || err}`;
                 stopMicCheck();
             }
         }

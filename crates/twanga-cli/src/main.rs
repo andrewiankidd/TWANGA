@@ -297,32 +297,37 @@ enum Command {
         /// pages.
         feature: Option<String>,
     },
-    /// Measure your audio chain's output→input round-trip latency,
-    /// or set it manually for setups (headphones, line-in, no-mic)
-    /// where the acoustic loop isn't available. By default,
-    /// `twanga calibrate` runs an interactive wizard that picks the
-    /// right method based on a couple of setup questions; pass one
-    /// of the flags below to skip the wizard for scripting. Result
-    /// is persisted under the data root and consumed by
-    /// `twanga play`'s proximity-score modes (tight / casual) —
-    /// without calibration those modes systematically score on-time
-    /// plucks as Late.
+    /// Measure your audio chain's input latency. By default,
+    /// `twanga calibrate` runs an interactive wizard that lets you
+    /// pick between three methods: pluck-along (recommended; works
+    /// for any input), speaker→mic round-trip (system-only delay,
+    /// needs mic + speakers), or manual entry. Pass one of the
+    /// flags below to skip the wizard for scripting. Result is
+    /// persisted under the data root and consumed by `twanga play`'s
+    /// proximity-score modes (tight / casual) — without calibration
+    /// those modes systematically score on-time plucks as Late.
     Calibrate {
         /// Print the currently-stored calibration without measuring.
         /// Useful in scripts that just want to read the value back.
-        #[arg(long, conflicts_with_all = ["round_trip", "manual"])]
+        #[arg(long, conflicts_with_all = ["pluck_along", "round_trip", "manual"])]
         show: bool,
-        /// Skip the wizard and run the round-trip measurement
-        /// (plays clicks through your speakers, captures via mic).
-        /// Requires both speakers + mic that can acoustically loop;
-        /// errors out cleanly if no clicks are detected.
+        /// Skip the wizard and run the pluck-along measurement.
+        /// TWANGA plays a metronome; you pluck a single note on
+        /// each click. Median offset = the latency. Works for any
+        /// input (mic, line-in, USB instrument cable).
+        #[arg(long, conflicts_with_all = ["round_trip", "manual"])]
+        pluck_along: bool,
+        /// Skip the wizard and run the speaker→mic round-trip
+        /// measurement. TWANGA plays clicks through your speakers
+        /// and captures them via mic. Measures system delay only
+        /// (no user reaction time). Requires mic + speakers that
+        /// can acoustically loop; errors out if no clicks detected.
         #[arg(long, conflicts_with = "manual")]
         round_trip: bool,
         /// Skip the wizard and save a manually-entered value in
         /// milliseconds. Use when you know your input pipeline
-        /// latency from your interface's spec sheet, or when the
-        /// acoustic round-trip isn't possible (headphones / line-in).
-        /// Range 0..=1000.
+        /// latency from your interface's spec sheet, or when no
+        /// measurement is practical. Range 0..=1000.
         #[arg(long, value_name = "MS")]
         manual: Option<u32>,
     },
@@ -1856,20 +1861,25 @@ fn main() -> Result<()> {
         Command::Docs { feature } => run_docs(feature)?,
         Command::Calibrate {
             show,
+            pluck_along,
             round_trip,
             manual,
-        } => run_calibrate(show, round_trip, manual)?,
+        } => run_calibrate(show, pluck_along, round_trip, manual)?,
     }
     Ok(())
 }
 
 /// `twanga calibrate` — dispatch to the right calibration flow.
-/// `--show` prints the stored value; `--round-trip` skips the
-/// wizard and runs the measurement directly; `--manual <ms>` skips
-/// the wizard and saves a hand-entered value; bare invocation runs
-/// the interactive wizard that picks the right method based on
-/// the user's mic / output setup.
-fn run_calibrate(show: bool, round_trip: bool, manual: Option<u32>) -> Result<()> {
+/// `--show` prints the stored value; `--pluck-along` runs the
+/// recommended measurement; `--round-trip` runs the speaker→mic
+/// measurement; `--manual <ms>` saves a hand-entered value; bare
+/// invocation runs the interactive wizard.
+fn run_calibrate(
+    show: bool,
+    pluck_along: bool,
+    round_trip: bool,
+    manual: Option<u32>,
+) -> Result<()> {
     let Some(root) = twanga_paths::data_root() else {
         return Err(anyhow!(
             "couldn't resolve a data root (no home dir + no portable sentinel)"
@@ -1879,6 +1889,9 @@ fn run_calibrate(show: bool, round_trip: bool, manual: Option<u32>) -> Result<()
 
     if show {
         return calibrate_show(&path);
+    }
+    if pluck_along {
+        return calibrate_pluck_along(&path);
     }
     if round_trip {
         return calibrate_round_trip(&path);
@@ -1906,6 +1919,45 @@ fn calibrate_show(path: &Path) -> Result<()> {
             eprintln!("Run `twanga calibrate` (without --show) to measure.");
         }
     }
+    Ok(())
+}
+
+fn calibrate_pluck_along(path: &Path) -> Result<()> {
+    use calibration::PluckProgress;
+    eprintln!("Pluck-along calibration");
+    eprintln!("───────────────────────");
+    eprintln!(
+        "{} pre-roll clicks at {} BPM to lock onto the tempo, then {} more.",
+        calibration::PLUCK_ALONG_PRE_ROLL,
+        calibration::PLUCK_ALONG_BPM,
+        calibration::PLUCK_ALONG_BEATS
+    );
+    eprintln!("Pluck a single note on each click — any string, any fret.");
+    eprintln!();
+    let mut progress = |evt: PluckProgress<'_>| match evt {
+        PluckProgress::PreRoll { i, total } => {
+            eprint!("\rPre-roll {i}/{total}…   ");
+        }
+        PluckProgress::Beat { i, total } => {
+            eprint!("\rBeat {i}/{total} — pluck!   ");
+        }
+        PluckProgress::Done {
+            matched,
+            total,
+            label,
+        } => {
+            eprintln!("\rMeasured {matched}/{total} beats (via {label})        ");
+        }
+    };
+    let cal = calibration::run_pluck_along_calibration(&mut progress)?;
+    cal.save(path)?;
+    eprintln!("Device:    {}", cal.device_name);
+    eprintln!(
+        "Latency:   {} ms (via {})",
+        cal.latency_ms,
+        cal.method.label()
+    );
+    eprintln!("Saved to:  {}", path.display());
     Ok(())
 }
 
@@ -1944,7 +1996,7 @@ fn calibrate_manual_from_flag(path: &Path, ms: u32) -> Result<()> {
     // is still applied (matches the headphones / no-mic case).
     let device_name = match twanga_audio::InputStream::open() {
         Ok(s) => s.device_name,
-        Err(_) => "(no mic detected)".to_string(),
+        Err(_) => "(no input detected)".to_string(),
     };
     let cal = calibration::manual_calibration(device_name, ms);
     cal.save(path)?;
@@ -1958,124 +2010,188 @@ fn calibrate_manual_from_flag(path: &Path, ms: u32) -> Result<()> {
     Ok(())
 }
 
-/// Interactive wizard. Asks two setup questions then dispatches to
-/// the right measurement method:
-///
-///   Q1=mic + Q2=speakers   → round-trip (acoustic loop works)
-///   anything else           → manual entry (with driver hints)
-///
-/// Aborts if stdin / stderr aren't TTYs — the wizard expects a
-/// human typing answers. Scripts should pass `--round-trip` or
+/// User's declared input/output kind, used by the wizard to pick
+/// the right calibration method via the compatibility matrix.
+#[derive(Copy, Clone, PartialEq, Eq)]
+enum InputKind {
+    Microphone,
+    DirectCable,
+    None,
+}
+#[derive(Copy, Clone, PartialEq, Eq)]
+enum OutputKind {
+    Speakers,
+    Headphones,
+    Silent,
+}
+
+/// Result of evaluating a setup against the calibration methods.
+struct SetupEval {
+    recommended: calibration::CalibrationMethod,
+    pluck_along: MethodAvailability,
+    round_trip: MethodAvailability,
+}
+
+enum MethodAvailability {
+    Ok,
+    Blocked(&'static str),
+}
+
+/// Compatibility matrix: given the user's setup, decide which
+/// calibration methods are physically possible and which one to
+/// recommend. Mirrors the same logic in JS's `evaluateSetup` —
+/// keep them in sync.
+fn evaluate_setup(input: InputKind, output: OutputKind) -> SetupEval {
+    let has_input = input != InputKind::None;
+    let has_output = output != OutputKind::Silent;
+    let is_mic = input == InputKind::Microphone;
+    let is_speakers = output == OutputKind::Speakers;
+
+    let pluck_along = if has_input && has_output {
+        MethodAvailability::Ok
+    } else if !has_input {
+        MethodAvailability::Blocked("needs a working input")
+    } else {
+        MethodAvailability::Blocked("needs audible output (metronome to play along to)")
+    };
+    let round_trip = if is_mic && is_speakers {
+        MethodAvailability::Ok
+    } else if !is_mic && !is_speakers {
+        MethodAvailability::Blocked(
+            "needs microphone + speakers (no direct-cable / headphones loop)",
+        )
+    } else if !is_mic {
+        MethodAvailability::Blocked("needs a microphone (no acoustic capture via direct cable)")
+    } else {
+        MethodAvailability::Blocked("needs speakers in the same room as the mic")
+    };
+
+    let recommended = if matches!(pluck_along, MethodAvailability::Ok) {
+        calibration::CalibrationMethod::PluckAlong
+    } else {
+        calibration::CalibrationMethod::Manual
+    };
+    SetupEval {
+        recommended,
+        pluck_along,
+        round_trip,
+    }
+}
+
+/// Interactive wizard. Asks the user about their input + output
+/// setup, evaluates the compatibility matrix, recommends the best
+/// calibration method, then offers a confirmation menu showing
+/// only compatible options. Aborts if stdin / stderr aren't TTYs.
+/// Scripts should pass `--pluck-along` / `--round-trip` /
 /// `--manual <ms>` explicitly.
 fn calibrate_wizard(path: &Path) -> Result<()> {
     use std::io::IsTerminal;
     if !std::io::stdin().is_terminal() || !std::io::stderr().is_terminal() {
         return Err(anyhow!(
-            "interactive wizard requires a TTY. Use `--round-trip` or `--manual <ms>` for scripts."
+            "interactive wizard requires a TTY. Use `--pluck-along`, `--round-trip` or `--manual <ms>` for scripts."
         ));
     }
 
-    eprintln!("Calibration wizard");
-    eprintln!("──────────────────");
-    eprintln!("Two questions to pick the right measurement for your setup.");
+    eprintln!("Calibration");
+    eprintln!("───────────");
+    eprintln!("Two setup questions — TWANGA will recommend the right method.");
     eprintln!();
 
-    let input = prompt_choice(
-        "Q1. Where does TWANGA listen for your playing?",
+    let input_choice = prompt_choice(
+        "Input — how does TWANGA hear you?",
         &[
-            (
-                "a",
-                "Microphone — captures sound acoustically (USB mic, condenser, dynamic mic in front of an amp)",
-            ),
+            ("a", "Microphone (captures sound acoustically)"),
             (
                 "b",
-                "Direct cable from instrument — USB instrument cable, or instrument cable into an audio interface (no acoustic capture)",
+                "Direct cable from instrument (USB instrument cable, line-in via audio interface)",
             ),
-            ("c", "Nothing connected yet (set manually for now)"),
+            ("c", "Nothing connected yet"),
         ],
     )?;
-
-    // Q2 only matters when the input is a microphone — that's the
-    // only branch where round-trip is physically possible. Line-in
-    // (no acoustic capture) and "nothing connected" (no input) both
-    // skip Q2 and route straight to manual entry.
-    let output = if input == "a" {
-        prompt_choice(
-            "Q2. How do you hear TWANGA's audio (metronome, count-in)?",
-            &[
-                ("a", "Speakers in the same room as the mic"),
-                ("b", "Headphones (or speakers far from the mic)"),
-                ("c", "No audible playback (visual cues only)"),
-            ],
-        )?
-    } else {
-        "skip".to_string()
+    let input = match input_choice.as_str() {
+        "a" => InputKind::Microphone,
+        "b" => InputKind::DirectCable,
+        _ => InputKind::None,
     };
 
-    match (input.as_str(), output.as_str()) {
-        // Only mic + speakers supports round-trip — that's the one
-        // case where TWANGA can physically capture its own click
-        // through the air. Line-in users can't be captured back even
-        // if their speakers work; they need manual entry.
-        ("a", "a") => {
-            eprintln!();
-            // Output verification before the real measurement.
-            // Catches "speakers muted / wrong output device" before
-            // it presents as "no clicks detected" (which gives the
-            // user no clue which side of the loop is broken). Only
-            // runs under the wizard — `--round-trip` skips it for
-            // scriptability.
-            if !prompt_output_test()? {
-                eprintln!();
-                eprintln!("Audio output isn't reaching your speakers. Switching to manual entry.");
-                eprintln!(
-                    "(Tip: run `twanga tune` separately to verify your mic + pitch detection.)"
-                );
-                return calibrate_manual_wizard(path);
-            }
-            eprintln!();
-            eprintln!("Setup detected: acoustic round-trip available. Running measurement.");
-            calibrate_round_trip(path)
-        }
-        // Everything else: manual entry with a driver-default hint.
-        _ => {
-            eprintln!();
-            eprintln!("Setup detected: acoustic round-trip not available. Setting manually.");
-            eprintln!("(Tip: run `twanga tune` separately to verify your mic + pitch detection.)");
-            calibrate_manual_wizard(path)
-        }
-    }
-}
+    let output_choice = prompt_choice(
+        "Output — how do you hear TWANGA?",
+        &[
+            ("a", "Speakers in the same room as the mic"),
+            ("b", "Headphones (or speakers far from the mic)"),
+            ("c", "No audible playback (visual cues only)"),
+        ],
+    )?;
+    let output = match output_choice.as_str() {
+        "a" => OutputKind::Speakers,
+        "b" => OutputKind::Headphones,
+        _ => OutputKind::Silent,
+    };
 
-/// Play a single test click + ask whether the user heard it.
-/// Returns `Ok(true)` on yes (proceed with round-trip), `Ok(false)`
-/// on no (the wizard reroutes to manual). Wizard-only — the
-/// `--round-trip` flag skips this and goes straight to measurement.
-fn prompt_output_test() -> Result<bool> {
-    use std::io::{BufRead, Write};
+    let setup = evaluate_setup(input, output);
     eprintln!();
-    eprintln!("Playing one test click — confirm you can hear it.");
-    let mut output = twanga_audio::OutputStream::open()?;
-    let click = metronome_click(output.sample_rate);
-    output.write(&click);
-    std::thread::sleep(std::time::Duration::from_millis(300));
-    let stderr = std::io::stderr();
-    let stdin = std::io::stdin();
-    let mut stderr_lock = stderr.lock();
-    let mut stdin_lock = stdin.lock();
-    let mut line = String::new();
-    for _ in 0..5 {
-        write!(stderr_lock, "Did you hear the click? [y/n]: ")?;
-        stderr_lock.flush()?;
-        line.clear();
-        stdin_lock.read_line(&mut line)?;
-        match line.trim().to_lowercase().as_str() {
-            "y" | "yes" => return Ok(true),
-            "n" | "no" => return Ok(false),
-            _ => writeln!(stderr_lock, "invalid response — y or n")?,
+    eprintln!("Recommended for your setup: {}", setup.recommended.label());
+    let why = match setup.recommended {
+        calibration::CalibrationMethod::PluckAlong => {
+            "works for your setup and includes reaction time (best for scoring)"
         }
+        calibration::CalibrationMethod::Manual => {
+            "no measurement method works with your setup — type a known value"
+        }
+        calibration::CalibrationMethod::RoundTrip => {
+            "system-delay-only measurement (no reaction time)"
+        }
+    };
+    eprintln!("  Why: {why}");
+
+    // Build the compatible-method menu. Recommended option is
+    // highlighted; blocked options surface their reason so the
+    // user knows what they'd need to enable.
+    let mut menu: Vec<(&str, String)> = Vec::new();
+    if matches!(setup.pluck_along, MethodAvailability::Ok) {
+        let suffix = if matches!(
+            setup.recommended,
+            calibration::CalibrationMethod::PluckAlong
+        ) {
+            " (recommended)"
+        } else {
+            ""
+        };
+        menu.push((
+            "p",
+            format!("Pluck-along — pluck a note on each metronome click{suffix}"),
+        ));
+    } else if let MethodAvailability::Blocked(reason) = setup.pluck_along {
+        eprintln!("  Pluck-along: not available ({reason})");
     }
-    Err(anyhow!("too many invalid responses"))
+    if matches!(setup.round_trip, MethodAvailability::Ok) {
+        menu.push((
+            "r",
+            "Speaker→mic round-trip — TWANGA plays + listens (system-only delay)".to_string(),
+        ));
+    } else if let MethodAvailability::Blocked(reason) = setup.round_trip {
+        eprintln!("  Round-trip: not available ({reason})");
+    }
+    let manual_suffix = if matches!(setup.recommended, calibration::CalibrationMethod::Manual) {
+        " (recommended — only option for your setup)"
+    } else {
+        ""
+    };
+    menu.push((
+        "m",
+        format!("Manual entry — type a known value{manual_suffix}"),
+    ));
+
+    eprintln!();
+    let menu_borrowed: Vec<(&str, &str)> = menu.iter().map(|(k, v)| (*k, v.as_str())).collect();
+    let pick = prompt_choice("Pick a method", &menu_borrowed)?;
+
+    eprintln!();
+    match pick.as_str() {
+        "p" => calibrate_pluck_along(path),
+        "r" => calibrate_round_trip(path),
+        _ => calibrate_manual_wizard(path),
+    }
 }
 
 /// Interactive manual-entry sub-flow. Shows typical-value

@@ -259,7 +259,7 @@ A handful of footguns that aren't bugs in TWANGA but feel like ones:
   decay fast, so the average across the window can fall below the
   gate even when the meter shows a tall spike on attack. If quiet
   plucks aren't registering, drop the threshold: GUI has a slider
-  on the mic meter (drag the vertical-line thumb left); CLI has
+  on the input meter (drag the vertical-line thumb left); CLI has
   `--silence-rms 0.002` (-54 dB) at startup or `[` + Enter at
   runtime to step down by ~6 dB per press.
 
