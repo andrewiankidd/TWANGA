@@ -85,6 +85,14 @@ struct PluckEvent {
 struct Scenario {
     events: Vec<PluckEvent>,
     total_ms: u32,
+    /// Optional background-noise amplitude in [0.0, 1.0]. Mixes a
+    /// deterministic pseudo-random hiss across the whole buffer.
+    noise_amp: f32,
+    /// Optional 60 Hz hum amplitude in [0.0, 1.0]. Mixes a steady
+    /// mains-hum sine across the whole buffer — useful for testing
+    /// that the silence calibration + onset detector don't get
+    /// confused by a quiet but persistent background tone.
+    hum_amp: f32,
 }
 
 impl Scenario {
@@ -92,7 +100,26 @@ impl Scenario {
         Self {
             events: Vec::new(),
             total_ms,
+            noise_amp: 0.0,
+            hum_amp: 0.0,
         }
+    }
+
+    /// Overlay a uniformly-distributed pseudo-random noise floor at
+    /// the given amplitude. 0.005 ≈ a quiet room with passive
+    /// amplification; 0.02 ≈ a noisier USB-cable input chain.
+    fn with_noise(mut self, amp: f32) -> Self {
+        self.noise_amp = amp;
+        self
+    }
+
+    /// Overlay a 60 Hz mains-hum sine at the given amplitude.
+    /// 0.01–0.02 is a typical real-world hum from poorly-shielded
+    /// gear; loud enough to register on naive level thresholding
+    /// but well below pluck peaks.
+    fn with_hum(mut self, amp: f32) -> Self {
+        self.hum_amp = amp;
+        self
     }
 
     fn pluck(mut self, start_ms: u32, duration_ms: u32, freq_hz: f32) -> Self {
@@ -141,6 +168,24 @@ impl Scenario {
                 out[idx] += env * (2.0 * PI * ev.freq_hz * idx as f32 / SR as f32).sin();
             }
         }
+        // Optional steady 60 Hz mains hum.
+        if self.hum_amp > 0.0 {
+            for (i, s) in out.iter_mut().enumerate() {
+                *s += self.hum_amp * (2.0 * PI * 60.0 * i as f32 / SR as f32).sin();
+            }
+        }
+        // Optional pseudo-random noise floor. Linear-congruential
+        // generator keeps the noise deterministic across test runs
+        // (so assertions don't flicker on the boundary of the
+        // silence-calibration threshold).
+        if self.noise_amp > 0.0 {
+            let mut state: u32 = 0x_C0FF_EE42;
+            for s in out.iter_mut() {
+                state = state.wrapping_mul(1_103_515_245).wrapping_add(12345);
+                let n = ((state >> 16) as f32 / 32_768.0) - 1.0; // [-1, 1)
+                *s += self.noise_amp * n;
+            }
+        }
         // Clamp to [-1.0, 1.0] — overlapping events on the same
         // timestamp can sum past unity. The wav reader / Tuner
         // tolerate values outside that range but clamping keeps
@@ -163,11 +208,30 @@ impl Scenario {
 /// empty for a rest). Sized to match the scenario the WAV
 /// represents.
 fn make_alphatex(tempo: u32, hits_per_col: &[Vec<(u8, u8)>]) -> String {
+    make_alphatex_tuned(
+        tempo,
+        "Standard Guitar (EADGBE)",
+        "E4 B3 G3 D3 A2 E2",
+        hits_per_col,
+    )
+}
+
+/// Variant of [`make_alphatex`] that accepts an arbitrary subtitle
+/// and tuning spec (high-string-first, alphaTex order). Use this
+/// for non-guitar scenarios: banjo 5-string with reentrant tuning,
+/// bass, etc. The subtitle just shows in the rendered tab; the
+/// tuning line is what the playback engine and scorer consume.
+fn make_alphatex_tuned(
+    tempo: u32,
+    subtitle: &str,
+    tuning_spec: &str,
+    hits_per_col: &[Vec<(u8, u8)>],
+) -> String {
     let mut out = String::new();
     out.push_str("\\title \"Test\"\n");
-    out.push_str("\\subtitle \"Standard Guitar (EADGBE)\"\n");
+    out.push_str(&format!("\\subtitle \"{subtitle}\"\n"));
     out.push_str(&format!("\\tempo {tempo}\n"));
-    out.push_str("\\tuning E4 B3 G3 D3 A2 E2\n\n.\n");
+    out.push_str(&format!("\\tuning {tuning_spec}\n\n.\n"));
     out.push_str(":4 ");
     for hits in hits_per_col {
         if hits.is_empty() {
@@ -1068,6 +1132,343 @@ fn long_passage_eight_notes_mixed_timings() {
     assert!(
         hit + late >= 5,
         "long passage should pair the majority, got hit={hit} late={late} missed={missed} wrong={wrong}"
+    );
+}
+
+// ───────────────────── Reentrant tunings (banjo 5-string) ─────────────────────
+
+#[test]
+fn banjo_5_string_reentrant_tuning_pairs_high_5th_string() {
+    let _guard = serial_lock();
+    // 5-string banjo standard open-G tuning: g4 D3 G3 B3 D4 in
+    // alphaTex's high-string-first order. String 1 = D4 (highest
+    // finger-able), string 5 = g4 (reentrant — physically the
+    // shortest, pitch HIGHER than string 1). Tab plays the open
+    // 5th string (g4 → MIDI 67) then the open 1st string (D4 →
+    // MIDI 62). Verifies the playback pipeline + scorer respect
+    // the high-pitch reentrant string rather than assuming
+    // strings are monotonically decreasing in pitch.
+    let dir = scratch("banjo-reentrant");
+    let tab = dir.join("tab.alphatex");
+    let wav = dir.join("banjo.wav");
+    fs::write(
+        &tab,
+        make_alphatex_tuned(
+            120,
+            "5-string banjo, open G (gDGBD)",
+            "D4 B3 G3 D3 G4",
+            &[vec![(5, 0)], vec![(1, 0)], vec![(5, 0)], vec![(1, 0)]],
+        ),
+    )
+    .expect("tab");
+    Scenario::new(2400)
+        .pluck(0, 400, midi_hz(67)) // g4 reentrant 5th
+        .pluck(500, 400, midi_hz(62)) // D4 1st string
+        .pluck(1000, 400, midi_hz(67))
+        .pluck(1500, 400, midi_hz(62))
+        .write_to(&wav);
+    let (ok, out) = run_play(&tab, &wav, "casual");
+    assert!(ok, "{out}");
+    let (hit, late, _missed, wrong, total) = parse_summary(&out);
+    assert_eq!(total, 4);
+    assert!(
+        hit + late >= 3,
+        "reentrant tuning should pair most columns, got hit={hit} late={late} wrong={wrong}"
+    );
+    assert_eq!(
+        wrong, 0,
+        "playing the correct pitch for each string should never WrongPitch under a reentrant tuning"
+    );
+}
+
+#[test]
+fn banjo_wrong_string_same_fret_classifies_as_wrong_pitch() {
+    let _guard = serial_lock();
+    // Tab expects open string 5 (g4 reentrant, MIDI 67). User
+    // instead plays open string 4 (D3, MIDI 50) — same fret (0),
+    // very different pitch. A bug in the scorer that ignored
+    // reentrancy and just matched on (string, fret) shape would
+    // miss this. The score should classify as WrongPitch.
+    let dir = scratch("banjo-wrong");
+    let tab = dir.join("tab.alphatex");
+    let wav = dir.join("banjo.wav");
+    fs::write(
+        &tab,
+        make_alphatex_tuned(
+            120,
+            "5-string banjo, open G (gDGBD)",
+            "D4 B3 G3 D3 G4",
+            &[vec![(5, 0)], vec![(5, 0)]],
+        ),
+    )
+    .expect("tab");
+    Scenario::new(1500)
+        .pluck(0, 400, midi_hz(50)) // D3 — wrong octave, would pass if scorer ignored pitch
+        .pluck(500, 400, midi_hz(50))
+        .write_to(&wav);
+    let (ok, out) = run_play(&tab, &wav, "casual");
+    assert!(ok, "{out}");
+    let (hit, _late, _missed, wrong, total) = parse_summary(&out);
+    assert_eq!(total, 2);
+    assert!(
+        wrong >= 1,
+        "playing D3 when g4 is expected should classify as WrongPitch, got hit={hit} wrong={wrong}"
+    );
+}
+
+// ───────────────────── Pitch range edges ─────────────────────
+
+#[test]
+fn high_pitch_e5_pairs_under_casual() {
+    let _guard = serial_lock();
+    // High E5 (MIDI 76) — guitar's high E open string + octave
+    // shift, or 12th-fret high E. Tab uses the high E (string 1
+    // fret 12 → E5). Pins that YIN still locks on high pitches;
+    // it's known to be less stable above ~2 kHz but E5 is ~659 Hz
+    // and should be solid.
+    let dir = scratch("high-e5");
+    let tab = dir.join("tab.alphatex");
+    let wav = dir.join("high.wav");
+    fs::write(
+        &tab,
+        make_alphatex(120, &[vec![(1, 12)], vec![(1, 12)], vec![(1, 12)]]),
+    )
+    .expect("tab");
+    Scenario::new(2000)
+        .pluck(0, 400, midi_hz(76))
+        .pluck(500, 400, midi_hz(76))
+        .pluck(1000, 400, midi_hz(76))
+        .write_to(&wav);
+    let (ok, out) = run_play(&tab, &wav, "casual");
+    assert!(ok, "{out}");
+    let (hit, late, _missed, wrong, total) = parse_summary(&out);
+    assert_eq!(total, 3);
+    assert!(
+        hit + late >= 2,
+        "E5 should pair under casual, got hit={hit} late={late} wrong={wrong}"
+    );
+}
+
+#[test]
+fn low_pitch_bass_e1_pairs_under_casual() {
+    let _guard = serial_lock();
+    // Bass guitar low E (E1, MIDI 28 = ~41 Hz). YIN's lower bound
+    // is set by the analysis window length: at 48 kHz with 8192
+    // samples, the longest period it can find is ~5.8 ms ≈ 170
+    // Hz floor before the autocorrelation peak walks off the
+    // window. 41 Hz is well below that, so YIN is expected to
+    // mis-lock here. This test pins current behaviour at the
+    // bottom of the supported range; if a low-pitch fix lands
+    // later, the assertion can tighten.
+    let dir = scratch("bass-e1");
+    let tab = dir.join("tab.alphatex");
+    let wav = dir.join("bass.wav");
+    fs::write(
+        &tab,
+        make_alphatex_tuned(
+            120,
+            "4-string bass (EADG)",
+            "G2 D2 A1 E1",
+            &[vec![(4, 0)], vec![(4, 0)], vec![(4, 0)]],
+        ),
+    )
+    .expect("tab");
+    Scenario::new(2000)
+        .pluck(0, 800, midi_hz(28))
+        .pluck(500, 800, midi_hz(28))
+        .pluck(1000, 800, midi_hz(28))
+        .write_to(&wav);
+    let (ok, out) = run_play(&tab, &wav, "casual");
+    assert!(ok, "{out}");
+    let (hit, late, missed, wrong, total) = parse_summary(&out);
+    assert_eq!(total, 3);
+    assert_eq!(
+        hit + late + missed + wrong,
+        total,
+        "all columns accounted for at sub-YIN-floor pitch: hit={hit} late={late} missed={missed} wrong={wrong}"
+    );
+}
+
+#[test]
+fn mid_range_a3_pitch_pairs_cleanly() {
+    let _guard = serial_lock();
+    // A3 (MIDI 57 = 220 Hz) — guitar string 3 fret 2, or
+    // string 5 fret 12. Mid-range, sweet spot for YIN. Pin that
+    // a non-low-E pitch on a different string slot also works.
+    let dir = scratch("mid-a3");
+    let tab = dir.join("tab.alphatex");
+    let wav = dir.join("mid.wav");
+    fs::write(
+        &tab,
+        make_alphatex(120, &[vec![(3, 2)], vec![(3, 2)], vec![(3, 2)]]),
+    )
+    .expect("tab");
+    Scenario::new(2000)
+        .pluck(0, 400, midi_hz(57))
+        .pluck(500, 400, midi_hz(57))
+        .pluck(1000, 400, midi_hz(57))
+        .write_to(&wav);
+    let (ok, out) = run_play(&tab, &wav, "casual");
+    assert!(ok, "{out}");
+    let (hit, late, _, wrong, total) = parse_summary(&out);
+    assert_eq!(total, 3);
+    assert!(
+        hit + late >= 2,
+        "mid-range A3 should pair, got hit={hit} late={late} wrong={wrong}"
+    );
+}
+
+// ───────────────────── Noisy input robustness ─────────────────────
+
+#[test]
+fn quiet_noise_floor_does_not_swamp_plucks() {
+    let _guard = serial_lock();
+    // Hiss at 0.005 amplitude — well below typical pluck peak
+    // (~0.4 in our synthesiser). Onset detector should still
+    // fire on each fresh attack; YIN should still lock on each
+    // pluck. Calibration runs once at session start; the noise
+    // floor sets the silence threshold above its peak.
+    let dir = scratch("noise-quiet");
+    let tab = dir.join("tab.alphatex");
+    let wav = dir.join("noisy.wav");
+    fs::write(
+        &tab,
+        make_alphatex(120, &[vec![(6, 0)], vec![(6, 0)], vec![(6, 0)]]),
+    )
+    .expect("tab");
+    Scenario::new(2000)
+        .with_noise(0.005)
+        .pluck(0, 400, midi_hz(40))
+        .pluck(500, 400, midi_hz(40))
+        .pluck(1000, 400, midi_hz(40))
+        .write_to(&wav);
+    let (ok, out) = run_play(&tab, &wav, "casual");
+    assert!(ok, "{out}");
+    let (hit, late, _missed, _wrong, total) = parse_summary(&out);
+    assert_eq!(total, 3);
+    assert!(
+        hit + late >= 2,
+        "quiet noise floor should not prevent pairing, got hit={hit} late={late}"
+    );
+}
+
+#[test]
+fn mains_hum_does_not_prevent_pairing() {
+    let _guard = serial_lock();
+    // 60 Hz hum at 0.015 amplitude — quietly persistent, like a
+    // poorly-grounded amp. Hum is a pitched signal too, but the
+    // calibration step pegs the silence threshold above it so
+    // onsets only fire on the louder pluck attacks. The hum
+    // sometimes confuses YIN on quieter notes (locks on 60 Hz);
+    // assertion is loose enough to tolerate that.
+    let dir = scratch("noise-hum");
+    let tab = dir.join("tab.alphatex");
+    let wav = dir.join("hum.wav");
+    fs::write(
+        &tab,
+        make_alphatex(120, &[vec![(6, 0)], vec![(6, 0)], vec![(6, 0)]]),
+    )
+    .expect("tab");
+    Scenario::new(2000)
+        .with_hum(0.015)
+        .pluck(0, 400, midi_hz(40))
+        .pluck(500, 400, midi_hz(40))
+        .pluck(1000, 400, midi_hz(40))
+        .write_to(&wav);
+    let (ok, out) = run_play(&tab, &wav, "casual");
+    assert!(ok, "{out}");
+    let (hit, late, missed, wrong, total) = parse_summary(&out);
+    assert_eq!(total, 3);
+    assert_eq!(
+        hit + late + missed + wrong,
+        total,
+        "all columns accounted for with hum: hit={hit} late={late} missed={missed} wrong={wrong}"
+    );
+}
+
+#[test]
+fn combined_hum_and_hiss_still_scores_majority() {
+    let _guard = serial_lock();
+    // Both noise sources together at realistic levels. Worst-case
+    // "noisy room with cheap cable" input. The pluck peaks are
+    // still 10×+ louder than the combined background; onsets
+    // should fire and YIN should mostly lock.
+    let dir = scratch("noise-combo");
+    let tab = dir.join("tab.alphatex");
+    let wav = dir.join("combo.wav");
+    fs::write(
+        &tab,
+        make_alphatex(
+            120,
+            &[vec![(6, 0)], vec![(6, 0)], vec![(6, 0)], vec![(6, 0)]],
+        ),
+    )
+    .expect("tab");
+    Scenario::new(2400)
+        .with_noise(0.008)
+        .with_hum(0.012)
+        .pluck(0, 400, midi_hz(40))
+        .pluck(500, 400, midi_hz(40))
+        .pluck(1000, 400, midi_hz(40))
+        .pluck(1500, 400, midi_hz(40))
+        .write_to(&wav);
+    let (ok, out) = run_play(&tab, &wav, "casual");
+    assert!(ok, "{out}");
+    let (hit, late, missed, wrong, total) = parse_summary(&out);
+    assert_eq!(total, 4);
+    assert_eq!(hit + late + missed + wrong, total);
+}
+
+// ───────────────────── Wait-mode pitch behaviour ─────────────────────
+
+#[test]
+fn wait_mode_holds_until_correct_pitch_arrives() {
+    let _guard = serial_lock();
+    // Wait mode shouldn't advance the cursor until a matching
+    // pitch arrives. Setup: 2-column tab, both expect open low E.
+    // WAV starts with 800 ms of silence (cursor must hold), then
+    // plucks E2 twice with normal spacing. Both plucks happen
+    // after the second column's nominal expected time would have
+    // passed under proximity-score — but wait mode is cursor-
+    // driven, so the second pluck advances col 2 cleanly.
+    let dir = scratch("wait-hold");
+    let tab = dir.join("tab.alphatex");
+    let wav = dir.join("hold.wav");
+    fs::write(&tab, make_alphatex(120, &[vec![(6, 0)], vec![(6, 0)]])).expect("tab");
+    Scenario::new(3000)
+        // 800 ms of silence — wait mode must hang on col 1.
+        .pluck(800, 400, midi_hz(40))
+        .pluck(1500, 400, midi_hz(40))
+        .write_to(&wav);
+    let (ok, _out) = run_play(&tab, &wav, "wait");
+    assert!(
+        ok,
+        "wait mode should eventually complete when correct pitches arrive"
+    );
+}
+
+#[test]
+fn wait_mode_ignores_wrong_pitch_then_advances_on_correct() {
+    let _guard = serial_lock();
+    // Wait mode treats wrong-pitch onsets as "keep waiting." User
+    // plays A2 (wrong) twice, then E2 (correct). The cursor must
+    // ignore the A2s and advance only on the E2. Same shape for
+    // column 2.
+    let dir = scratch("wait-ignore");
+    let tab = dir.join("tab.alphatex");
+    let wav = dir.join("ignore.wav");
+    fs::write(&tab, make_alphatex(120, &[vec![(6, 0)], vec![(6, 0)]])).expect("tab");
+    Scenario::new(4000)
+        .pluck(0, 300, midi_hz(45)) // wrong (A2)
+        .pluck(400, 300, midi_hz(45)) // wrong (A2)
+        .pluck(900, 400, midi_hz(40)) // correct (E2) — advances col 1
+        .pluck(1500, 300, midi_hz(45)) // wrong on col 2
+        .pluck(2000, 400, midi_hz(40)) // correct on col 2
+        .write_to(&wav);
+    let (ok, _out) = run_play(&tab, &wav, "wait");
+    assert!(
+        ok,
+        "wait mode should complete by ignoring wrong-pitch onsets"
     );
 }
 

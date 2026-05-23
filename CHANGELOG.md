@@ -10,6 +10,24 @@ dated section.
 
 ### Added
 
+- **10 more `--from-file` scenarios: reentrant banjo, pitch-range
+  edges, noisy input, wait-mode pitch behaviour.** Extends the
+  WAV-replay suite (now 33 tests) into surfaces the original set
+  didn't touch: 5-string banjo's reentrant high-G drone string
+  (open G4 on string 5 paired correctly under casual; wrong-pitch
+  D3 on string 5 classified as WrongPitch — guards against a
+  scorer that ignored pitch and only matched on (string, fret)
+  shape); pitch-range edges (E5 / A3 mid-range / bass E1 below
+  YIN's 8192-sample-window floor of ~170 Hz, the last pinned as
+  "all columns accounted for" rather than asserting hits); noisy
+  input (quiet hiss at 0.005, 60 Hz mains hum at 0.015, combined
+  hum+hiss at realistic levels); wait-mode pitch behaviour (cursor
+  holds through 800 ms of silence then advances on the first
+  correct pluck; wrong-pitch onsets get ignored and the cursor
+  advances on the next correct pitch). The `Scenario` builder
+  gained `.with_noise(amp)` and `.with_hum(amp)` overlays; a new
+  `make_alphatex_tuned` helper takes an explicit tuning spec for
+  non-guitar instruments.
 - **`twanga play --from-file <wav>` + 23-scenario integration suite.**
   Playback now swaps the live mic for a paced WAV-file replay when
   `--from-file` is set, making the whole pipeline (sample read →
