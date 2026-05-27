@@ -36,6 +36,21 @@ strings = [
 ]
 
 [[tuning]]
+slug = "double-c-banjo"
+name = "Double C 5-String Banjo (gCGCD)"
+# The other mainstream clawhammer tuning besides open G — favoured for
+# modal / minor-key tunes. Same high-G drone on string 5 (fret_offset 5
+# for the same reason as standard-banjo). String order is 1→5: D4 C4 G3
+# C3, then the g4 drone.
+strings = [
+    { name = "D4", midi = 62 },
+    { name = "C4", midi = 60 },
+    { name = "G3", midi = 55 },
+    { name = "C3", midi = 48 },
+    { name = "g4 (drone)", midi = 67, fret_offset = 5 },
+]
+
+[[tuning]]
 slug = "standard-ukulele"
 name = "Standard Ukulele (Reentrant GCEA)"
 strings = [

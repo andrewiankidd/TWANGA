@@ -8,7 +8,7 @@ Public surface worth knowing:
 
 **Tuning registry.** Built-in presets live in [`src/presets.toml`](src/presets.toml) and are also the schema the CLI uses for user-defined tunings at `$CONFIG/twanga/tunings.toml` — same `PresetEntry` / `PresetString` / `PresetFile` types, so promoting a user creation to a built-in is just copying the TOML block.
 
-- `Tuning::builtin_presets()` / `Tuning::builtin_slugs()` — enumerate everything shipped (`standard-guitar`, `standard-banjo`, `standard-ukulele`, `drop-d-guitar`, `tenor-banjo`, `tenor-ukulele`).
+- `Tuning::builtin_presets()` / `Tuning::builtin_slugs()` — enumerate everything shipped (`standard-guitar`, `standard-banjo`, `double-c-banjo`, `standard-ukulele`, `drop-d-guitar`, `tenor-banjo`, `tenor-ukulele`).
 - `Tuning::from_preset(slug)` — build a `Tuning` from a built-in slug (returns `None` for unknowns; user-defined tunings live one layer up in `twanga-cli`).
 - `Tuning::standard_guitar()` / `standard_banjo()` / `standard_ukulele()` — convenience constructors, used by `twanga-dsp` and `twanga-tabs` tests.
 - `PresetEntry::to_tuning()` / `PresetEntry::from_tuning(slug, &tuning)` — round-trip between the on-disk schema and the runtime type.

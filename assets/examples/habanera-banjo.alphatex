@@ -1,0 +1,16 @@
+\title "Habanera (from Carmen)"
+\subtitle "Georges Bizet · Double C 5-String Banjo (gCGCD)"
+\copyright "Georges Bizet, 'Habanera' (L'amour est un oiseau rebelle) from Carmen, 1875 — public domain. Original arrangement under MIT or Apache-2.0."
+\tempo 72
+\tuning D4 C4 G3 C3 G4
+.
+// Double C (gCGCD) — the modal/minor clawhammer tuning. The Habanera
+// signature is its descending chromatic line; in C minor that's
+// C - B - Bb - A - Ab - G (tonic down to the dominant). Played low on
+// strings 2-3 with the open 5th-string g drone ringing above.
+// Phrase 1 — "L'amour est un oiseau rebelle"  C B | Bb A | Ab G | G (land on the dominant)
+:8 0.2 0.5 4.3 0.5 | 3.3 0.5 2.3 0.5 |
+:8 1.3 0.5 0.3 0.5 | 0.3 0.5 0.3 0.5 |
+// Phrase 2 — repeat the descent, resolve G -> C (dominant to tonic)
+:8 0.2 0.5 4.3 0.5 | 3.3 0.5 2.3 0.5 |
+:8 1.3 0.5 0.3 0.5 | 0.3 0.5 0.2 0.5 |

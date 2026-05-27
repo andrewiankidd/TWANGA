@@ -116,6 +116,12 @@
       "tuning": "standard-banjo"
     },
     {
+      "id": "habanera-banjo",
+      "title": "Habanera (from Carmen)",
+      "path": "habanera-banjo.alphatex",
+      "tuning": "double-c-banjo"
+    },
+    {
       "id": "soldiers-joy-tenor-banjo",
       "title": "Soldier's Joy",
       "path": "soldiers-joy-tenor-banjo.alphatex",
