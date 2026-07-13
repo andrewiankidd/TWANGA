@@ -374,10 +374,13 @@ fn parse_inner(reader: &mut Reader<&[u8]>) -> Result<ParseOutput, MusicXmlError>
                 }
             }
             Ok(Event::Text(t)) => {
-                // `unescape` decodes `&amp;` / `&lt;` / etc. into
-                // their literal characters — the right behaviour for
-                // text content like `<work-title>Rock &amp; Roll</work-title>`.
-                if let Ok(s) = t.unescape() {
+                // `xml10_content` decodes the byte content and resolves
+                // `&amp;` / `&lt;` / etc. into their literal characters —
+                // the right behaviour for text content like
+                // `<work-title>Rock &amp; Roll</work-title>`. (quick-xml
+                // 0.41 renamed the old `unescape` to the versioned
+                // `xml10_content` / `xml11_content` accessors.)
+                if let Ok(s) = t.xml10_content() {
                     current_text.push_str(&s);
                 }
             }

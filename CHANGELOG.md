@@ -8,6 +8,21 @@ dated section.
 
 ## [Unreleased]
 
+### Security
+
+- **Cleared four RustSec advisories with real upstream fixes (no
+  `deny.toml` ignores added).** `cargo audit` had started failing CI on
+  advisories published against dependencies already in the tree:
+  - `quick-xml` **0.36 → 0.41** in `twanga-tabs` (the MusicXML parser) —
+    fixes RUSTSEC-2026-0194 (quadratic duplicate-attribute check) and
+    RUSTSEC-2026-0195 (unbounded namespace-declaration allocation). The
+    only API change was `BytesText::unescape()` → `xml10_content()`.
+  - `plist` **1.9 → 1.10** pulls its transitive `quick-xml` to 0.41,
+    clearing the same two advisories on the Tauri build-dep path without
+    a manual ignore.
+  - `anyhow` **1.0.102 → 1.0.103** — fixes RUSTSEC-2026-0190 (unsound
+    `Error::downcast_mut`).
+
 ### Fixed
 
 - **Calibration redesign: pluck-along is now the primary method,

@@ -14,7 +14,7 @@ twanga-core = { path = "../twanga-core" }
 # allocation), MIT, no_std-compatible. Picked over `roxmltree` because
 # the parser sees big files (multi-page scores) and we don't need
 # random access — pull-parsing scales linearly.
-quick-xml = "0.36"
+quick-xml = "0.41"
 # `.mxl` is a zip archive containing the inner MusicXML. We only
 # need DEFLATE decompression — the MusicXML container spec mandates
 # deflate, and every exporter in the wild (MuseScore / Sibelius /
