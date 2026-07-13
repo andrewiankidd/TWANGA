@@ -116,6 +116,12 @@
       "tuning": "standard-banjo"
     },
     {
+      "id": "ida-red-banjo",
+      "title": "Ida Red",
+      "path": "ida-red-banjo.alphatex",
+      "tuning": "standard-banjo"
+    },
+    {
       "id": "habanera-banjo",
       "title": "Habanera (from Carmen)",
       "path": "habanera-banjo.alphatex",

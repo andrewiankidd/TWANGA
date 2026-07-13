@@ -1,0 +1,19 @@
+\title "Ida Red"
+\subtitle "Traditional Appalachian / old-time melody · standard 5-string banjo (Open G)"
+\copyright "Traditional public-domain melody (American old-time fiddle / banjo tune, 19th century). Arrangement under MIT or Apache-2.0."
+\tempo 100
+\tuning D4 B3 G3 D3 G4
+.
+// AABB fiddle-tune form. Melody on strings 1-3 with the open
+// 5th-string g drone clawhammer-style — same pattern as Cripple Creek
+// and John Henry in the bundle.
+// A part — "Ida Red, Ida Red, I'm a fool 'bout Ida Red"
+:8 0.3 0.5 0.3 0.5 | 0.3 0.5 2.3 0.5 |
+:8 0.2 0.5 0.2 0.5 | 0.1 0.5 0.1 0.5 |
+:8 0.1 0.5 0.2 0.5 | 0.2 0.5 2.3 0.5 |
+:8 0.3 0.5 0.3 0.5 | 0.3 0.5 0.3 0.5 |
+// B part — melody climbs to high G (string 1 fret 5), then back home
+:8 0.1 0.5 0.1 0.5 | 0.1 0.5 2.1 0.5 |
+:8 4.1 0.5 4.1 0.5 | 5.1 0.5 5.1 0.5 |
+:8 5.1 0.5 2.1 0.5 | 0.1 0.5 0.1 0.5 |
+:8 0.2 0.5 2.3 0.5 | 0.3 0.5 0.3 0.5 |
