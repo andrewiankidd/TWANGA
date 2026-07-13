@@ -16,6 +16,16 @@ function pitchClassName(midi) {
     return PITCH_CLASS_NAMES[((midi % 12) + 12) % 12];
 }
 
+// Live-scoring outcome → cell-background tint. Mirrors the
+// `.live-outcome-*` colours on the floating outcome badge so the
+// per-column tint and the badge speak the same colour language.
+const OUTCOME_BG = {
+    hit:    'rgba(76, 175, 80, 0.22)',
+    late:   'rgba(255, 193, 7, 0.18)',
+    missed: 'rgba(244, 67, 54, 0.22)',
+    wrong:  'rgba(186, 85, 211, 0.22)',
+};
+
 class TabRenderer {
     constructor(container, options = {}) {
         this.container = container;
@@ -58,6 +68,15 @@ class TabRenderer {
         // _rebuild, mutated in-place by _refreshLiveNotes(); no grid
         // rebuild required when the playhead moves.
         this.noteCells = [];
+        // Per-column body-cell refs (one inner array per column,
+        // length = string count). Populated during _rebuild;
+        // setColumnOutcome tints all cells in the affected column.
+        this.colCells = [];
+        // Live-scoring outcome per column (col → outcome.kind).
+        // Preserved across _rebuild so re-rendering keeps the
+        // outcome tints — only `clearColumnOutcomes` (called at
+        // session start by the host) drops them.
+        this.columnOutcomes = new Map();
 
         this.root = document.createElement('div');
         this.root.className = 'tw-rt-tab';
@@ -181,6 +200,11 @@ class TabRenderer {
         const { tuning, columns, columnsPerBar, capoSpec } = this.score;
         const strings = tuning?.strings ?? [];
         const numCols = columns.length;
+        // Reset per-column cell refs; one inner array per column so
+        // setColumnOutcome can tint all cells in a column with one
+        // call. Outcomes themselves are preserved across rebuilds
+        // (see this.columnOutcomes) and re-applied at the end.
+        this.colCells = Array.from({ length: numCols }, () => []);
         const { cellWidth, cellHeight, labelWidth, interactive, selectedColumn } = this.options;
 
         // Parse the score's capo spec into per-string offsets so we can
@@ -393,6 +417,8 @@ class TabRenderer {
                     });
                 }
                 this.grid.appendChild(cell);
+                // Track per-column for setColumnOutcome's tint loop.
+                if (this.colCells[c]) this.colCells[c].push(cell);
             }
         }
 
@@ -400,6 +426,13 @@ class TabRenderer {
         // selectedColumn. Subsequent setPlayhead / setInteractiveOptions
         // calls update these in place without rebuilding.
         this._refreshLiveNotes();
+
+        // Re-apply any preserved live-scoring outcomes — rebuild
+        // wiped the DOM, but `columnOutcomes` is durable across
+        // rebuilds (only `clearColumnOutcomes` drops them).
+        for (const [col] of this.columnOutcomes) {
+            this._applyColumnOutcome(col);
+        }
     }
 
     /// Update the per-string live-note cells to reflect the active
@@ -435,6 +468,40 @@ class TabRenderer {
             }
             const off = capoOffsets[s] ?? 0;
             cell.textContent = pitchClassName(baseMidi + off + fret);
+        }
+    }
+
+    /// Tint all body cells in column `col` with the outcome colour.
+    /// `outcome` is `{ kind, offsetMs?, detectedHz? }` — only `kind`
+    /// (one of `'hit' | 'late' | 'missed' | 'wrong'`) drives the
+    /// tint. Out-of-range columns or missing-shape outcomes no-op.
+    setColumnOutcome(col, outcome) {
+        if (!outcome || typeof outcome.kind !== 'string') return;
+        if (col < 0 || col >= this.colCells.length) return;
+        this.columnOutcomes.set(col, outcome.kind);
+        this._applyColumnOutcome(col);
+    }
+
+    /// Drop all stored outcome tints. The host calls this at session
+    /// start so a previous take's verdicts don't bleed into the new
+    /// run.
+    clearColumnOutcomes() {
+        const previouslyTinted = [...this.columnOutcomes.keys()];
+        this.columnOutcomes.clear();
+        for (const col of previouslyTinted) this._applyColumnOutcome(col);
+    }
+
+    /// Apply the stored outcome (if any) to the body cells of `col`,
+    /// or revert them to transparent if none. Centralised so
+    /// setColumnOutcome / clearColumnOutcomes / _rebuild all go
+    /// through the same styling path.
+    _applyColumnOutcome(col) {
+        const cells = this.colCells[col];
+        if (!cells) return;
+        const kind = this.columnOutcomes.get(col);
+        const bg = OUTCOME_BG[kind] ?? '';
+        for (const cell of cells) {
+            cell.style.background = bg;
         }
     }
 

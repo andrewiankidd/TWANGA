@@ -35,6 +35,20 @@
 //                                   absolute pitch class for that fret on
 //                                   that string (open MIDI + capo offset).
 //                                   Unrecognised modes coerce to 'fret'.
+//     setColumnOutcome(col, oc)   — tint column `col` with a live-scoring
+//                                   verdict. `oc` is `{ kind, offsetMs?,
+//                                   detectedHz? }` where kind is one of
+//                                   `'hit'` / `'late'` / `'missed'` /
+//                                   `'wrong'`. Renderers visualise this
+//                                   however fits their metaphor (cell
+//                                   background tint for the tab grid;
+//                                   note-glyph fill for the highway).
+//                                   Hosts call this from the playback
+//                                   loop's live scorer as columns are
+//                                   evaluated.
+//     clearColumnOutcomes()       — remove all per-column tints. Called
+//                                   at session start so a previous take's
+//                                   outcomes don't bleed into the new run.
 //
 // That's the entire contract. The renderer owns *everything* about its visual
 // layout (canvas vs DOM vs SVG, colours, sizing, animation). The host only

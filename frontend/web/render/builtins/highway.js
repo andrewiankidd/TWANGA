@@ -12,6 +12,21 @@
 // lane is empty. Past notes still scroll off as expected. The renderer
 // doesn't need to know whether it's being used by a recorder or a player.
 
+// Live-scoring outcome → note-fill tint. Mirrors the
+// `.live-outcome-*` colours on the floating outcome badge + the
+// tab renderer's per-column tint so all three surfaces speak the
+// same colour language. Duplicated from tab.js — same "hoist if a
+// third renderer needs them" posture as parseCapoForLabels.
+const OUTCOME_BG = {
+    hit:    'rgba(76, 175, 80, 0.85)',
+    late:   'rgba(255, 193, 7, 0.85)',
+    missed: 'rgba(244, 67, 54, 0.85)',
+    wrong:  'rgba(186, 85, 211, 0.85)',
+};
+// Note's base fill when no outcome has been recorded — kept here
+// so the clear path can restore it without re-querying CSS.
+const NOTE_BG_DEFAULT = 'var(--highlight)';
+
 class HighwayRenderer {
     constructor(container, options = {}) {
         this.container = container;
@@ -42,6 +57,11 @@ class HighwayRenderer {
         };
         this.score = null;
         this.playhead = 0;
+        // Live-scoring outcome per column (col → outcome.kind).
+        // Preserved across _rebuildLanes so re-rendering keeps the
+        // outcome tints — only `clearColumnOutcomes` (called at
+        // session start by the host) drops them.
+        this.columnOutcomes = new Map();
 
         this.root = document.createElement('div');
         this.root.className = 'tw-rt-highway';
@@ -265,6 +285,45 @@ class HighwayRenderer {
                 lane.appendChild(note);
                 this.noteEls.push({ string: s, column: c, el: note });
             }
+        }
+
+        // Re-apply any preserved live-scoring outcomes — _rebuildLanes
+        // wiped the DOM, but `columnOutcomes` is durable across
+        // rebuilds (only `clearColumnOutcomes` drops them).
+        for (const [col] of this.columnOutcomes) {
+            this._applyColumnOutcome(col);
+        }
+    }
+
+    /// Tint all note circles in column `col` with the outcome
+    /// colour. `outcome` is `{ kind, offsetMs?, detectedHz? }` —
+    /// only `kind` (one of `'hit' | 'late' | 'missed' | 'wrong'`)
+    /// drives the tint. Unknown kinds no-op.
+    setColumnOutcome(col, outcome) {
+        if (!outcome || typeof outcome.kind !== 'string') return;
+        this.columnOutcomes.set(col, outcome.kind);
+        this._applyColumnOutcome(col);
+    }
+
+    /// Drop all stored outcome tints + revert note fills to the
+    /// default highlight colour. Host calls this at session start
+    /// so a previous take's verdicts don't bleed into the new run.
+    clearColumnOutcomes() {
+        const previouslyTinted = [...this.columnOutcomes.keys()];
+        this.columnOutcomes.clear();
+        for (const col of previouslyTinted) this._applyColumnOutcome(col);
+    }
+
+    /// Apply the stored outcome (if any) to the note circles in
+    /// `col`, or revert them to NOTE_BG_DEFAULT if none. Centralised
+    /// so setColumnOutcome / clearColumnOutcomes / _rebuildLanes all
+    /// go through the same styling path.
+    _applyColumnOutcome(col) {
+        if (!this.noteEls) return;
+        const kind = this.columnOutcomes.get(col);
+        const bg = OUTCOME_BG[kind] ?? NOTE_BG_DEFAULT;
+        for (const { column, el } of this.noteEls) {
+            if (column === col) el.style.background = bg;
         }
     }
 

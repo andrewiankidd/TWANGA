@@ -427,6 +427,88 @@
             color: var(--text, #e0e0e0);
             font-weight: 600;
         }
+        /* Live per-column outcome badge — flashes the most recent
+           column's verdict during scored playback. Big enough to
+           read in peripheral vision while you're watching the
+           playhead; fades after ~1s so consecutive notes register
+           individually. Color encodes outcome:
+             hit     — green
+             late    — amber
+             missed  — red
+             wrong   — magenta (distinct from missed so you can tell
+                                 "you played, but wrong" apart from
+                                 "you didn't play"). */
+        .live-outcome {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 3.2rem;
+            padding: 0.7rem 1.2rem;
+            margin: 0.4rem 0 0.6rem;
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            font-size: 1.4rem;
+            font-weight: 700;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+            transition: opacity 0.5s ease-out, background-color 0.15s, color 0.15s;
+            background: var(--surface);
+            color: var(--muted);
+        }
+        .live-outcome[hidden] { display: none; }
+        .live-outcome.live-outcome-fading { opacity: 0.35; }
+        .live-outcome-hit {
+            background: rgba(76, 175, 80, 0.22);
+            color: #7fd082;
+            border-color: rgba(76, 175, 80, 0.55);
+        }
+        .live-outcome-late {
+            background: rgba(255, 193, 7, 0.18);
+            color: #e8b54a;
+            border-color: rgba(255, 193, 7, 0.55);
+        }
+        .live-outcome-missed {
+            background: rgba(244, 67, 54, 0.22);
+            color: #e57373;
+            border-color: rgba(244, 67, 54, 0.55);
+        }
+        .live-outcome-wrong {
+            background: rgba(186, 85, 211, 0.22);
+            color: #c08cd9;
+            border-color: rgba(186, 85, 211, 0.55);
+        }
+        /* Calibration-drift warning shown inside the score-summary
+           panel when the user's median timing offset is far enough
+           from zero to suggest stale Calibrate values. Same border
+           accent as the panel but warmer (amber) so it reads as
+           "something to act on" rather than just "more info". */
+        .score-summary .ss-calibration-warning {
+            margin-top: 0.7rem;
+            padding: 0.6rem 0.8rem;
+            border-left: 3px solid #e0a948;
+            background: rgba(224, 169, 72, 0.10);
+            border-radius: 4px;
+            font-size: 0.9rem;
+            color: var(--text, #e0e0e0);
+            line-height: 1.5;
+        }
+        .score-summary .ss-calibration-warning .ss-cal-headline {
+            font-weight: 600;
+            color: #e0a948;
+            margin-bottom: 0.3rem;
+        }
+        .score-summary .ss-calibration-warning button {
+            margin-top: 0.4rem;
+        }
+        .copy-trace-status {
+            margin: 0.4rem 0 0;
+            font-size: 0.8rem;
+            color: var(--muted);
+            font-family: monospace;
+            min-height: 1.2em;
+        }
+        .copy-trace-status-success { color: var(--highlight); }
+        .copy-trace-status-error { color: #d97a7a; }
 
         /* Tuner-screen widgets */
         /* Tuning + capo disclosure. Replaces the old picker-button row
@@ -2300,6 +2382,14 @@
                      under the transport row. -->
                 <div class="score-summary" id="playback-score-summary" hidden></div>
 
+                <!-- Live per-column outcome badge. Flashes the most
+                     recent column's Hit / Late / Missed / WrongPitch
+                     verdict during scored playback, then fades.
+                     Populated by `scoreColumnLive`; cleared on
+                     session start. Stays hidden under wait / free
+                     where live scoring doesn't apply. -->
+                <div class="live-outcome" id="playback-live-outcome" hidden></div>
+
                 <div class="renderer-host" id="playback-renderer-host"></div>
 
                 <!-- Mic-level meter — only visible during wait-mode playback
@@ -2339,7 +2429,11 @@
                     <button class="action" id="playback-play-btn">Play</button>
                     <button class="action secondary" id="playback-pause-btn" disabled>Pause</button>
                     <button class="action secondary" id="playback-stop-btn" disabled>Stop</button>
+                    <button class="action secondary" id="playback-copy-trace-btn" disabled
+                            title="Copy the last completed playback session's OTLP-JSON trace to the clipboard. Paste back to diagnose timing / scoring issues."
+                    >Copy trace</button>
                 </div>
+                <p class="copy-trace-status" id="playback-copy-trace-status"></p>
             </div>
         </section>
 
@@ -3229,6 +3323,188 @@
         const CURRENT_TUNING_KEY = 'twanga-current-tuning-v1';
 
         // Latency-calibration storage key + measurement constants.
+        // -----------------------------------------------------------------
+        // OTLP-compatible tracer for the playback path
+        // -----------------------------------------------------------------
+        //
+        // Browser-vanilla (no OTEL SDK dep). Captures spans + events
+        // with high-res timestamps; exports as OTLP-JSON shape so the
+        // log can be shipped to Tempo / Grafana without rewriting the
+        // emit code (if anyone ever does that). For now it just lives
+        // in-memory and the "Copy trace" button writes the JSON to
+        // clipboard for paste-back debugging.
+        //
+        // Conventions:
+        //   - Trace IDs: 16 random bytes → 32 hex chars
+        //   - Span IDs:  8 random bytes  → 16 hex chars
+        //   - Times:     epoch-ms (perf.timeOrigin + perf.now), converted to
+        //                Unix-nanos at export
+        //   - Attribute names: `twanga.<subsystem>.<field>` (OTEL vendor-
+        //                namespace pattern); domain-specific so they don't
+        //                collide with OTEL's HTTP / DB / etc. semantic
+        //                conventions
+        const twangaTracer = (() => {
+            let _trace = null;
+            let _lastExport = null;
+
+            function nowEpochMs() {
+                return performance.timeOrigin + performance.now();
+            }
+
+            function randomHex(byteLen) {
+                const bytes = new Uint8Array(byteLen);
+                crypto.getRandomValues(bytes);
+                return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+            }
+
+            function newTrace(name, attributes = {}) {
+                const traceId = randomHex(16);
+                _trace = { traceId, spans: [] };
+                return _newSpan({
+                    name, traceId,
+                    spanId: randomHex(8),
+                    parentSpanId: '',
+                    attributes,
+                });
+            }
+
+            function startSpan(name, parentSpan = null, attributes = {}) {
+                if (!_trace) return null;
+                return _newSpan({
+                    name, traceId: _trace.traceId,
+                    spanId: randomHex(8),
+                    parentSpanId: parentSpan?.spanId ?? _trace.spans[0]?.spanId ?? '',
+                    attributes,
+                });
+            }
+
+            function _newSpan({ name, traceId, spanId, parentSpanId, attributes }) {
+                const sp = {
+                    traceId, spanId, parentSpanId, name,
+                    kind: 1, // SPAN_KIND_INTERNAL
+                    startEpochMs: nowEpochMs(),
+                    endEpochMs: null,
+                    attributes: { ...attributes },
+                    events: [],
+                    status: { code: 0 },
+                };
+                _trace.spans.push(sp);
+                return sp;
+            }
+
+            function endSpan(span, attributes = {}) {
+                if (!span) return;
+                span.endEpochMs = nowEpochMs();
+                Object.assign(span.attributes, attributes);
+            }
+
+            function event(span, name, attributes = {}) {
+                if (!span) return;
+                span.events.push({
+                    name,
+                    epochMs: nowEpochMs(),
+                    attributes,
+                });
+            }
+
+            function endTrace(attributes = {}) {
+                if (!_trace) return null;
+                for (const sp of _trace.spans) {
+                    if (sp.endEpochMs == null) sp.endEpochMs = nowEpochMs();
+                }
+                if (_trace.spans[0]) Object.assign(_trace.spans[0].attributes, attributes);
+                _lastExport = exportOtlpJson(_trace);
+                _trace = null;
+                return _lastExport;
+            }
+
+            /// Snapshot the current trace mid-flight (or return the last
+            /// completed export if no trace is active). Used by the "Copy
+            /// trace" UI so the user can grab the log while a session is
+            /// still running.
+            function snapshot() {
+                if (_trace) return exportOtlpJson(_trace);
+                return _lastExport;
+            }
+
+            // ---- OTLP JSON export ----
+
+            function exportOtlpJson(trace) {
+                return {
+                    resourceSpans: [{
+                        resource: { attributes: [
+                            kv('service.name', 'twanga-playback'),
+                            kv('service.version', '0.1.0'),
+                            kv('telemetry.sdk.name', 'twanga-inline'),
+                            kv('telemetry.sdk.language', 'webjs'),
+                            kv('browser.user_agent', navigator.userAgent),
+                        ]},
+                        scopeSpans: [{
+                            scope: { name: 'twanga.playback', version: '0.1.0' },
+                            spans: trace.spans.map(spanToOtlp),
+                        }],
+                    }],
+                };
+            }
+
+            function spanToOtlp(sp) {
+                const out = {
+                    traceId: sp.traceId,
+                    spanId: sp.spanId,
+                    name: sp.name,
+                    kind: sp.kind,
+                    startTimeUnixNano: epochMsToUnixNano(sp.startEpochMs),
+                    attributes: attrMap(sp.attributes),
+                    events: sp.events.map((e) => ({
+                        timeUnixNano: epochMsToUnixNano(e.epochMs),
+                        name: e.name,
+                        attributes: attrMap(e.attributes),
+                    })),
+                    status: sp.status,
+                };
+                if (sp.parentSpanId) out.parentSpanId = sp.parentSpanId;
+                if (sp.endEpochMs != null) out.endTimeUnixNano = epochMsToUnixNano(sp.endEpochMs);
+                return out;
+            }
+
+            function attrMap(obj) {
+                return Object.entries(obj).map(([k, v]) => kv(k, v));
+            }
+
+            /// OTLP attribute value tag. Picks the right variant based on
+            /// JS type. null/undefined → stringValue "null" so the field
+            /// isn't dropped silently (useful in trace inspection).
+            function kv(key, v) {
+                if (v == null) return { key, value: { stringValue: 'null' } };
+                if (typeof v === 'string') return { key, value: { stringValue: v } };
+                if (typeof v === 'boolean') return { key, value: { boolValue: v } };
+                if (Number.isInteger(v) && Math.abs(v) < Number.MAX_SAFE_INTEGER) {
+                    return { key, value: { intValue: String(v) } };
+                }
+                if (typeof v === 'number') return { key, value: { doubleValue: v } };
+                if (Array.isArray(v)) {
+                    return { key, value: { arrayValue: { values: v.map((x) => kv('', x).value) } } };
+                }
+                return { key, value: { stringValue: String(v) } };
+            }
+
+            /// Convert epoch-ms to OTLP `timeUnixNano` string. Splits at
+            /// the seconds boundary to keep Number precision intact (a
+            /// straight epochMs * 1e6 would overflow Number.MAX_SAFE_INTEGER
+            /// for any current timestamp).
+            function epochMsToUnixNano(epochMs) {
+                const seconds = Math.floor(epochMs / 1000);
+                const subSecondMs = epochMs - seconds * 1000;
+                const subSecondNs = Math.round(subSecondMs * 1e6);
+                return `${seconds}${String(subSecondNs).padStart(9, '0')}`;
+            }
+
+            return { newTrace, startSpan, endSpan, event, endTrace, snapshot };
+        })();
+
+        // Expose for DevTools: `copy(JSON.stringify(twangaTracer.snapshot(), null, 2))`.
+        window.twangaTracer = twangaTracer;
+
         // Mirrors the CLI's `$DATA_ROOT/latency.toml` schema (device
         // name + measured ms + measured-at timestamp); changing input
         // device invalidates the stored value at read time so we
@@ -4170,6 +4446,24 @@
                     activeCellLabel = mode === 'note' ? 'note' : 'fret';
                     if (typeof active?.setCellLabel === 'function') {
                         active.setCellLabel(activeCellLabel);
+                    }
+                },
+                /// Tint column `col` with the live-scoring outcome's
+                /// colour (hit = green, late = amber, missed = red,
+                /// wrong = magenta). Plugins that don't implement
+                /// this no-op silently — old plugins keep working,
+                /// just without per-column feedback.
+                setColumnOutcome(col, outcome) {
+                    if (typeof active?.setColumnOutcome === 'function') {
+                        active.setColumnOutcome(col, outcome);
+                    }
+                },
+                /// Wipe all per-column tints. Called at session
+                /// start so a previous take's outcomes don't bleed
+                /// into the new run.
+                clearColumnOutcomes() {
+                    if (typeof active?.clearColumnOutcomes === 'function') {
+                        active.clearColumnOutcomes();
                     }
                 },
                 destroy() {
@@ -5989,6 +6283,7 @@
             });
             el('playback-pause-btn').addEventListener('click', playbackTogglePause);
             el('playback-stop-btn').addEventListener('click', () => playbackStop('stopped'));
+            el('playback-copy-trace-btn').addEventListener('click', copyPlaybackTraceToClipboard);
 
             // Spacebar pause/resume while on the Playback screen.
             document.addEventListener('keydown', (e) => {
@@ -6083,6 +6378,30 @@
             // session — proximity-score outcomes only consider events
             // collected during the current playback run.
             playbackState.onsetEvents = [];
+            // Live per-column scoring state. The incremental scorer
+            // fires one setTimeout per non-rest column at
+            // `expected_ms + late_ms` and decides Hit/Late/Missed/
+            // WrongPitch from `onsetEvents` accumulated so far. Used
+            // onsets are tracked in a Set so a single pluck can't
+            // satisfy two adjacent columns. Outcomes accumulate into
+            // `columnOutcomes` for the renderer's per-column tint;
+            // pending timeouts get cleared on stop.
+            playbackState.columnOutcomes = new Map();
+            playbackState.usedOnsetIndices = new Set();
+            playbackState.pendingScoringTimeouts = [];
+            // Calibration drift detection: record the timing offset
+            // of every paired column outcome so the session-end
+            // summary can flag a systematically-off calibration and
+            // suggest re-running the Calibrate screen. We don't
+            // silently auto-correct mid-song — that would cost the
+            // user the first half of every take to "warmup" without
+            // scoring, and hides a real hardware-calibration problem
+            // they'd want to fix once at the source.
+            playbackState.observedOffsets = [];
+            // Wipe any prior per-column tints from the renderer + the
+            // live badge from the previous take.
+            playbackState.rendererController?.clearColumnOutcomes?.();
+            clearLiveOutcomeBadge();
             // Clear any previous take's score summary so the panel
             // doesn't show stale results during the new run.
             clearPlaybackScoreSummary();
@@ -6195,17 +6514,42 @@
                             if (playbackState.policy === 'tight'
                                 || playbackState.policy === 'casual') {
                                 if (playbackState.playStartTime === 0) return;
-                                const nowMs = performance.now()
+                                const rawPerfNow = performance.now();
+                                const nowMs = rawPerfNow
                                     - playbackState.playStartTime
                                     - playbackState.totalPausedMs;
                                 const windowLatency = playbackState.chromaticTuner.window_latency_ms?.() ?? 0;
-                                const totalLatency = windowLatency + (playbackState.extraLatencyMs || 0);
+                                const extraLatency = playbackState.extraLatencyMs || 0;
+                                const totalLatency = windowLatency + extraLatency;
                                 for (const r of readings) {
                                     if (!r.from_onset_window) continue;
+                                    const ts = Math.max(0, Math.round(nowMs - totalLatency));
                                     playbackState.onsetEvents.push({
-                                        timestamp_ms: Math.max(0, Math.round(nowMs - totalLatency)),
+                                        timestamp_ms: ts,
                                         detected_hz: r.detected_hz,
                                     });
+                                    // Trace event with every intermediate
+                                    // value — `raw_perf_now_ms` proves
+                                    // wall-clock at the moment the reading
+                                    // arrived; `now_relative_ms` is
+                                    // playback-time at that moment;
+                                    // `timestamp_ms` is what got stored
+                                    // (after both latency corrections).
+                                    twangaTracer.event(
+                                        playbackState.traceSession,
+                                        'twanga.onset.captured',
+                                        {
+                                            'twanga.onset.raw_perf_now_ms': rawPerfNow,
+                                            'twanga.onset.now_relative_ms': nowMs,
+                                            'twanga.onset.window_latency_ms': windowLatency,
+                                            'twanga.onset.extra_latency_ms': extraLatency,
+                                            'twanga.onset.total_latency_ms': totalLatency,
+                                            'twanga.onset.timestamp_ms': ts,
+                                            'twanga.onset.detected_hz': r.detected_hz,
+                                            'twanga.onset.onset_event_idx':
+                                                playbackState.onsetEvents.length - 1,
+                                        },
+                                    );
                                 }
                             }
                         },
@@ -6314,10 +6658,37 @@
             const resumeBackshiftMs =
                 (playbackState._resumeOffsetCols ?? 0) * playbackState.msPerColumn;
             playbackState.playStartTime = performance.now() - resumeBackshiftMs;
+            // Open a session-level OTLP span. Subsequent events
+            // (column-entered, onset.captured, column scoring, etc.)
+            // attach to this span or to child spans of it. The "Copy
+            // trace" button + window.twangaTracer expose the trace
+            // so the user can paste it back for diagnosis.
+            playbackState.traceSession = twangaTracer.newTrace('twanga.playback.session', {
+                'twanga.playback.policy': playbackState.policy,
+                'twanga.playback.tab_id': playbackState.loadedTab?.id ?? 'unknown',
+                'twanga.playback.tab_title': playbackState.loadedTab?.title ?? '',
+                'twanga.playback.tempo_bpm':
+                    playbackState.bpmOverride ?? playbackState.loadedTab?.transposed?.tempo() ?? 0,
+                'twanga.playback.ms_per_column': playbackState.msPerColumn,
+                'twanga.playback.loop_start': playbackState.loopStart,
+                'twanga.playback.loop_end': playbackState.loopEnd,
+                'twanga.playback.start_col': playbackState.currentCol,
+                'twanga.playback.pre_roll': playbackState.preRoll,
+                'twanga.playback.extra_latency_ms': playbackState.extraLatencyMs ?? 0,
+                'twanga.playback.tuning_slug': playbackState.tuning?.getMode?.() ?? 'unknown',
+                'twanga.playback.play_start_perf_now_ms': playbackState.playStartTime,
+                'twanga.playback.resume_backshift_ms': resumeBackshiftMs,
+            });
             if (playbackState._resumeOffsetCols > 0) {
                 playbackState.rendererController?.setPlayhead(playbackState.currentCol);
             }
             playbackState._resumeOffsetCols = 0;
+            // The tick handler schedules live-scoring evaluations as
+            // the cursor advances PAST each column — but the cursor
+            // already starts ON `currentCol` at t=0, so the very
+            // first column needs scheduling here or it'd never get
+            // scored under tight / casual policies.
+            scheduleColumnLiveScoring(playbackState.currentCol);
             playbackState.tickHandle = setInterval(
                 playbackTick,
                 Math.max(15, playbackState.msPerColumn / 4),
@@ -6377,6 +6748,13 @@
                 clearInterval(playbackState.tickHandle);
                 playbackState.tickHandle = null;
             }
+            // Cancel pending live-scoring evaluations so they don't
+            // fire after the session ended (would score against a
+            // stale `onsetEvents` + flash spurious outcomes).
+            for (const h of playbackState.pendingScoringTimeouts ?? []) {
+                clearTimeout(h);
+            }
+            playbackState.pendingScoringTimeouts = [];
             if (micSession.consumerName === 'playback') micSession.stop();
             playbackState.chromaticTuner?.free?.();
             playbackState.chromaticTuner = null;
@@ -6403,10 +6781,16 @@
             // item.
             const isScoring = playbackState.policy === 'tight'
                 || playbackState.policy === 'casual';
+            let finalSummary = null;
+            let calibrationDrift = null;
             if (isScoring && playbackState.loadedTab) {
                 try {
-                    const summary = playbackComputeScoreSummary();
-                    renderPlaybackScoreSummary(summary);
+                    finalSummary = playbackComputeScoreSummary();
+                    calibrationDrift = detectCalibrationDrift(
+                        playbackState.observedOffsets,
+                        liveScorePolicyLateMs(),
+                    );
+                    renderPlaybackScoreSummary(finalSummary, calibrationDrift);
                     el('playback-hint').textContent = hintText ?? 'stopped';
                 } catch (e) {
                     console.warn('score-summary failed', e);
@@ -6415,6 +6799,34 @@
             } else {
                 el('playback-hint').textContent = hintText ?? 'stopped';
             }
+            // Close the OTLP session span with the batch-scorer's
+            // final outcome counts. The "Copy trace" button can now
+            // export the completed trace; window.twangaTracer
+            // .snapshot() returns the same OTLP JSON.
+            twangaTracer.endTrace({
+                'twanga.playback.end_hint': hintText ?? 'stopped',
+                'twanga.playback.final.hit': finalSummary?.hit ?? 0,
+                'twanga.playback.final.late': finalSummary?.late ?? 0,
+                'twanga.playback.final.missed': finalSummary?.missed ?? 0,
+                'twanga.playback.final.wrong_pitch': finalSummary?.wrong_pitch ?? 0,
+                'twanga.playback.final.total': finalSummary?.total ?? 0,
+                'twanga.playback.onset_events_count': playbackState.onsetEvents?.length ?? 0,
+                'twanga.playback.drift.observation_count':
+                    playbackState.observedOffsets?.length ?? 0,
+                'twanga.playback.drift.median_ms': calibrationDrift?.medianMs ?? null,
+                'twanga.playback.drift.is_significant':
+                    calibrationDrift?.isSignificant ?? false,
+                'twanga.playback.drift.threshold_ms': calibrationDrift?.thresholdMs ?? null,
+                'twanga.playback.drift.observed_offsets':
+                    playbackState.observedOffsets
+                        ? [...playbackState.observedOffsets]
+                        : [],
+            });
+            playbackState.traceSession = null;
+            // Enable the Copy-trace button now that there's a
+            // completed trace to grab.
+            const copyBtn = el('playback-copy-trace-btn');
+            if (copyBtn) copyBtn.disabled = false;
         }
 
         /// Build the schedule for the played loop range, package the
@@ -6468,12 +6880,46 @@
             return `finished — ${s.hit}/${s.total} hit (${pct(s.hit)}%), ${s.late} late, ${s.missed} missed, ${s.wrong_pitch} wrong pitch`;
         }
 
+        /// Detect a systematic timing offset in the session's pluck
+        /// data — the signal that the calibrated `extraLatencyMs` is
+        /// stale and the user should re-run Calibrate.
+        ///
+        /// Returns null when there are too few observations to draw
+        /// any conclusion (the user barely played); otherwise returns
+        /// `{ medianMs, thresholdMs, isSignificant, direction, sampleCount }`.
+        ///
+        /// `isSignificant` is true when |median| exceeds half the
+        /// late-window — i.e., the user is consistently mis-timed by
+        /// enough to halve their margin for actually-on-time plucks.
+        /// `direction` is 'early' (negative median) or 'late' (positive)
+        /// so the warning can name it in human terms.
+        function detectCalibrationDrift(offsets, lateMs) {
+            if (!Array.isArray(offsets) || offsets.length < 4) return null;
+            const sorted = [...offsets].sort((a, b) => a - b);
+            const medianMs = Math.round(sorted[Math.floor(sorted.length / 2)]);
+            // Threshold = half the late-window, floor 30ms so the
+            // tight policy (lateMs=50) doesn't bark over normal human
+            // jitter. Casual = 75 ms, tight = 30 ms.
+            const thresholdMs = Math.max(30, Math.round(lateMs / 2));
+            return {
+                medianMs,
+                thresholdMs,
+                isSignificant: Math.abs(medianMs) >= thresholdMs,
+                direction: medianMs < 0 ? 'early' : 'late',
+                sampleCount: offsets.length,
+            };
+        }
+
         /// Render the prominent end-of-session score summary panel
         /// above the renderer. Headline = hit ratio + percentage;
         /// breakdown line = late / missed / wrong-pitch counts.
         /// Lands in the user's eyeline when a take finishes (vs.
         /// the small hint row buried under the transport).
-        function renderPlaybackScoreSummary(s) {
+        ///
+        /// If `drift` is significant, appends a calibration-warning
+        /// block with a Recalibrate CTA — the user gets one obvious
+        /// fix instead of a vague "scores looked weird" feeling.
+        function renderPlaybackScoreSummary(s, drift) {
             const panel = el('playback-score-summary');
             if (!panel) return;
             if (!s || s.total === 0) {
@@ -6485,13 +6931,38 @@
             }
             const pct = (n) => Math.round(n / s.total * 100);
             panel.hidden = false;
-            panel.innerHTML =
+            let html =
                 `<div class="ss-headline">${s.hit} / ${s.total} hit (${pct(s.hit)}%)</div>`
                 + `<div class="ss-breakdown">`
                 + `<strong>${s.late}</strong> late · `
                 + `<strong>${s.missed}</strong> missed · `
                 + `<strong>${s.wrong_pitch}</strong> wrong pitch`
                 + `</div>`;
+            if (drift && drift.isSignificant) {
+                const magnitude = Math.abs(drift.medianMs);
+                html +=
+                    `<div class="ss-calibration-warning">`
+                    + `<div class="ss-cal-headline">Calibration looks off by ~${magnitude} ms</div>`
+                    + `Your plucks landed consistently <strong>${magnitude} ms ${drift.direction}</strong> `
+                    + `across ${drift.sampleCount} notes — more than the ${drift.thresholdMs}-ms threshold `
+                    + `that suggests stale calibration. Re-running Calibrate should bring scoring `
+                    + `back in line.`
+                    + `<div><button class="action" id="playback-recalibrate-btn" type="button">`
+                    + `Recalibrate now</button></div>`
+                    + `</div>`;
+            }
+            panel.innerHTML = html;
+            // Dynamic button — the document-level [data-screen]
+            // listener bound at boot doesn't fire for innerHTML
+            // inserts, so wire the click handler explicitly.
+            const recalBtn = el('playback-recalibrate-btn');
+            if (recalBtn) {
+                recalBtn.addEventListener('click', () => {
+                    stopMicCheck();
+                    show('calibrate');
+                    refreshCalibrateScreen();
+                });
+            }
         }
 
         function clearPlaybackScoreSummary() {
@@ -6499,6 +6970,311 @@
             if (panel) {
                 panel.hidden = true;
                 panel.innerHTML = '';
+            }
+        }
+
+        // ---- Live per-column scoring ----------------------------------------
+        //
+        // The batch `score_playback_session` only runs at session end.
+        // For live Hit/Late/Missed/WrongPitch feedback as the user
+        // plays, schedule a one-shot evaluation per non-rest column
+        // at `expected_ms + late_ms`. At fire time, pair the column
+        // against the onsets accumulated so far (same nearest-unused
+        // logic as the batch scorer, but incremental — `usedOnsetIndices`
+        // prevents one pluck from satisfying two adjacent columns),
+        // classify, then flash the badge + tint the column in the
+        // renderer.
+        //
+        // Live scoring uses `late_ms` as its decision window (not the
+        // batch scorer's `late_ms × 4`) so feedback lands within one
+        // tight-window of the column rather than 200–600 ms later. A
+        // pluck that arrives after the live window closes will be
+        // classified Missed live but still classified Late by the
+        // batch scorer at session end — the end summary is the
+        // authoritative score; live feedback is the gameplay signal.
+
+        /// Active live-scoring late-window in ms, by policy. Mirrors
+        /// the `late_ms` constants on PlaybackPolicy::tight/casual
+        /// in twanga-tabs::playback.
+        function liveScorePolicyLateMs() {
+            if (playbackState.policy === 'tight') return 50;
+            if (playbackState.policy === 'casual') return 150;
+            return null; // wait / free — live scoring doesn't apply
+        }
+
+        /// Total onset latency in ms: window-latency (YIN DSP delay)
+        /// + extra-latency (calibrated hardware round-trip). Used
+        /// to defer scoring until all onsets that could belong to a
+        /// column have actually been captured — without this offset,
+        /// scoring fires before the user's pluck arrives in the
+        /// onset buffer and every column auto-misses.
+        function liveScoreTotalLatencyMs() {
+            const windowLatency =
+                playbackState.chromaticTuner?.window_latency_ms?.() ?? 0;
+            const extraLatency = playbackState.extraLatencyMs || 0;
+            return windowLatency + extraLatency;
+        }
+
+        /// Schedule a one-shot scoring evaluation for `colIdx`. No-op
+        /// if the policy doesn't score, the column is out of the
+        /// played range, or the column has no hits (rest column —
+        /// nothing to score).
+        function scheduleColumnLiveScoring(colIdx) {
+            const lateMs = liveScorePolicyLateMs();
+            if (lateMs == null) return;
+            if (colIdx < playbackState.loopStart || colIdx >= playbackState.loopEnd) return;
+            const tab = playbackState.loadedTab?.transposed;
+            if (!tab) return;
+            const col = tab.column_at(colIdx);
+            if (!col || !Array.isArray(col.hits) || col.hits.length === 0) return;
+
+            // Expected time (ms from playStartTime) for this column.
+            // Mirrors the elapsed/msPerColumn math in playbackTick.
+            const expectedMs = (colIdx - playbackState.loopStart) * playbackState.msPerColumn;
+            // An onset physically played at TWANGA-time T arrives in
+            // the buffer at clock-time T + totalOnsetLatency. Scoring
+            // must wait that long after the late-window's right edge
+            // — otherwise the column's own onset is still in flight
+            // through the DSP pipeline when we score, and every
+            // column auto-misses.
+            const totalLatencyMs = liveScoreTotalLatencyMs();
+            const fireAtRel = expectedMs + lateMs + totalLatencyMs;
+            const nowRel = performance.now()
+                - playbackState.playStartTime
+                - playbackState.totalPausedMs;
+            const delay = Math.max(0, fireAtRel - nowRel);
+
+            twangaTracer.event(
+                playbackState.traceSession,
+                'twanga.column.scheduled',
+                {
+                    'twanga.column.idx': colIdx,
+                    'twanga.column.expected_ms': expectedMs,
+                    'twanga.column.total_onset_latency_ms': totalLatencyMs,
+                    'twanga.column.fire_at_relative_ms': fireAtRel,
+                    'twanga.column.delay_ms': delay,
+                    'twanga.column.late_ms_threshold': lateMs,
+                    'twanga.column.hits_count': col.hits.length,
+                },
+            );
+            const handle = setTimeout(() => scoreColumnLive(colIdx), delay);
+            playbackState.pendingScoringTimeouts.push(handle);
+        }
+
+        /// Score column `colIdx` against the current onset buffer.
+        /// Picks the nearest unused onset within ±lateMs, classifies
+        /// against pitch via `playbackWaitMatches`, and emits the
+        /// outcome to the badge + the renderer's per-column tint.
+        ///
+        /// Every paired column's raw offset (pluck-time minus
+        /// expected-time) is recorded in `playbackState.observedOffsets`
+        /// so the session-end summary can detect a systematic timing
+        /// drift and prompt the user to re-run Calibrate.
+        function scoreColumnLive(colIdx) {
+            const lateMs = liveScorePolicyLateMs();
+            if (lateMs == null) return;
+            if (!playbackState.isPlaying) return; // session ended between schedule + fire
+
+            const tab = playbackState.loadedTab?.transposed;
+            const col = tab?.column_at(colIdx);
+            if (!col || !Array.isArray(col.hits) || col.hits.length === 0) return;
+
+            const expectedMs = (colIdx - playbackState.loopStart) * playbackState.msPerColumn;
+            const lo = expectedMs - lateMs;
+            const hi = expectedMs + lateMs;
+
+            // Open a per-column child span. Every candidate onset
+            // considered (rejected or chosen) becomes an event on
+            // this span so the user's debug copy shows the FULL
+            // pairing decision, not just the final outcome.
+            const colSpan = twangaTracer.startSpan(
+                'twanga.column.score',
+                playbackState.traceSession,
+                {
+                    'twanga.column.idx': colIdx,
+                    'twanga.column.expected_ms': expectedMs,
+                    'twanga.column.window_lo_ms': lo,
+                    'twanga.column.window_hi_ms': hi,
+                    'twanga.column.late_ms_threshold': lateMs,
+                    'twanga.column.onset_events_seen': playbackState.onsetEvents.length,
+                    'twanga.column.onset_events_used': playbackState.usedOnsetIndices.size,
+                },
+            );
+
+            // Find nearest unused onset within the window.
+            let bestIdx = -1;
+            let bestDist = Infinity;
+            const events = playbackState.onsetEvents;
+            const used = playbackState.usedOnsetIndices;
+            for (let i = 0; i < events.length; i++) {
+                if (used.has(i)) {
+                    twangaTracer.event(colSpan, 'twanga.column.candidate_skipped', {
+                        'twanga.onset.idx': i,
+                        'twanga.onset.timestamp_ms': events[i].timestamp_ms,
+                        'twanga.reason': 'already_used',
+                    });
+                    continue;
+                }
+                const ts = events[i].timestamp_ms;
+                if (ts < lo || ts > hi) {
+                    twangaTracer.event(colSpan, 'twanga.column.candidate_rejected', {
+                        'twanga.onset.idx': i,
+                        'twanga.onset.timestamp_ms': ts,
+                        'twanga.onset.detected_hz': events[i].detected_hz,
+                        'twanga.column.offset_ms': ts - expectedMs,
+                        'twanga.reason': ts < lo ? 'before_window' : 'after_window',
+                    });
+                    continue;
+                }
+                const dist = Math.abs(ts - expectedMs);
+                twangaTracer.event(colSpan, 'twanga.column.candidate_considered', {
+                    'twanga.onset.idx': i,
+                    'twanga.onset.timestamp_ms': ts,
+                    'twanga.onset.detected_hz': events[i].detected_hz,
+                    'twanga.column.offset_ms': ts - expectedMs,
+                    'twanga.column.dist_to_expected_ms': dist,
+                });
+                if (dist < bestDist) {
+                    bestDist = dist;
+                    bestIdx = i;
+                }
+            }
+
+            let outcome;
+            let observedOffsetMs = null;
+            if (bestIdx === -1) {
+                outcome = { kind: 'missed' };
+            } else {
+                used.add(bestIdx);
+                const onset = events[bestIdx];
+                observedOffsetMs = Math.round(onset.timestamp_ms - expectedMs);
+                const pitchOk = playbackWaitMatches(onset.detected_hz, colIdx);
+                if (!pitchOk) {
+                    outcome = {
+                        kind: 'wrong',
+                        offsetMs: observedOffsetMs,
+                        detectedHz: onset.detected_hz,
+                    };
+                } else if (Math.abs(observedOffsetMs) <= lateMs) {
+                    outcome = { kind: 'hit', offsetMs: observedOffsetMs };
+                } else {
+                    outcome = { kind: 'late', offsetMs: observedOffsetMs };
+                }
+            }
+
+            twangaTracer.endSpan(colSpan, {
+                'twanga.column.outcome': outcome.kind,
+                'twanga.column.outcome_offset_ms': outcome.offsetMs ?? null,
+                'twanga.column.chosen_onset_idx': bestIdx,
+                'twanga.column.chosen_detected_hz':
+                    bestIdx >= 0 ? events[bestIdx].detected_hz : null,
+            });
+
+            // Record the observed offset for drift detection. We
+            // include all paired outcomes (hit / late / wrong) — even
+            // wrong-pitch tells us *when* the user plucked, which is
+            // what matters for calibration. 'missed' contributes
+            // nothing because there's no pluck to time.
+            if (observedOffsetMs != null) {
+                playbackState.observedOffsets.push(observedOffsetMs);
+            }
+
+            playbackState.columnOutcomes.set(colIdx, outcome);
+            showLiveOutcomeBadge(outcome, colIdx);
+            playbackState.rendererController?.setColumnOutcome?.(colIdx, outcome);
+        }
+
+        /// Flash the live-outcome badge with `outcome`. Auto-clears
+        /// after a short delay so consecutive notes still register
+        /// individually (a stuck badge would feel laggy).
+        let _liveOutcomeFadeHandle = null;
+        function showLiveOutcomeBadge(outcome, colIdx) {
+            const badge = el('playback-live-outcome');
+            if (!badge) return;
+            let label;
+            if (outcome.kind === 'hit') {
+                label = `HIT (col ${colIdx + 1}, ${signed(outcome.offsetMs)} ms)`;
+            } else if (outcome.kind === 'late') {
+                label = `LATE (col ${colIdx + 1}, ${signed(outcome.offsetMs)} ms)`;
+            } else if (outcome.kind === 'wrong') {
+                label = `WRONG (col ${colIdx + 1}, ${signed(outcome.offsetMs)} ms)`;
+            } else {
+                label = `MISSED (col ${colIdx + 1})`;
+            }
+            badge.textContent = label;
+            badge.className = `live-outcome live-outcome-${outcome.kind}`;
+            badge.hidden = false;
+            if (_liveOutcomeFadeHandle) clearTimeout(_liveOutcomeFadeHandle);
+            _liveOutcomeFadeHandle = setTimeout(() => {
+                badge.classList.add('live-outcome-fading');
+            }, 400);
+        }
+
+        function clearLiveOutcomeBadge() {
+            const badge = el('playback-live-outcome');
+            if (!badge) return;
+            badge.hidden = true;
+            badge.className = 'live-outcome';
+            badge.textContent = '';
+            if (_liveOutcomeFadeHandle) {
+                clearTimeout(_liveOutcomeFadeHandle);
+                _liveOutcomeFadeHandle = null;
+            }
+        }
+
+        function signed(n) { return n >= 0 ? `+${n}` : `${n}`; }
+
+        /// Grab the last completed playback trace (or the live one if
+        /// a session is still running) and copy its OTLP JSON to the
+        /// clipboard. Surface success / failure on the status line
+        /// under the transport row. The trace is OTLP-compatible —
+        /// could be POSTed to a Tempo collector unchanged, but the
+        /// MVP use case is "user pastes back here for diagnosis."
+        async function copyPlaybackTraceToClipboard() {
+            const statusEl = el('playback-copy-trace-status');
+            const snapshot = twangaTracer.snapshot();
+            if (!snapshot) {
+                if (statusEl) {
+                    statusEl.textContent =
+                        'No trace available yet — play a session first.';
+                    statusEl.className = 'copy-trace-status copy-trace-status-error';
+                }
+                return;
+            }
+            const json = JSON.stringify(snapshot, null, 2);
+            try {
+                await navigator.clipboard.writeText(json);
+                const spanCount = snapshot.resourceSpans?.[0]?.scopeSpans?.[0]?.spans?.length ?? 0;
+                const byteCount = json.length;
+                if (statusEl) {
+                    statusEl.textContent =
+                        `Copied OTLP trace — ${spanCount} spans, ${(byteCount / 1024).toFixed(1)} KB.`;
+                    statusEl.className = 'copy-trace-status copy-trace-status-success';
+                }
+            } catch (err) {
+                // Clipboard API can fail in non-secure contexts or if
+                // permission was denied. Fall back to a textarea +
+                // execCommand so the user gets the data regardless.
+                try {
+                    const ta = document.createElement('textarea');
+                    ta.value = json;
+                    ta.style.position = 'fixed';
+                    ta.style.opacity = '0';
+                    document.body.appendChild(ta);
+                    ta.select();
+                    document.execCommand('copy');
+                    ta.remove();
+                    if (statusEl) {
+                        statusEl.textContent = `Copied (fallback path) — ${(json.length / 1024).toFixed(1)} KB.`;
+                        statusEl.className = 'copy-trace-status copy-trace-status-success';
+                    }
+                } catch (err2) {
+                    if (statusEl) {
+                        statusEl.textContent =
+                            `Couldn't copy: ${err.message ?? err}. Open DevTools and run: copy(JSON.stringify(twangaTracer.snapshot(), null, 2))`;
+                        statusEl.className = 'copy-trace-status copy-trace-status-error';
+                    }
+                }
             }
         }
 
@@ -6544,6 +7320,31 @@
                     for (let c = startCol; c <= newCol; c++) {
                         if (c % playbackState.colsPerBeat === 0) recPlayMetronomeClick();
                     }
+                }
+                // Live scoring: under tight / casual, schedule a
+                // one-shot evaluation per newly-entered column at
+                // `expected_ms + late_ms`. The evaluation pairs the
+                // column against the onsets accumulated so far and
+                // flashes the outcome on the badge + tints the
+                // column in the renderer.
+                const startCol = playbackState.currentCol + 1;
+                for (let c = startCol; c <= newCol; c++) {
+                    // Trace per cursor-advance — the "perceived"
+                    // expected_ms for the column (what playbackTick's
+                    // own math thinks the column should fire at)
+                    // alongside the actual elapsed time. Discrepancy
+                    // between these is the smoking gun for any
+                    // playStartTime vs pre-roll timing bug.
+                    twangaTracer.event(
+                        playbackState.traceSession,
+                        'twanga.column.entered',
+                        {
+                            'twanga.column.idx': c,
+                            'twanga.column.elapsed_ms_at_entry': elapsed,
+                            'twanga.column.expected_ms': (c - playbackState.loopStart) * playbackState.msPerColumn,
+                        },
+                    );
+                    scheduleColumnLiveScoring(c);
                 }
                 playbackState.currentCol = newCol;
                 playbackState.rendererController?.setPlayhead(newCol);
