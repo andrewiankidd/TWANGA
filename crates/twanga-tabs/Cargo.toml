@@ -22,7 +22,7 @@ quick-xml = "0.41"
 # C-dependency transitives that don't build for wasm32 without a
 # host clang, and keeps the WASM bundle smaller too. `deflate` (the
 # pure-Rust default) is the only compression backend we enable.
-zip = { version = "2", default-features = false, features = ["deflate"] }
+zip = { version = "8", default-features = false, features = ["deflate"] }
 # Standard MIDI File (.mid / .midi) decoder. `midly` is `no_std`-
 # friendly, MIT-licensed, pure-Rust, and wasm32-compatible without
 # any C transitives. We only need the parse path (TWANGA imports
