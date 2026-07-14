@@ -91,7 +91,7 @@ jobs:
           cp -r docs/features frontend/web/assets/docs
           ls -lh frontend/web/assets/docs/
 
-      - uses: actions/configure-pages@v5
+      - uses: actions/configure-pages@v6
 
       - name: Upload site artifact
         uses: actions/upload-pages-artifact@v5
