@@ -23,7 +23,7 @@ authors = ["Andrew"]
 
 [workspace.dependencies]
 anyhow = "1"
-cpal = "0.15"
+cpal = "0.18"
 rustfft = "6"
 clap = { version = "4", features = ["derive"] }
 ringbuf = "0.4"
